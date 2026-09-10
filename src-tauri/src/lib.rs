@@ -764,11 +764,17 @@ struct AppConfig {
 }
 
 fn default_cli_binary() -> String {
-    // Auto-detect: prefer br (Rust), fallback to bd (Go)
-    for bin in &["br", "bd"] {
+    // Auto-detect the installed CLI. Prefer bd (Go) — the Dolt-era backend
+    // this app targets — and fall back to br (Rust, legacy).
+    // The probe runs with the extended PATH so GUI launches (Finder/Dock,
+    // minimal PATH) can still resolve the Homebrew binary. This fixes the
+    // "br not found or not executable" error seen when the app is opened
+    // from the Dock without `bd` on the ambient PATH.
+    for bin in &["bd", "br"] {
         if let Ok(output) = std::process::Command::new(bin)
             .arg("--version")
             .current_dir(std::env::temp_dir())
+            .env("PATH", get_extended_path())
             .output()
         {
             if output.status.success() {
@@ -776,8 +782,8 @@ fn default_cli_binary() -> String {
             }
         }
     }
-    // Neither found — default to br (will fail later with clear error)
-    "br".to_string()
+    // Neither found — default to bd (matches the app's Dolt-era backend)
+    "bd".to_string()
 }
 
 impl Default for AppConfig {
