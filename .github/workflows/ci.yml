@@ -59,3 +59,53 @@ jobs:
 
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # ---------------------------------------------------------------------------
+  # Windows runners. The app ships a Windows MSI, and several code paths
+  # (extended PATH, attachment path guards, CREATE_NO_WINDOW) are
+  # platform-specific, so the same gates run on windows-latest.
+  # ---------------------------------------------------------------------------
+  frontend-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Type check
+        run: npx vue-tsc --noEmit
+
+  backend-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
