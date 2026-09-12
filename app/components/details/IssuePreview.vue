@@ -9,7 +9,8 @@ import StatusBadge from '~/components/issues/StatusBadge.vue'
 import PriorityBadge from '~/components/issues/PriorityBadge.vue'
 import ImageThumbnail from '~/components/ui/image-preview/ImageThumbnail.vue'
 import { extractNonImageRefs, isUrl } from '~/utils/markdown'
-import { hasMetadata, formatMetadataJson } from '~/utils/metadata'
+import { hasMetadata, normalizeMetadata, formatMetadataJson } from '~/utils/metadata'
+import CustomFieldsPanel from '~/components/details/CustomFieldsPanel.vue'
 import type { AttachmentFile } from '~/composables/useAttachments'
 
 const { currentTheme } = useTheme()
@@ -334,6 +335,8 @@ const relationBorderColor = (rel: { id: string; priority: string }) => {
 }
 
 const showMetadata = computed(() => hasMetadata(props.issue.metadata))
+const customFields = computed(() => normalizeMetadata(props.issue.metadata))
+const customFieldCount = computed(() => (customFields.value ? Object.keys(customFields.value).length : 0))
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-'
@@ -855,7 +858,7 @@ const formatEstimate = (minutes: number) => {
       </div>
     </div>
 
-    <!-- Metadata Section (only if exists, read-only JSON) -->
+    <!-- Custom Fields Section (metadata; collapse state persists under the existing 'metadata' key) -->
     <div v-if="showMetadata">
       <button
         class="flex items-center gap-1.5 w-full text-left group"
@@ -871,10 +874,15 @@ const formatEstimate = (minutes: number) => {
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
-        <h4 class="text-[10px] font-medium text-muted-foreground uppercase tracking-wide group-hover:text-foreground transition-colors">Metadata</h4>
+        <h4 class="text-[10px] font-medium text-muted-foreground uppercase tracking-wide group-hover:text-foreground transition-colors">
+          Custom Fields
+          <span class="text-muted-foreground">({{ customFieldCount }})</span>
+        </h4>
       </button>
       <div v-show="isMetadataOpen" class="mt-1 pl-4.5">
-        <pre class="text-xs bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">{{ formatMetadataJson(issue.metadata) }}</pre>
+        <CustomFieldsPanel v-if="customFields" :metadata="customFields" />
+        <!-- Non-object metadata (bd only validates well-formed JSON): show it raw -->
+        <pre v-else class="text-xs bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">{{ formatMetadataJson(issue.metadata) }}</pre>
       </div>
     </div>
 
