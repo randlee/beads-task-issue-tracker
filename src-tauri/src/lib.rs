@@ -720,6 +720,9 @@ fn get_extended_path() -> String {
             format!(r"{}\AppData\Local\bin", userprofile),
             format!(r"{}\.local\bin", userprofile),
             format!(r"{}\Programs", localappdata),
+            // `go install` and `cargo install` targets (bd / br)
+            format!(r"{}\go\bin", userprofile),
+            format!(r"{}\.cargo\bin", userprofile),
         ];
         extra_paths.extend(current_path.split(';').map(String::from));
         extra_paths.join(";")
@@ -727,13 +730,18 @@ fn get_extended_path() -> String {
     #[cfg(not(target_os = "windows"))]
     {
         let home = env::var("HOME").unwrap_or_default();
+        let gopath = env::var("GOPATH").unwrap_or_else(|_| format!("{}/go", home));
         let mut extra_paths = vec![
             "/opt/homebrew/bin".to_string(),
             "/usr/local/bin".to_string(),
+            "/home/linuxbrew/.linuxbrew/bin".to_string(),
             "/usr/bin".to_string(),
             "/bin".to_string(),
             format!("{}/.local/bin", home),
             format!("{}/bin", home),
+            // `go install` and `cargo install` targets (bd / br)
+            format!("{}/bin", gopath),
+            format!("{}/.cargo/bin", home),
         ];
         extra_paths.extend(current_path.split(':').map(String::from));
         extra_paths.join(":")
@@ -763,27 +771,39 @@ struct AppConfig {
     cli_binary: String,
 }
 
+/// CLI binaries probed during auto-detection, in priority order.
+/// `bd` (Go) is the primary CLI this app targets; `br` (Rust) is secondary.
+const CLI_CANDIDATES: &[&str] = &["bd", "br"];
+
+/// Binary assumed when no candidate responds to `--version`.
+const CLI_FALLBACK: &str = "bd";
+
+/// Pure selection logic: return the first candidate for which `probe` succeeds,
+/// or `fallback` when none does. Separated from process spawning so it is unit-testable.
+fn select_default_binary<F: Fn(&str) -> bool>(candidates: &[&str], fallback: &str, probe: F) -> String {
+    candidates
+        .iter()
+        .find(|bin| probe(bin))
+        .map(|bin| bin.to_string())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Returns true when `bin --version` runs and exits successfully.
+/// Runs with the extended PATH so GUI launches (Finder/Dock, minimal PATH)
+/// can still resolve Homebrew / Go / Cargo installs, and from the temp dir so
+/// bd never auto-migrates a project as a side effect of the probe.
+fn probe_cli_binary(bin: &str) -> bool {
+    new_command(bin)
+        .arg("--version")
+        .current_dir(std::env::temp_dir())
+        .env("PATH", get_extended_path())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn default_cli_binary() -> String {
-    // Auto-detect the installed CLI. Prefer bd (Go) — the Dolt-era backend
-    // this app targets — and fall back to br (Rust, legacy).
-    // The probe runs with the extended PATH so GUI launches (Finder/Dock,
-    // minimal PATH) can still resolve the Homebrew binary. This fixes the
-    // "br not found or not executable" error seen when the app is opened
-    // from the Dock without `bd` on the ambient PATH.
-    for bin in &["bd", "br"] {
-        if let Ok(output) = std::process::Command::new(bin)
-            .arg("--version")
-            .current_dir(std::env::temp_dir())
-            .env("PATH", get_extended_path())
-            .output()
-        {
-            if output.status.success() {
-                return bin.to_string();
-            }
-        }
-    }
-    // Neither found — default to bd (matches the app's Dolt-era backend)
-    "bd".to_string()
+    select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, probe_cli_binary)
 }
 
 impl Default for AppConfig {
@@ -4866,6 +4886,101 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- CLI auto-detection -------------------------------------------------
+
+    #[test]
+    fn select_prefers_first_available_candidate() {
+        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |_| true);
+        assert_eq!(picked, "bd", "bd must be probed before br");
+    }
+
+    #[test]
+    fn select_falls_through_to_br_when_bd_missing() {
+        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |bin| bin == "br");
+        assert_eq!(picked, "br");
+    }
+
+    #[test]
+    fn select_falls_back_to_bd_when_nothing_found() {
+        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |_| false);
+        assert_eq!(picked, "bd");
+    }
+
+    #[test]
+    fn select_probes_in_declared_order_and_stops_early() {
+        use std::cell::RefCell;
+        let seen = RefCell::new(Vec::new());
+        let picked = select_default_binary(&["first", "second", "third"], "fb", |bin| {
+            seen.borrow_mut().push(bin.to_string());
+            bin == "second"
+        });
+        assert_eq!(picked, "second");
+        assert_eq!(*seen.borrow(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn probe_returns_false_for_nonexistent_binary() {
+        assert!(!probe_cli_binary("definitely-not-a-real-cli-binary-xyz"));
+    }
+
+    #[test]
+    fn extended_path_includes_gui_launch_locations() {
+        let path = get_extended_path();
+        #[cfg(not(target_os = "windows"))]
+        {
+            for needle in ["/opt/homebrew/bin", "/usr/local/bin", "/.cargo/bin", "/.local/bin"] {
+                assert!(path.contains(needle), "extended PATH missing {needle}: {path}");
+            }
+            // GOPATH/bin or ~/go/bin
+            assert!(path.contains("go/bin") || env::var("GOPATH").is_ok(), "extended PATH missing go bin dir: {path}");
+            // Ambient PATH is preserved
+            let ambient = env::var("PATH").unwrap_or_default();
+            assert!(ambient.is_empty() || path.ends_with(&ambient));
+        }
+        #[cfg(target_os = "windows")]
+        {
+            for needle in [r"\go\bin", r"\.cargo\bin", r"\.local\bin"] {
+                assert!(path.contains(needle), "extended PATH missing {needle}: {path}");
+            }
+        }
+    }
+
+    // ---- CLI client detection -----------------------------------------------
+
+    #[test]
+    fn detect_bd_1x_banner() {
+        // Real output from bd 1.0.4
+        assert_eq!(detect_cli_client("bd version 1.0.4 (ce242a879)"), CliClient::Bd);
+        assert_eq!(parse_bd_version("bd version 1.0.4 (ce242a879)"), Some((1, 0, 4)));
+    }
+
+    #[test]
+    fn detect_bd_legacy_banner() {
+        assert_eq!(detect_cli_client("bd version 0.49.6 (Homebrew)"), CliClient::Bd);
+        assert_eq!(parse_bd_version("bd version 0.49.6 (Homebrew)"), Some((0, 49, 6)));
+    }
+
+    #[test]
+    fn detect_br_banner() {
+        let banner = "br 0.1.33 (rustc 1.85.0-nightly)";
+        assert_eq!(detect_cli_client(banner), CliClient::Br);
+        assert_eq!(parse_bd_version(banner), Some((0, 1, 33)));
+    }
+
+    #[test]
+    fn detect_unknown_banner() {
+        assert_eq!(detect_cli_client("something-else 2.0.0"), CliClient::Unknown);
+        assert_eq!(detect_cli_client(""), CliClient::Unknown);
+    }
+
+    #[test]
+    fn parse_version_tolerates_prerelease_suffix_and_garbage() {
+        assert_eq!(parse_bd_version("bd version 1.2.0-beta (abc)"), Some((1, 2, 0)));
+        assert_eq!(parse_bd_version("bd version 1.2.3-fork"), Some((1, 2, 3)));
+        assert_eq!(parse_bd_version("no version here"), None);
+        assert_eq!(parse_bd_version("bd version 1.2"), None);
+    }
 
     fn minimal_issue_json(id: &str, title: &str) -> String {
         format!(
