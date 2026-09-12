@@ -7,8 +7,13 @@
 ### Changes
 - **CLI policy: bd first.** This project is now maintained independently and follows current `bd` (1.x). `br` (beads_rust) stays supported but is no longer the recommended default. README, CLAUDE.md, and docs/philosophy.md updated accordingly
 - **CLI auto-detection prefers `bd`** and falls back to `bd` when no CLI is found (previously `br`). Users who set an explicit binary in Settings are unaffected
+- **Version-gated CLI auto-detection** (#10): candidates are ranked bd ≥ 1.0 → legacy bd → br → unknown, so a supported `bd` always wins and a legacy `bd` is still selected but flagged. `MIN_SUPPORTED_BD_MAJOR` in `lib.rs` is the single place to raise the floor
+- **Legacy bd warning** (#6): `check_bd_compatibility` now reports `found`, `legacy`, `minSupportedMajor`, and `searchedPaths`; a dismissible banner under the header (and the Settings dialog) warns when bd < 1.0 or br is in use. Dismissal is remembered per binary + version and reappears after an upgrade or switch
+- **"CLI not found" notice** (#10): when neither `bd` nor `br` resolves, a non-dismissible banner explains what was searched and links to Settings instead of silently showing empty lists. Startup logs the searched directories
+- **Frontend default CLI aligned to `bd`** (#10) to match the backend fallback
 
 ### Fixes
+- **`bd --version` probes always run from the temp dir** so a version check can never trigger bd auto-migration in the app's working directory
 - **CLI not detected on GUI launch**: the `--version` probe now runs with the extended PATH, so opening the app from Finder/Dock finds Homebrew-installed CLIs instead of failing with "not found or not executable"
 
 ## [1.24.4] - 2026-04-08

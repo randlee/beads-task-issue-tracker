@@ -778,32 +778,201 @@ const CLI_CANDIDATES: &[&str] = &["bd", "br"];
 /// Binary assumed when no candidate responds to `--version`.
 const CLI_FALLBACK: &str = "bd";
 
-/// Pure selection logic: return the first candidate for which `probe` succeeds,
-/// or `fallback` when none does. Separated from process spawning so it is unit-testable.
-fn select_default_binary<F: Fn(&str) -> bool>(candidates: &[&str], fallback: &str, probe: F) -> String {
-    candidates
-        .iter()
-        .find(|bin| probe(bin))
-        .map(|bin| bin.to_string())
-        .unwrap_or_else(|| fallback.to_string())
+/// Minimum `bd` major version this app targets. Older versions still run
+/// through the version-gated code paths but are reported as legacy and
+/// surfaced to the user. Raise this when the supported floor moves.
+const MIN_SUPPORTED_BD_MAJOR: u32 = 1;
+
+/// Result of running `<bin> --version` on a candidate CLI binary.
+#[derive(Debug, Clone, PartialEq)]
+struct CliProbe {
+    client: CliClient,
+    version: Option<(u32, u32, u32)>,
+    /// Trimmed first line of `--version` output, for logs and the UI.
+    raw: String,
 }
 
-/// Returns true when `bin --version` runs and exits successfully.
+/// Outcome of auto-detection.
+#[derive(Debug, Clone, PartialEq)]
+struct CliSelection {
+    binary: String,
+    /// `None` when no candidate answered and `binary` is the fallback.
+    probe: Option<CliProbe>,
+}
+
+impl CliSelection {
+    /// True when a `bd` older than `MIN_SUPPORTED_BD_MAJOR` was selected.
+    fn is_legacy(&self) -> bool {
+        self.probe
+            .as_ref()
+            .map(|p| is_legacy_bd(p.client, p.version))
+            .unwrap_or(false)
+    }
+}
+
+/// A `bd` whose major version is below the supported floor (or whose version
+/// could not be parsed) is legacy. `br` and unknown clients are never "legacy".
+fn is_legacy_bd(client: CliClient, version: Option<(u32, u32, u32)>) -> bool {
+    match (client, version) {
+        (CliClient::Bd, Some((major, _, _))) => major < MIN_SUPPORTED_BD_MAJOR,
+        (CliClient::Bd, None) => true,
+        _ => false,
+    }
+}
+
+/// Rank a probed candidate for auto-selection. Lower is better; ties keep
+/// candidate order. Pure so it can be unit-tested without spawning processes.
+///
+/// 0: bd at or above the supported floor (primary CLI)
+/// 1: bd below the floor / unparsable version (works, but warn)
+/// 2: br (secondary CLI)
+/// 3: unknown client
+fn rank_cli_candidate(probe: &CliProbe) -> u8 {
+    match probe.client {
+        CliClient::Bd if !is_legacy_bd(probe.client, probe.version) => 0,
+        CliClient::Bd => 1,
+        CliClient::Br => 2,
+        CliClient::Unknown => 3,
+    }
+}
+
+/// Pure selection logic: probe every candidate, pick the best-ranked one
+/// (first wins on ties), or fall back to `fallback` when none answers.
+fn select_default_binary<F: Fn(&str) -> Option<CliProbe>>(
+    candidates: &[&str],
+    fallback: &str,
+    probe: F,
+) -> CliSelection {
+    let mut best: Option<(u8, &str, CliProbe)> = None;
+    for bin in candidates {
+        if let Some(p) = probe(bin) {
+            let rank = rank_cli_candidate(&p);
+            let better = match &best {
+                None => true,
+                Some((best_rank, _, _)) => rank < *best_rank,
+            };
+            if better {
+                best = Some((rank, bin, p));
+            }
+        }
+    }
+    match best {
+        Some((_, bin, p)) => CliSelection { binary: bin.to_string(), probe: Some(p) },
+        None => CliSelection { binary: fallback.to_string(), probe: None },
+    }
+}
+
+/// Parse `--version` stdout into a `CliProbe`. Pure.
+fn parse_cli_probe(stdout: &str) -> CliProbe {
+    let raw = stdout.lines().next().unwrap_or("").trim().to_string();
+    CliProbe {
+        client: detect_cli_client(&raw),
+        version: parse_bd_version(&raw),
+        raw,
+    }
+}
+
+/// Run `bin --version` and parse it. `None` when the binary is missing,
+/// not executable, or exits non-zero.
 /// Runs with the extended PATH so GUI launches (Finder/Dock, minimal PATH)
 /// can still resolve Homebrew / Go / Cargo installs, and from the temp dir so
 /// bd never auto-migrates a project as a side effect of the probe.
-fn probe_cli_binary(bin: &str) -> bool {
-    new_command(bin)
+fn probe_cli_binary(bin: &str) -> Option<CliProbe> {
+    let output = new_command(bin)
         .arg("--version")
         .current_dir(std::env::temp_dir())
         .env("PATH", get_extended_path())
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(parse_cli_probe(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Directories the CLI probe searches, in order, without duplicates.
+/// Uses the platform PATH separator (`;` on Windows, `:` elsewhere).
+fn extended_path_entries() -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    std::env::split_paths(&get_extended_path())
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| !p.is_empty())
+        .filter(|p| seen.insert(p.clone()))
+        .collect()
+}
+
+fn cli_client_name(client: CliClient) -> &'static str {
+    match client {
+        CliClient::Bd => "bd",
+        CliClient::Br => "br",
+        CliClient::Unknown => "unknown",
+    }
+}
+
+/// Human-readable compatibility warnings for a detected client. Pure.
+fn cli_compatibility_warnings(client: CliClient, version: Option<(u32, u32, u32)>) -> Vec<String> {
+    let mut warnings = Vec::new();
+    match (client, version) {
+        (CliClient::Bd, Some((major, minor, patch))) if major < MIN_SUPPORTED_BD_MAJOR => {
+            warnings.push(format!(
+                "bd {}.{}.{} is a legacy version: this app targets bd {}.x. \
+                 Legacy versions may work but are not supported; please upgrade bd.",
+                major, minor, patch, MIN_SUPPORTED_BD_MAJOR
+            ));
+            if major == 0 && minor >= 50 {
+                warnings.push(
+                    "bd 0.50-0.56 removed the daemon and JSONL files in favor of Dolt server mode; \
+                     change detection falls back to polling."
+                        .to_string(),
+                );
+            }
+        }
+        (CliClient::Bd, None) => {
+            warnings.push(format!(
+                "Could not parse the bd version; this app targets bd {}.x.",
+                MIN_SUPPORTED_BD_MAJOR
+            ));
+        }
+        (CliClient::Br, _) => {
+            warnings.push(
+                "br (beads_rust) detected: supported as a secondary CLI. New features target bd first."
+                    .to_string(),
+            );
+        }
+        (CliClient::Unknown, _) => {
+            warnings.push("Could not detect the CLI client from its --version output.".to_string());
+        }
+        _ => {}
+    }
+    warnings
 }
 
 fn default_cli_binary() -> String {
-    select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, probe_cli_binary)
+    let selection = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, probe_cli_binary);
+    match &selection.probe {
+        Some(p) => {
+            log::info!(
+                "[cli_detect] Auto-selected {} ({} {})",
+                selection.binary,
+                cli_client_name(p.client),
+                p.raw
+            );
+            if selection.is_legacy() {
+                log::warn!(
+                    "[cli_detect] {} is below the supported bd {}.x floor; running in legacy mode",
+                    p.raw,
+                    MIN_SUPPORTED_BD_MAJOR
+                );
+            }
+        }
+        None => log::warn!(
+            "[cli_detect] No CLI found (tried {}); defaulting to {}. Searched: {}",
+            CLI_CANDIDATES.join(", "),
+            selection.binary,
+            extended_path_entries().join(if cfg!(windows) { ";" } else { ":" })
+        ),
+    }
+    selection.binary
 }
 
 impl Default for AppConfig {
@@ -3557,6 +3726,7 @@ async fn get_bd_version() -> String {
     let binary = get_cli_binary();
     match new_command(&binary)
         .arg("--version")
+        .current_dir(std::env::temp_dir())
         .env("PATH", get_extended_path())
         .output()
     {
@@ -3573,63 +3743,69 @@ async fn get_bd_version() -> String {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CompatibilityInfo {
+    /// Configured binary name or path (e.g. "bd").
+    binary: String,
+    /// False when `binary --version` could not be run.
+    found: bool,
+    /// Raw `--version` output, or a "not found" message.
     version: String,
     /// "bd", "br", or "unknown"
-    #[serde(rename = "clientType")]
     client_type: String,
-    #[serde(rename = "versionTuple")]
     version_tuple: Option<Vec<u32>>,
-    #[serde(rename = "supportsDaemonFlag")]
+    /// True when a bd below `MIN_SUPPORTED_BD_MAJOR` is in use.
+    legacy: bool,
+    min_supported_major: u32,
     supports_daemon_flag: bool,
-    #[serde(rename = "usesJsonlFiles")]
     uses_jsonl_files: bool,
-    #[serde(rename = "usesDoltBackend")]
     uses_dolt_backend: bool,
-    #[serde(rename = "supportsListAllFlag")]
     supports_list_all_flag: bool,
+    /// Directories searched when resolving the binary (for the "not found" UI).
+    searched_paths: Vec<String>,
     warnings: Vec<String>,
 }
 
 #[tauri::command]
 async fn check_bd_compatibility() -> CompatibilityInfo {
-    let version_string = get_bd_version().await;
-    let info = get_cli_client_info();
+    let binary = get_cli_binary();
+    let probe = probe_cli_binary(&binary);
 
-    let mut warnings = Vec::new();
-
-    let (client, tuple) = match info {
-        Some((client, major, minor, patch)) => (client, Some((major, minor, patch))),
-        None => {
-            warnings.push(format!("Could not detect CLI client from: {}", version_string));
-            (CliClient::Unknown, None)
-        }
+    let (found, version_string, client, tuple) = match &probe {
+        Some(p) => (true, p.raw.clone(), p.client, p.version),
+        None => (false, format!("{} not found", binary), CliClient::Unknown, None),
     };
 
-    let client_type_str = match client {
-        CliClient::Bd => "bd",
-        CliClient::Br => "br",
-        CliClient::Unknown => "unknown",
+    let mut warnings = if found {
+        cli_compatibility_warnings(client, tuple)
+    } else {
+        vec![format!(
+            "{} was not found on PATH or is not executable. Install bd {}.x or point Settings at the binary.",
+            binary, MIN_SUPPORTED_BD_MAJOR
+        )]
     };
-
-    if client == CliClient::Br {
-        warnings.push("br (beads_rust) detected: frozen on classic SQLite+JSONL architecture, no daemon support".to_string());
+    if found && client == CliClient::Unknown {
+        warnings.push(format!("--version output was: {}", version_string));
     }
 
-    if let Some((major, minor, _)) = tuple {
-        if client == CliClient::Bd && major == 0 && minor >= 50 {
-            warnings.push("bd >= 0.50.0 detected: daemon and JSONL systems have been removed".to_string());
-        }
+    // Keep the feature-flag cache coherent with what we just observed.
+    if let (Some(p), Some((major, minor, patch))) = (&probe, tuple) {
+        *CLI_CLIENT_INFO.lock().unwrap_or_else(|e| e.into_inner()) = Some((p.client, major, minor, patch));
     }
 
     CompatibilityInfo {
+        binary,
+        found,
         version: version_string,
-        client_type: client_type_str.to_string(),
+        client_type: cli_client_name(client).to_string(),
         version_tuple: tuple.map(|(a, b, c)| vec![a, b, c]),
+        legacy: is_legacy_bd(client, tuple),
+        min_supported_major: MIN_SUPPORTED_BD_MAJOR,
         supports_daemon_flag: supports_daemon_flag(),
         uses_jsonl_files: uses_jsonl_files(),
         uses_dolt_backend: uses_dolt_backend(),
         supports_list_all_flag: supports_list_all_flag(),
+        searched_paths: extended_path_entries(),
         warnings,
     }
 }
@@ -3682,6 +3858,7 @@ fn validate_cli_binary_internal(binary: &str) -> Result<String, String> {
 
     match new_command(binary)
         .arg("--version")
+        .current_dir(std::env::temp_dir())
         .env("PATH", get_extended_path())
         .output()
     {
@@ -4792,21 +4969,19 @@ pub fn run() {
             // Check if CLI binary is accessible
             // IMPORTANT: Run from /tmp to avoid bd auto-migrating projects in cwd
             let binary = get_cli_binary();
-            match new_command(&binary)
-                .arg("--version")
-                .current_dir(std::env::temp_dir())
-                .env("PATH", get_extended_path())
-                .output()
-            {
-                Ok(output) if output.status.success() => {
-                    let version = String::from_utf8_lossy(&output.stdout);
-                    log::info!("[startup] {} found: {}", binary, version.trim());
+            match probe_cli_binary(&binary) {
+                Some(p) => {
+                    log::info!("[startup] {} found: {} ({})", binary, p.raw, cli_client_name(p.client));
+                    for w in cli_compatibility_warnings(p.client, p.version) {
+                        log::warn!("[startup] {}", w);
+                    }
                 }
-                Ok(output) => {
-                    log::warn!("[startup] {} command failed: {}", binary, String::from_utf8_lossy(&output.stderr));
-                }
-                Err(e) => {
-                    log::error!("[startup] {} not found or not executable: {}", binary, e);
+                None => {
+                    log::error!(
+                        "[startup] {} not found or not executable. Searched: {}",
+                        binary,
+                        extended_path_entries().join(if cfg!(windows) { "; " } else { ":" })
+                    );
                 }
             }
 
@@ -4889,39 +5064,183 @@ mod tests {
 
     // ---- CLI auto-detection -------------------------------------------------
 
+    fn probe(client: CliClient, version: Option<(u32, u32, u32)>) -> CliProbe {
+        let raw = match (client, version) {
+            (CliClient::Bd, Some((a, b, c))) => format!("bd version {}.{}.{} (abc123)", a, b, c),
+            (CliClient::Br, Some((a, b, c))) => format!("br {}.{}.{} (rustc 1.85.0)", a, b, c),
+            _ => "mystery 9.9.9".to_string(),
+        };
+        CliProbe { client, version, raw }
+    }
+
     #[test]
-    fn select_prefers_first_available_candidate() {
-        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |_| true);
-        assert_eq!(picked, "bd", "bd must be probed before br");
+    fn rank_prefers_supported_bd_then_legacy_bd_then_br_then_unknown() {
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Bd, Some((1, 0, 4)))), 0);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Bd, Some((2, 3, 0)))), 0);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Bd, Some((0, 49, 6)))), 1);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Bd, Some((0, 56, 0)))), 1);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Bd, None)), 1);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Br, Some((0, 1, 33)))), 2);
+        assert_eq!(rank_cli_candidate(&probe(CliClient::Unknown, None)), 3);
+    }
+
+    #[test]
+    fn select_picks_supported_bd_over_br() {
+        let sel = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |bin| match bin {
+            "bd" => Some(probe(CliClient::Bd, Some((1, 0, 4)))),
+            "br" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            _ => None,
+        });
+        assert_eq!(sel.binary, "bd");
+        assert!(sel.probe.is_some());
+        assert!(!sel.is_legacy());
+    }
+
+    #[test]
+    fn select_still_picks_legacy_bd_over_br_but_flags_it() {
+        let sel = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |bin| match bin {
+            "bd" => Some(probe(CliClient::Bd, Some((0, 49, 6)))),
+            "br" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            _ => None,
+        });
+        assert_eq!(sel.binary, "bd");
+        assert!(sel.is_legacy());
     }
 
     #[test]
     fn select_falls_through_to_br_when_bd_missing() {
-        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |bin| bin == "br");
-        assert_eq!(picked, "br");
+        let sel = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |bin| match bin {
+            "br" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            _ => None,
+        });
+        assert_eq!(sel.binary, "br");
+        assert!(sel.probe.is_some());
+        assert!(!sel.is_legacy());
     }
 
     #[test]
     fn select_falls_back_to_bd_when_nothing_found() {
-        let picked = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |_| false);
-        assert_eq!(picked, "bd");
+        let sel = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, |_| None);
+        assert_eq!(sel.binary, "bd");
+        assert!(sel.probe.is_none());
+        assert!(!sel.is_legacy());
     }
 
     #[test]
-    fn select_probes_in_declared_order_and_stops_early() {
-        use std::cell::RefCell;
-        let seen = RefCell::new(Vec::new());
-        let picked = select_default_binary(&["first", "second", "third"], "fb", |bin| {
-            seen.borrow_mut().push(bin.to_string());
-            bin == "second"
+    fn select_prefers_better_rank_over_candidate_order() {
+        // A binary named "bd" that turns out to be unknown loses to a real br later in the list.
+        let sel = select_default_binary(&["bd", "br"], "bd", |bin| match bin {
+            "bd" => Some(probe(CliClient::Unknown, None)),
+            "br" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            _ => None,
         });
-        assert_eq!(picked, "second");
-        assert_eq!(*seen.borrow(), vec!["first", "second"]);
+        assert_eq!(sel.binary, "br");
     }
 
     #[test]
-    fn probe_returns_false_for_nonexistent_binary() {
-        assert!(!probe_cli_binary("definitely-not-a-real-cli-binary-xyz"));
+    fn select_keeps_first_candidate_on_equal_rank() {
+        let sel = select_default_binary(&["first", "second"], "fb", |_| Some(probe(CliClient::Bd, Some((1, 2, 0)))));
+        assert_eq!(sel.binary, "first");
+    }
+
+    #[test]
+    fn parse_probe_uses_first_line_only() {
+        let p = parse_cli_probe("bd version 1.0.4 (ce242a879)\nextra line\n");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.raw, "bd version 1.0.4 (ce242a879)");
+    }
+
+    #[test]
+    fn probe_returns_none_for_nonexistent_binary() {
+        assert!(probe_cli_binary("definitely-not-a-real-cli-binary-xyz").is_none());
+    }
+
+    #[test]
+    fn legacy_detection_respects_floor() {
+        assert!(is_legacy_bd(CliClient::Bd, Some((0, 49, 6))));
+        assert!(is_legacy_bd(CliClient::Bd, Some((0, 99, 0))));
+        assert!(is_legacy_bd(CliClient::Bd, None));
+        assert!(!is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR, 0, 0))));
+        assert!(!is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR + 1, 0, 0))));
+        assert!(!is_legacy_bd(CliClient::Br, Some((0, 1, 33))));
+        assert!(!is_legacy_bd(CliClient::Unknown, None));
+    }
+
+    #[test]
+    fn warnings_empty_for_supported_bd() {
+        assert!(cli_compatibility_warnings(CliClient::Bd, Some((1, 0, 4))).is_empty());
+        assert!(cli_compatibility_warnings(CliClient::Bd, Some((3, 1, 0))).is_empty());
+    }
+
+    #[test]
+    fn warnings_flag_legacy_bd() {
+        let w = cli_compatibility_warnings(CliClient::Bd, Some((0, 49, 6)));
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("0.49.6"));
+        assert!(w[0].contains("legacy"));
+        assert!(w[0].contains(&format!("bd {}.x", MIN_SUPPORTED_BD_MAJOR)));
+
+        let w = cli_compatibility_warnings(CliClient::Bd, Some((0, 56, 0)));
+        assert_eq!(w.len(), 2, "0.50-0.56 also gets the server-mode note");
+        assert!(w[1].contains("Dolt"));
+    }
+
+    #[test]
+    fn warnings_for_br_unknown_and_unparsable() {
+        let w = cli_compatibility_warnings(CliClient::Br, Some((0, 1, 33)));
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("secondary"));
+
+        let w = cli_compatibility_warnings(CliClient::Unknown, None);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("Could not detect"));
+
+        let w = cli_compatibility_warnings(CliClient::Bd, None);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("Could not parse"));
+    }
+
+    #[test]
+    fn extended_path_entries_are_nonempty_and_deduplicated() {
+        let entries = extended_path_entries();
+        assert!(!entries.is_empty());
+        assert!(entries.iter().all(|e| !e.is_empty()));
+        let mut sorted = entries.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), entries.len(), "duplicates present: {entries:?}");
+        // Split on the platform separator, not a hardcoded one
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        assert!(entries.iter().all(|e| !e.contains(sep)), "entry contains separator: {entries:?}");
+    }
+
+    #[test]
+    fn compatibility_info_serializes_camel_case() {
+        let info = CompatibilityInfo {
+            binary: "bd".into(),
+            found: true,
+            version: "bd version 1.0.4".into(),
+            client_type: "bd".into(),
+            version_tuple: Some(vec![1, 0, 4]),
+            legacy: false,
+            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
+            supports_daemon_flag: false,
+            uses_jsonl_files: false,
+            uses_dolt_backend: true,
+            supports_list_all_flag: true,
+            searched_paths: vec!["/opt/homebrew/bin".into()],
+            warnings: vec![],
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        for key in [
+            "binary", "found", "version", "clientType", "versionTuple", "legacy", "minSupportedMajor",
+            "supportsDaemonFlag", "usesJsonlFiles", "usesDoltBackend", "supportsListAllFlag",
+            "searchedPaths", "warnings",
+        ] {
+            assert!(json.get(key).is_some(), "missing camelCase key {key}: {json}");
+        }
+        assert!(json.get("client_type").is_none());
     }
 
     #[test]
@@ -4932,9 +5251,7 @@ mod tests {
             for needle in ["/opt/homebrew/bin", "/usr/local/bin", "/.cargo/bin", "/.local/bin"] {
                 assert!(path.contains(needle), "extended PATH missing {needle}: {path}");
             }
-            // GOPATH/bin or ~/go/bin
             assert!(path.contains("go/bin") || env::var("GOPATH").is_ok(), "extended PATH missing go bin dir: {path}");
-            // Ambient PATH is preserved
             let ambient = env::var("PATH").unwrap_or_default();
             assert!(ambient.is_empty() || path.ends_with(&ambient));
         }

@@ -1,7 +1,8 @@
 import { getCliBinaryPath } from '~/utils/bd-api'
 
 // Singleton state — shared across all callers
-const cliBinary = ref<'br' | 'bd'>('br')
+// Default matches the backend (CLI_FALLBACK = "bd"); init() corrects it from settings.
+const cliBinary = ref<'br' | 'bd'>('bd')
 
 export function useCliClient() {
   const isBr = computed(() => cliBinary.value === 'br')

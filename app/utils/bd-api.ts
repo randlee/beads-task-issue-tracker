@@ -709,15 +709,26 @@ export async function checkBdCliUpdate(): Promise<BdCliUpdateInfo> {
 // ============================================================================
 
 export interface BdCompatibilityInfo {
+  /** Configured binary name or path (e.g. "bd") */
+  binary: string
+  /** False when `binary --version` could not be run */
+  found: boolean
+  /** Raw --version output, or a "not found" message */
   version: string
   /** "bd", "br", or "unknown" */
   clientType: string
   versionTuple: number[] | null
+  /** True when a bd below minSupportedMajor is in use */
+  legacy: boolean
+  /** Backend's supported bd major floor (currently 1) */
+  minSupportedMajor: number
   supportsDaemonFlag: boolean
   usesJsonlFiles: boolean
   usesDoltBackend: boolean
   /** bd >= 0.55: --all flag works correctly for bd list */
   supportsListAllFlag: boolean
+  /** Directories searched when resolving the binary */
+  searchedPaths: string[]
   warnings: string[]
 }
 
@@ -726,13 +737,18 @@ export async function checkBdCompatibility(): Promise<BdCompatibilityInfo> {
     return invoke<BdCompatibilityInfo>('check_bd_compatibility')
   }
   return {
+    binary: 'bd',
+    found: true,
     version: 'web mode',
     clientType: 'unknown',
     versionTuple: null,
+    legacy: false,
+    minSupportedMajor: 1,
     supportsDaemonFlag: false,
     usesJsonlFiles: false,
     usesDoltBackend: false,
     supportsListAllFlag: false,
+    searchedPaths: [],
     warnings: [],
   }
 }

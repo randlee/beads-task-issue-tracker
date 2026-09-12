@@ -4,6 +4,7 @@ import type { Issue, UpdateIssuePayload } from '~/types/issue'
 // Layout components
 import AppHeader from '~/components/layout/AppHeader.vue'
 import UpdateIndicator from '~/components/layout/UpdateIndicator.vue'
+import CliCompatibilityBanner from '~/components/layout/CliCompatibilityBanner.vue'
 import DebugPanel from '~/components/layout/DebugPanel.vue'
 import DialogsLayer from '~/components/layout/DialogsLayer.vue'
 
@@ -49,6 +50,7 @@ const { columns, toggleColumn, setColumns, resetColumns } = useColumnConfig()
 const { beadsPath, hasStoredPath } = useBeadsPath()
 const { success: notifySuccess, error: notifyError } = useNotification()
 const { isBr, init: initCliClient } = useCliClient()
+const { refresh: refreshCliCompatibility } = useCliCompatibility()
 const { projects } = useProjects()
 const {
   issues,
@@ -267,6 +269,8 @@ onMounted(async () => {
 
     // Detect CLI client (br vs bd) for feature gating
     await initCliClient()
+    // Surface "CLI not found" / legacy-version warnings (non-blocking)
+    refreshCliCompatibility()
 
     // Check for updates after initial load + start periodic check (hourly)
     // (these don't call bd CLI, safe to run before migration check)
@@ -777,15 +781,18 @@ watch(
   <div class="fixed inset-0 grid grid-rows-[1fr_auto] bg-background">
     <!-- Zoomable content (header + panels) -->
     <div id="zoomable-content" class="grid grid-rows-[auto_1fr] overflow-hidden">
-      <!-- Header -->
-      <AppHeader
-        :project-name="currentProjectName"
-        :edit-context="editContext"
-        :edit-id="editId"
-        :show-refresh="!showOnboarding"
-        :is-exposed="isCurrentProjectExposed"
-        @refresh="handleRefresh"
-      />
+      <!-- Header + CLI compatibility banner (one grid row) -->
+      <div>
+        <AppHeader
+          :project-name="currentProjectName"
+          :edit-context="editContext"
+          :edit-id="editId"
+          :show-refresh="!showOnboarding"
+          :is-exposed="isCurrentProjectExposed"
+          @refresh="handleRefresh"
+        />
+        <CliCompatibilityBanner />
+      </div>
 
     <!-- Desktop Layout (3 columns) -->
     <div v-if="!isMobileView" class="flex overflow-hidden">
