@@ -9,6 +9,7 @@ import StatusBadge from '~/components/issues/StatusBadge.vue'
 import PriorityBadge from '~/components/issues/PriorityBadge.vue'
 import ImageThumbnail from '~/components/ui/image-preview/ImageThumbnail.vue'
 import { extractNonImageRefs, isUrl } from '~/utils/markdown'
+import { hasMetadata, formatMetadataJson } from '~/utils/metadata'
 import type { AttachmentFile } from '~/composables/useAttachments'
 
 const { currentTheme } = useTheme()
@@ -332,13 +333,7 @@ const relationBorderColor = (rel: { id: string; priority: string }) => {
   return colors[priority] || 'border-muted-foreground/50'
 }
 
-const formatMetadata = (raw: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2)
-  } catch {
-    return raw
-  }
-}
+const showMetadata = computed(() => hasMetadata(props.issue.metadata))
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-'
@@ -861,7 +856,7 @@ const formatEstimate = (minutes: number) => {
     </div>
 
     <!-- Metadata Section (only if exists, read-only JSON) -->
-    <div v-if="issue.metadata">
+    <div v-if="showMetadata">
       <button
         class="flex items-center gap-1.5 w-full text-left group"
         @click="toggleSection('metadata')"
@@ -879,7 +874,7 @@ const formatEstimate = (minutes: number) => {
         <h4 class="text-[10px] font-medium text-muted-foreground uppercase tracking-wide group-hover:text-foreground transition-colors">Metadata</h4>
       </button>
       <div v-show="isMetadataOpen" class="mt-1 pl-4.5">
-        <pre class="text-xs bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">{{ formatMetadata(issue.metadata) }}</pre>
+        <pre class="text-xs bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">{{ formatMetadataJson(issue.metadata) }}</pre>
       </div>
     </div>
 

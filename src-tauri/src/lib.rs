@@ -210,7 +210,8 @@ pub struct BdRawIssue {
     pub dependencies: Option<Vec<BdRawDependency>>,
     pub dependency_count: Option<i32>,
     pub dependent_count: Option<i32>,
-    pub metadata: Option<String>,
+    /// bd emits a JSON object (json.RawMessage); older data may carry a JSON string
+    pub metadata: Option<serde_json::Value>,
     pub spec_id: Option<String>,
     pub comment_count: Option<i32>,
 }
@@ -259,7 +260,8 @@ pub struct Issue {
     pub parent: Option<ParentIssue>,
     pub children: Option<Vec<ChildIssue>>,
     pub relations: Option<Vec<Relation>>,
-    pub metadata: Option<String>,
+    /// Normalized: a JSON object when present, `None` when absent/null/empty
+    pub metadata: Option<serde_json::Value>,
     #[serde(rename = "specId")]
     pub spec_id: Option<String>,
     #[serde(rename = "commentCount")]
@@ -625,7 +627,7 @@ fn transform_issue(raw: BdRawIssue) -> Issue {
         parent,
         children,
         relations: if relations.is_empty() { None } else { Some(relations) },
-        metadata: raw.metadata,
+        metadata: normalize_metadata(raw.metadata),
         spec_id: raw.spec_id,
         comment_count,
         dependency_count: raw.dependency_count.or_else(|| {
@@ -634,6 +636,33 @@ fn transform_issue(raw: BdRawIssue) -> Issue {
         dependent_count: raw.dependent_count.or_else(|| {
             raw.dependents.as_ref().map(|d| d.len() as i32)
         }),
+    }
+}
+
+/// Normalize the `metadata` blob bd returns.
+/// - bd 0.49+ and 1.x emit a JSON object (`json.RawMessage`), which is passed through
+/// - a JSON *string* (legacy payloads written via `--metadata '<json>'` on old versions,
+///   or data round-tripped through the app) is parsed if it holds an object
+/// - `null`, empty objects, and empty/whitespace strings become `None` so the UI can
+///   use presence as "has custom fields"
+fn normalize_metadata(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    use serde_json::Value;
+    match value {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(map)) if map.is_empty() => None,
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match serde_json::from_str::<Value>(trimmed) {
+                Ok(Value::Object(map)) if map.is_empty() => None,
+                Ok(parsed @ Value::Object(_)) => Some(parsed),
+                // Not an object: keep the original string so nothing is silently dropped
+                _ => Some(Value::String(s)),
+            }
+        }
+        other => other,
     }
 }
 
@@ -2584,12 +2613,22 @@ async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Issue>, Strin
             format!("Failed to parse issue: {}", e)
         })?;
 
-    let raw_issue: Option<BdRawIssue> = if result.is_array() {
-        result.as_array()
-            .and_then(|arr| arr.first())
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    let candidate = if result.is_array() {
+        result.as_array().and_then(|arr| arr.first()).cloned()
     } else {
-        serde_json::from_value(result).ok()
+        Some(result)
+    };
+    // Do not swallow deserialization errors: a schema mismatch used to make an
+    // existing issue look "not found" (see #7).
+    let raw_issue: Option<BdRawIssue> = match candidate {
+        None => None,
+        Some(v) => match serde_json::from_value::<BdRawIssue>(v) {
+            Ok(issue) => Some(issue),
+            Err(e) => {
+                log_error!("[bd_show] Issue {} returned by bd but failed to deserialize: {}", id, e);
+                return Err(format!("Failed to parse issue {}: {}", id, e));
+            }
+        },
     };
 
     log_info!("[bd_show] Issue {} found: {}", id, raw_issue.is_some());
@@ -4866,6 +4905,75 @@ mod tests {
             r#"{{"id":"{}","title":"{}","description":null,"status":"open","priority":3,"issue_type":"task","owner":null,"assignee":null,"labels":[],"created_at":"2025-01-01T00:00:00Z","created_by":null,"updated_at":"2025-01-01T00:00:00Z","closed_at":null,"close_reason":null,"blocked_by":null,"blocks":null,"comments":null,"external_ref":null,"estimate":null,"design":null,"acceptance_criteria":null,"notes":null,"parent":null,"dependents":null,"dependencies":null,"dependency_count":null,"dependent_count":null,"metadata":null,"spec_id":null,"comment_count":null}}"#,
             id, title
         )
+    }
+
+    fn issue_json_with_metadata(id: &str, metadata_json: &str) -> String {
+        minimal_issue_json(id, "With metadata").replace(r#""metadata":null"#, &format!(r#""metadata":{}"#, metadata_json))
+    }
+
+    // ---- metadata normalization (#7) ----------------------------------------
+
+    #[test]
+    fn issue_with_object_metadata_is_not_skipped() {
+        // bd emits metadata as a JSON object; this used to fail Option<String> and drop the issue
+        let json = format!(
+            "[{}]",
+            issue_json_with_metadata("m-1", r#"{"project":"gold","refs":["[[Note]]"],"nested":{"a":1},"percent_complete":56}"#)
+        );
+        let issues = parse_issues_tolerant(&json, "test").unwrap();
+        assert_eq!(issues.len(), 1, "issue with object metadata must be kept");
+        let issue = transform_issue(issues.into_iter().next().unwrap());
+        let meta = issue.metadata.expect("metadata present");
+        assert_eq!(meta["project"], "gold");
+        assert_eq!(meta["refs"][0], "[[Note]]");
+        assert_eq!(meta["nested"]["a"], 1);
+        assert_eq!(meta["percent_complete"], 56);
+    }
+
+    #[test]
+    fn bd_show_shape_with_object_metadata_deserializes() {
+        let v: serde_json::Value = serde_json::from_str(&issue_json_with_metadata("m-2", r#"{"k":"v"}"#)).unwrap();
+        let raw: BdRawIssue = serde_json::from_value(v).expect("bd show payload with object metadata");
+        assert_eq!(raw.metadata.unwrap()["k"], "v");
+    }
+
+    #[test]
+    fn string_metadata_holding_json_object_is_parsed() {
+        // metadata is a JSON *string* whose content is an object (legacy payload shape)
+        let json = format!("[{}]", issue_json_with_metadata("m-3", r#""{\"project\":\"iron\"}""#));
+        let issue = transform_issue(parse_issues_tolerant(&json, "test").unwrap().remove(0));
+        assert_eq!(issue.metadata.unwrap()["project"], "iron");
+    }
+
+    #[test]
+    fn null_empty_and_blank_metadata_normalize_to_none() {
+        use serde_json::json;
+        assert_eq!(normalize_metadata(None), None);
+        assert_eq!(normalize_metadata(Some(json!(null))), None);
+        assert_eq!(normalize_metadata(Some(json!({}))), None);
+        assert_eq!(normalize_metadata(Some(json!(""))), None);
+        assert_eq!(normalize_metadata(Some(json!("   "))), None);
+        assert_eq!(normalize_metadata(Some(json!("{}"))), None);
+    }
+
+    #[test]
+    fn non_object_metadata_is_preserved_not_dropped() {
+        use serde_json::json;
+        assert_eq!(normalize_metadata(Some(json!("free text"))), Some(json!("free text")));
+        assert_eq!(normalize_metadata(Some(json!("[1,2]"))), Some(json!("[1,2]")));
+        assert_eq!(normalize_metadata(Some(json!([1, 2]))), Some(json!([1, 2])));
+        assert_eq!(normalize_metadata(Some(json!(42))), Some(json!(42)));
+    }
+
+    #[test]
+    fn normalized_issue_serializes_metadata_as_object() {
+        let json = format!("[{}]", issue_json_with_metadata("m-4", r#"{"a":1}"#));
+        let issue = transform_issue(parse_issues_tolerant(&json, "test").unwrap().remove(0));
+        let out = serde_json::to_value(&issue).unwrap();
+        assert!(out["metadata"].is_object(), "frontend must receive an object, got {}", out["metadata"]);
+        // Absent metadata serializes as null
+        let issue = transform_issue(parse_issues_tolerant(&format!("[{}]", minimal_issue_json("m-5", "x")), "test").unwrap().remove(0));
+        assert!(serde_json::to_value(&issue).unwrap()["metadata"].is_null());
     }
 
     #[test]

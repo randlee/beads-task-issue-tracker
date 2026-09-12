@@ -32,6 +32,9 @@ export interface Relation {
   direction: string
 }
 
+/** Custom metadata blob (bd emits a JSON object; legacy data may be a string). */
+export type IssueMetadata = Record<string, unknown>
+
 export interface Issue {
   id: string
   title: string
@@ -55,7 +58,8 @@ export interface Issue {
   parent?: ParentIssue
   children?: ChildIssue[]
   relations?: Relation[]
-  metadata?: string
+  /** JSON object when present; string only for legacy non-object payloads; null/absent otherwise */
+  metadata?: IssueMetadata | string | null
   specId?: string
   commentCount?: number
   dependencyCount?: number
