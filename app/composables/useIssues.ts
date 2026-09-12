@@ -26,6 +26,8 @@ export interface IssueGroup {
 // Shared state across all components (singleton pattern)
 const issues = ref<Issue[]>([])
 const selectedIssue = ref<Issue | null>(null)
+// Last successfully deleted issue id — observed by useIssueNavigation to prune history
+const lastDeletedIssueId = ref<string | null>(null)
 const isLoading = ref(false)
 const isUpdating = ref(false)
 const error = ref<string | null>(null)
@@ -607,6 +609,7 @@ export function useIssues() {
       if (selectedIssue.value?.id === id) {
         selectedIssue.value = null
       }
+      lastDeletedIssueId.value = id
 
       // Purge orphan attachments (silently, no need to wait or handle errors)
       bdPurgeOrphanAttachments(getPath()).catch(() => {
@@ -834,6 +837,7 @@ export function useIssues() {
     updateIssue,
     closeIssue,
     deleteIssue,
+    lastDeletedIssueId,
     selectIssue,
     addComment,
     addDependency,
