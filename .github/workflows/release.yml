@@ -181,7 +181,7 @@ jobs:
           prerelease: true
           name: 'Beads Task-Issue Tracker - Latest Development Build'
           body: |
-            **This is an automatically generated development build from the latest code on `master`.**
+            **This is an automatically generated development build from the latest code on `develop`.**
 
             This release is updated on each `/create-release latest` invocation. It always reflects the most recent development state.
 
