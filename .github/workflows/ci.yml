@@ -9,9 +9,17 @@ on:
       - 'sprint/*'
       - 'fix/*'
 
+# The app ships macOS, Windows, and Linux builds, and several code paths
+# (extended PATH, attachment path guards, CREATE_NO_WINDOW) are
+# platform-specific, so the same gates run on all three runners.
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    name: frontend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,12 +44,18 @@ jobs:
         run: npx vue-tsc --noEmit
 
   backend:
-    runs-on: ubuntu-latest
+    name: backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
