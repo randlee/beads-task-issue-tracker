@@ -39,16 +39,15 @@ All steps mandatory. Work is NOT complete until `git push` succeeds.
 - When the session is long and context is getting large, proactively run `/continue-task` before auto-compact triggers
 - If a `PreCompact` hook fires with "auto" trigger, immediately run `/continue-task` instead of letting compact proceed blindly
 
-### bd Version Policy
-- **Stay on bd 0.49.x** — this is the last stable version with embedded Dolt (CGO) and SQLite backend. It was installed via Homebrew (`brew install bd`) and compiled locally with CGO support.
-- **Do NOT upgrade to bd 0.50–0.56+** — versions 0.50+ progressively removed embedded Dolt in favor of server mode (`dolt sql-server`). Version 0.56 removed CGO entirely. Server mode is a regression for standalone desktop apps: no file watcher support, requires polling, server lifecycle management, single-project-per-port limitation.
-- **Pre-compiled binaries from GitHub releases (0.50+) lack CGO** — even versions that still have embedded Dolt in source code (0.50–0.55) ship without CGO in their release binaries, making embedded mode non-functional.
-- **The branch `feat/bd-056-server-mode`** contains all the work to support bd 0.56 (server mode detection, adaptive polling fix, migration logic, DoltServerBanner). It can be merged if/when bd provides a viable path for standalone apps (e.g., change notification mechanism, multi-database server support).
-- **GitHub issue [#2050](https://github.com/steveyegge/beads/issues/2050)** tracks our feedback to the bd team about server mode regressions.
-- Always preserve backward compatibility with bd 0.49 — use version-gated helpers (`supports_bd_sync()`, `supports_daemon_flag()`, etc.) in the Rust backend to branch behavior by CLI version.
+### CLI Policy (bd first)
+- **`bd` (Go, [steveyegge/beads](https://github.com/steveyegge/beads)) is the primary and default CLI.** Target **bd 1.x** — that is what the maintainer runs and what new features are built against.
+- **Warn on bd < 1.0.** Pre-1.0 versions (0.49 SQLite/JSONL, 0.50–0.56 embedded-Dolt/server-mode transition) are legacy. The app should keep working where the version-gated helpers already allow it, but surface a warning to the user (see `check_bd_compatibility` in `src-tauri/src/lib.rs`) rather than silently degrading.
+- **`br` (Rust, [beads_rust](https://github.com/Dicklesworthstone/beads_rust)) remains supported** as a secondary CLI and can be selected in Settings. It is not a priority: do not block bd work on br parity, but do not break br detection or the `CliClient::Br` code paths either.
+- **Default binary**: auto-detection probes `bd` first, then `br`, and falls back to `bd` when neither is found. The probe must use `get_extended_path()` so GUI launches (Finder/Dock, minimal PATH) resolve Homebrew/Go/Cargo installs.
+- **History**: the original author pinned bd 0.49.x and recommended br because bd 0.50–0.56 removed embedded Dolt in favor of server mode (see [beads#2050](https://github.com/steveyegge/beads/issues/2050)). This project is now maintained independently and follows current bd. The branch `feat/bd-056-server-mode` holds earlier server-mode work (detection, adaptive polling, migration, DoltServerBanner) and can be mined when needed.
 
 ### bd Backward Compatibility
-- Never assume all projects use Dolt — check `project_uses_dolt()` before skipping legacy paths
+- Never assume all projects use Dolt — check `project_uses_dolt()` before skipping legacy paths (br and legacy bd projects are SQLite/JSONL)
 - Use version-gated helpers in `src-tauri/src/lib.rs` for any feature that depends on a specific bd version
 
 ### Logging
@@ -71,7 +70,7 @@ Always kill zombies before starting: `pkill -f "beads-issue-tracker" 2>/dev/null
 5. **Update `.claude/codebase-map.md`** to reflect any structural changes (new files, composables, commands, etc.)
 
 **Release notes must include:**
-- bd compatibility version (e.g., `> Requires **bd 0.49.x** — do not use bd 0.50–0.56+`)
+- bd compatibility version (e.g., `> Requires **bd 1.x**. bd < 1.0 is legacy and triggers a warning. br is supported as a secondary CLI.`)
 - **Never upload DMG manually** — GitHub Actions handles artifacts
 - macOS unsigned certificate notice:
   ```

@@ -5,24 +5,18 @@ A lightweight, standalone desktop application for managing [Beads](https://githu
 ![Beads Task-Issue Tracker](docs/screenshots/app-overview-1.23.0.png)
 
 > [!NOTE]
-> <a href="https://pair.w3dev.fr"><picture><source media="(prefers-color-scheme: dark)" srcset="https://pair.w3dev.fr/logo-dark.png"><source media="(prefers-color-scheme: light)" srcset="https://pair.w3dev.fr/logo-light.png"><img src="https://pair.w3dev.fr/logo-light.png" alt="PaiR" height="32"></picture></a>
+> **Maintenance status.** This repository is now maintained independently as a desktop GUI for the [`bd`](https://github.com/steveyegge/beads) CLI (bd 1.x). The original author has moved on to [PaiR](https://pair.w3dev.fr), a separate product with its own CLI and storage format — if you want that direction, see the PaiR releases at [w3dev33/pair-dist](https://github.com/w3dev33/pair-dist/releases).
 >
-> **This project's successor is [PaiR](https://pair.w3dev.fr)** — latest release: **[v0.26.0](https://github.com/w3dev33/pair-dist/releases/tag/v0.26.0)** for macOS (ARM64 + Intel), Linux (amd64 + arm64), and Windows.
->
-> As the Beads ecosystem evolves toward autonomous multi-agent orchestration, we believe the transition should be progressive. Most developers today work **with** AI, not behind it — they need to see what's happening, understand it, and stay in control. That's what PaiR is built for: a smooth, step-by-step transition from pair programming to broader AI delegation, without losing visibility along the way.
->
-> PaiR is fully independent: built-in CLI, own storage format (`.pair/`), zero external dependencies. Your existing `.beads/` data is never modified or overwritten — PaiR stores everything in its own directory. **Migration is automatic** for projects using `bd` 0.49.x (pre-Dolt) or `br` up to 0.1.33. Projects running `bd` 0.50+ (Dolt-based) are not currently supported for migration.
->
-> The Beads Task-Issue Tracker remains available and functional with `bd` 0.49.x and `br` up to 0.1.33, but active development has moved to PaiR.
+> Here, the focus is: follow current `bd`, keep `br` working as a secondary CLI, and stay a lightweight human control panel over `.beads/`.
 
 ## Why This App?
 
-[Beads](https://github.com/steveyegge/beads) is an AI-native issue tracker that stores issues directly in your codebase (in a `.beads` folder). Compatible with both [`br`](https://github.com/Dicklesworthstone/beads_rust) (Rust, recommended) and [`bd`](https://github.com/steveyegge/beads) (Go).
+[Beads](https://github.com/steveyegge/beads) is an AI-native issue tracker that stores issues directly in your codebase (in a `.beads` folder). Built for [`bd`](https://github.com/steveyegge/beads) (Go, 1.x); also works with [`br`](https://github.com/Dicklesworthstone/beads_rust) (Rust) as a secondary CLI.
 
 > [!IMPORTANT]
 > **A human interface for AI-piloted issue tracking**
 >
-> The Beads CLI (`br` or `bd`) is designed for AI agents — they create issues, update statuses, and pilot workflows programmatically. But **humans need visibility and control** over what the AI is doing.
+> The Beads CLI (`bd` or `br`) is designed for AI agents — they create issues, update statuses, and pilot workflows programmatically. But **humans need visibility and control** over what the AI is doing.
 >
 > This application lets you **observe** what the AI is driving, and **step in** to edit, correct, or redirect at any point. The workflow is collaborative — the AI pilots through the CLI, and you use this app as your control panel.
 >
@@ -80,7 +74,7 @@ The app uses a **native file watcher** on the `.beads` directory. When an AI age
 - **Zoom Controls**: Adjust UI scale from 75% to 150% (Alt+Click to reset)
 
 ### Settings & Tools
-- **Dual CLI support**: Auto-detects [`br`](https://github.com/Dicklesworthstone/beads_rust) (Rust, recommended) and [`bd`](https://github.com/steveyegge/beads) (Go) — switch between them via Settings (`Cmd/Ctrl+,`), feature profiles adapt automatically
+- **Dual CLI support**: Auto-detects [`bd`](https://github.com/steveyegge/beads) (Go, primary) and [`br`](https://github.com/Dicklesworthstone/beads_rust) (Rust, secondary) — switch between them via Settings (`Cmd/Ctrl+,`), feature profiles adapt automatically
 - **Theme System**: 4 themes — Classic Light, Classic Dark, Dark Flat, and Neon — with per-theme badge styling, glow effects, and one-click cycling via the header icon
 - **Debug Panel**: Live log viewer with auto-refresh, accessible via `Cmd/Ctrl+Shift+L`
 - **Database Repair**: Automatic detection and repair of schema migration issues
@@ -105,7 +99,7 @@ This means the attachment storage lives inside the `.beads` directory and gets v
 Beyond just viewing issues, this app is part of a broader development workflow powered by [Claude Code](https://claude.ai/code):
 
 - **Centralized task management**: Beads issues live in the codebase, making them accessible to AI coding assistants
-- **AI-driven development**: Claude Code can read, create, and update issues directly via `br` or `bd`, keeping context within the coding session
+- **AI-driven development**: Claude Code can read, create, and update issues directly via `bd` or `br`, keeping context within the coding session
 - **External bug sync**: Custom commands can import bugs from external systems (Jira, Redmine, etc.) into Beads
 - **Daily planning**: Quickly review and prioritize tasks for the day without switching contexts
 
@@ -113,41 +107,46 @@ Beyond just viewing issues, this app is part of a broader development workflow p
 
 > **Important**: This app requires a Beads CLI to be installed on your system. It acts as a graphical interface for the Beads command-line tool.
 
-### Recommended: `br` (beads_rust)
+### Primary: `bd` 1.x (Go)
 
-[**beads_rust**](https://github.com/Dicklesworthstone/beads_rust) (`br`) is our **recommended CLI** — it's faster, more optimized, and built on the proven SQLite + JSONL architecture. This is our primary choice going forward.
+[**bd**](https://github.com/steveyegge/beads) is the CLI this app is built and tested against. Use **bd 1.x**.
 
-1. **Install `br`** — follow the instructions at [github.com/Dicklesworthstone/beads_rust](https://github.com/Dicklesworthstone/beads_rust)
+1. **Install `bd`** — see the [beads repository](https://github.com/steveyegge/beads) for current instructions, e.g.
+   ```bash
+   brew install bd
+   # or
+   go install github.com/steveyegge/beads/cmd/bd@latest
+   ```
 
 2. **Initialize Beads in your project**
    ```bash
    cd your-project
-   br init
+   bd init
    ```
 
 3. **Verify installation**
    ```bash
-   br --version
+   bd --version
    ```
 
-The app **auto-detects** which CLI is installed. You can switch between `br` and `bd` at any time via **Settings** (`Cmd/Ctrl+,`).
+> **bd < 1.0 is legacy.** Versions 0.49.x (SQLite + JSONL) and 0.50–0.56 (embedded-Dolt / server-mode transition) may still work through the app's version-gated code paths, but they are not the target and the app will warn you. Upgrade to bd 1.x.
 
-### Also supported: `bd` 0.49.x (Go)
+The app **auto-detects** which CLI is installed (`bd` first, then `br`). You can switch between them at any time via **Settings** (`Cmd/Ctrl+,`).
 
-[**bd**](https://github.com/steveyegge/beads) (`bd`) version 0.49.x remains fully supported as a fallback. This is the last stable Go version with embedded Dolt and native file watcher support.
+### Secondary: `br` (beads_rust)
 
-> **Do not** upgrade to bd 0.50–0.56+ which switched to server mode, introducing regressions for standalone desktop use. See [beads#2050](https://github.com/steveyegge/beads/issues/2050) for details. If `bd` with Dolt regains comparable reactivity and performance in future versions, we'll reconsider.
+[**beads_rust**](https://github.com/Dicklesworthstone/beads_rust) (`br`) is a Rust CLI frozen on the classic SQLite + JSONL architecture. It remains supported and selectable in Settings, but it is not the priority: new features target `bd` first and `br` parity follows when practical.
 
 ```bash
-# Install bd (check the repo for the latest method)
-curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+cargo install beads_rust
+br --version
 ```
 
 ### Using Both Side by Side
 
 `br` and `bd` can be installed simultaneously. The app lets you switch between them at any time via Settings — useful for comparing behavior or transitioning gradually.
 
-If you use an AI coding assistant (Claude Code, Cursor, etc.) to pilot your issues, configure its skills/commands to use the CLI of your choice (`br` or `bd`). The app will reflect changes from either one in real time.
+If you use an AI coding assistant (Claude Code, Cursor, etc.) to pilot your issues, configure its skills/commands to use the CLI of your choice (`bd` or `br`). The app will reflect changes from either one in real time.
 
 ## Installation
 

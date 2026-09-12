@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+> Targets **bd 1.x**. bd < 1.0 is legacy and should trigger a warning. **br** remains supported as a secondary CLI.
+
+### Changes
+- **CLI policy: bd first.** This project is now maintained independently and follows current `bd` (1.x). `br` (beads_rust) stays supported but is no longer the recommended default. README, CLAUDE.md, and docs/philosophy.md updated accordingly
+- **CLI auto-detection prefers `bd`** and falls back to `bd` when no CLI is found (previously `br`). Users who set an explicit binary in Settings are unaffected
+
+### Fixes
+- **CLI not detected on GUI launch**: the `--version` probe now runs with the extended PATH, so opening the app from Finder/Dock finds Homebrew-installed CLIs instead of failing with "not found or not executable"
+
 ## [1.24.4] - 2026-04-08
 
 > Requires **bd 0.49.x**. Recommended CLI: **br** up to 0.1.33.
