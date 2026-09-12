@@ -1,0 +1,45 @@
+[atm]
+default_team = "bd-portal"
+
+# ── rmux: tmux session launcher ──────────────────────────────────────
+[rmux]
+session = "bd-portal"
+
+# Window 1: Core agents
+[[rmux.windows]]
+name = "agents"
+layout = "even-horizontal"
+
+[[rmux.windows.panes]]
+name = "team-lead"
+alias = "bd-lead"
+model = "sonnet"
+color = "blue"
+env = { ATM_IDENTITY = "team-lead", ATM_TEAM = "bd-portal" }
+
+[[rmux.windows.panes]]
+name = "tbd"
+command = "codex -c features.codex_hooks=true --yolo --model gpt-5.6-terra"
+env = { ATM_IDENTITY = "tbd", ATM_TEAM = "bd-portal" }
+
+[[rmux.windows.panes]]
+name = "quality-mgr"
+alias = "bd-quality-mgr"
+model = "sonnet"
+color = "blue"
+env = { ATM_IDENTITY = "quality-mgr", ATM_TEAM = "bd-portal" }
+
+# Window 2: Support agents
+[[rmux.windows]]
+name = "support"
+layout = "even-horizontal"
+
+[[rmux.windows.panes]]
+name = "lbd"
+command = "codex -c features.codex_hooks=true --yolo --model gpt-5.6-luna"
+env = { ATM_IDENTITY = "lbd", ATM_TEAM = "bd-portal" }
+
+[[rmux.windows.panes]]
+name = "sbd"
+command = "codex -c features.codex_hooks=true --yolo --model gpt-5.6-sol"
+env = { ATM_IDENTITY = "sbd", ATM_TEAM = "bd-portal" }
