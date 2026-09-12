@@ -864,7 +864,12 @@ fn select_default_binary<F: Fn(&str) -> Option<CliProbe>>(
 
 /// Parse `--version` stdout into a `CliProbe`. Pure.
 fn parse_cli_probe(stdout: &str) -> CliProbe {
-    let raw = stdout.lines().next().unwrap_or("").trim().to_string();
+    let raw = stdout
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_string();
     CliProbe {
         client: detect_cli_client(&raw),
         version: parse_bd_version(&raw),
@@ -1043,8 +1048,10 @@ fn detect_cli_client(version_str: &str) -> CliClient {
 /// Works for both "bd version 0.49.6 (Homebrew)" and "br 0.1.13 (rustc ...)".
 fn parse_bd_version(version_str: &str) -> Option<(u32, u32, u32)> {
     // Look for a semver-like pattern: digits.digits.digits
+    // Accept "1.2.3" and "v1.2.3" (some CLIs print a v-prefixed tag)
     let re_like = version_str
         .split_whitespace()
+        .map(|word| word.trim_start_matches(['v', 'V']))
         .find(|word| word.contains('.') && word.chars().next().map_or(false, |c| c.is_ascii_digit()));
 
     let version_part = re_like?;
@@ -5297,6 +5304,342 @@ mod tests {
         assert_eq!(parse_bd_version("bd version 1.2.3-fork"), Some((1, 2, 3)));
         assert_eq!(parse_bd_version("no version here"), None);
         assert_eq!(parse_bd_version("bd version 1.2"), None);
+    }
+
+    // ---- CLI auto-detection: edge cases -------------------------------------
+
+    #[test]
+    fn parse_probe_empty_and_whitespace_only_are_unknown() {
+        for input in ["", "   ", "\t", "  \n", "\n\n"] {
+            let p = parse_cli_probe(input);
+            assert_eq!(p.client, CliClient::Unknown, "input {input:?}");
+            assert_eq!(p.version, None, "input {input:?}");
+            assert_eq!(p.raw, "", "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn parse_probe_strips_crlf_line_endings() {
+        let p = parse_cli_probe("bd version 1.0.4 (abc)\r\n");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.raw, "bd version 1.0.4 (abc)");
+        assert!(!p.raw.contains('\r'));
+    }
+
+    #[test]
+    fn parse_probe_trims_surrounding_whitespace_on_first_line() {
+        let p = parse_cli_probe("  bd version 1.0.4 (abc)  \n");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.raw, "bd version 1.0.4 (abc)");
+    }
+
+    #[test]
+    fn parse_probe_skips_leading_blank_lines() {
+        let p = parse_cli_probe("\n  \nbd version 1.0.4 (abc)\n");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.raw, "bd version 1.0.4 (abc)");
+    }
+
+    #[test]
+    fn parse_probe_accepts_v_prefixed_version() {
+        let p = parse_cli_probe("bd v1.2.0");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 2, 0)));
+        assert_eq!(p.raw, "bd v1.2.0");
+        assert!(!is_legacy_bd(p.client, p.version));
+        assert_eq!(rank_cli_candidate(&p), 0);
+        assert_eq!(parse_bd_version("bd version V0.49.6"), Some((0, 49, 6)));
+    }
+
+    #[test]
+    fn parse_probe_br_banner_with_beads_rust_in_later_word() {
+        let p = parse_cli_probe("beads beads_rust 0.1.5 (rustc 1.85.0)\n");
+        assert_eq!(p.client, CliClient::Br);
+        assert_eq!(p.version, Some((0, 1, 5)));
+
+        let p = parse_cli_probe("cli beads-rust 0.2.0");
+        assert_eq!(p.client, CliClient::Br);
+        assert_eq!(p.version, Some((0, 2, 0)));
+    }
+
+    #[test]
+    fn parse_probe_bd_1x_prerelease_with_dotted_suffix() {
+        let p = parse_cli_probe("bd version 1.3.0-rc.1 (abc)\n");
+        assert_eq!(p.client, CliClient::Bd);
+        assert_eq!(p.version, Some((1, 3, 0)));
+        assert!(!is_legacy_bd(p.client, p.version));
+        assert_eq!(rank_cli_candidate(&p), 0);
+    }
+
+    #[test]
+    fn detect_cli_client_is_case_insensitive() {
+        assert_eq!(detect_cli_client("BD version 1.0.0"), CliClient::Bd);
+        assert_eq!(detect_cli_client("Bd Version 1.0.0"), CliClient::Bd);
+        assert_eq!(detect_cli_client("Br 0.1.0"), CliClient::Br);
+        assert_eq!(detect_cli_client("BR 0.1.0 (rustc)"), CliClient::Br);
+        assert_eq!(detect_cli_client("x BEADS_RUST 0.1.0"), CliClient::Br);
+        assert_eq!(parse_bd_version("BD version 1.0.0"), Some((1, 0, 0)));
+    }
+
+    #[test]
+    fn detect_cli_client_requires_word_boundary_prefix() {
+        // "bdx" / "brx" are not bd / br
+        assert_eq!(detect_cli_client("bdx 1.0.0"), CliClient::Unknown);
+        assert_eq!(detect_cli_client("brx 1.0.0"), CliClient::Unknown);
+        assert_eq!(detect_cli_client("bd"), CliClient::Unknown);
+    }
+
+    #[test]
+    fn select_picks_best_ranked_candidate_when_it_is_last() {
+        let sel = select_default_binary(&["a", "b", "c"], "fb", |bin| match bin {
+            "a" => Some(probe(CliClient::Unknown, None)),
+            "b" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            "c" => Some(probe(CliClient::Bd, Some((1, 0, 4)))),
+            _ => None,
+        });
+        assert_eq!(sel.binary, "c");
+        assert_eq!(sel.probe.as_ref().map(|p| p.client), Some(CliClient::Bd));
+        assert!(!sel.is_legacy());
+    }
+
+    #[test]
+    fn select_legacy_bd_last_beats_earlier_br() {
+        let sel = select_default_binary(&["br", "bd"], "fb", |bin| match bin {
+            "br" => Some(probe(CliClient::Br, Some((0, 1, 33)))),
+            "bd" => Some(probe(CliClient::Bd, Some((0, 49, 6)))),
+            _ => None,
+        });
+        assert_eq!(sel.binary, "bd");
+        assert!(sel.is_legacy());
+    }
+
+    #[test]
+    fn select_all_unknown_picks_first_found_not_fallback() {
+        let sel = select_default_binary(&["x", "y", "z"], "fb", |_| Some(probe(CliClient::Unknown, None)));
+        assert_eq!(sel.binary, "x", "a found-but-unknown binary still beats the fallback");
+        assert!(sel.probe.is_some());
+        assert_eq!(sel.probe.as_ref().map(|p| p.client), Some(CliClient::Unknown));
+        assert!(!sel.is_legacy());
+    }
+
+    #[test]
+    fn select_empty_candidate_list_returns_fallback() {
+        // Even a probe that would always succeed is never consulted.
+        let sel = select_default_binary(&[], "fb", |_| Some(probe(CliClient::Bd, Some((1, 0, 0)))));
+        assert_eq!(sel.binary, "fb");
+        assert!(sel.probe.is_none());
+        assert!(!sel.is_legacy());
+    }
+
+    #[test]
+    fn select_probe_called_once_per_candidate_in_order() {
+        use std::cell::RefCell;
+        let seen = RefCell::new(Vec::new());
+        let sel = select_default_binary(&["one", "two", "three"], "fb", |bin| {
+            seen.borrow_mut().push(bin.to_string());
+            None
+        });
+        assert_eq!(*seen.borrow(), vec!["one", "two", "three"]);
+        assert_eq!(sel.binary, "fb");
+    }
+
+    #[test]
+    fn select_ignores_fallback_name_when_probing() {
+        // The fallback is a name, not a candidate: it must not be probed.
+        let sel = select_default_binary(&["only"], "fallback-not-probed", |bin| {
+            assert_ne!(bin, "fallback-not-probed");
+            None
+        });
+        assert_eq!(sel.binary, "fallback-not-probed");
+    }
+
+    #[test]
+    fn legacy_boundary_at_exact_floor() {
+        assert!(!is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR, 0, 0))));
+        assert!(is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR - 1, 99, 99))));
+        // Minor/patch never influence the decision.
+        assert!(!is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR, 99, 99))));
+        assert!(is_legacy_bd(CliClient::Bd, Some((MIN_SUPPORTED_BD_MAJOR - 1, 0, 0))));
+        // Version is irrelevant for non-bd clients even at 0.0.0.
+        assert!(!is_legacy_bd(CliClient::Br, Some((0, 0, 0))));
+        assert!(!is_legacy_bd(CliClient::Br, None));
+        assert!(!is_legacy_bd(CliClient::Unknown, Some((0, 0, 0))));
+    }
+
+    #[test]
+    fn cli_selection_is_legacy_follows_probe() {
+        let legacy = CliSelection { binary: "bd".into(), probe: Some(probe(CliClient::Bd, Some((0, 49, 6)))) };
+        assert!(legacy.is_legacy());
+        let unparsable = CliSelection { binary: "bd".into(), probe: Some(probe(CliClient::Bd, None)) };
+        assert!(unparsable.is_legacy());
+        let ok = CliSelection { binary: "bd".into(), probe: Some(probe(CliClient::Bd, Some((1, 0, 0)))) };
+        assert!(!ok.is_legacy());
+        let br = CliSelection { binary: "br".into(), probe: Some(probe(CliClient::Br, Some((0, 1, 0)))) };
+        assert!(!br.is_legacy());
+        let none = CliSelection { binary: "bd".into(), probe: None };
+        assert!(!none.is_legacy());
+    }
+
+    #[test]
+    fn warnings_for_0_49_x_have_no_dolt_note() {
+        for v in [(0, 49, 0), (0, 49, 6), (0, 49, 99)] {
+            let w = cli_compatibility_warnings(CliClient::Bd, Some(v));
+            assert_eq!(w.len(), 1, "{v:?}: {w:?}");
+            assert!(w[0].contains(&format!("bd {}.{}.{}", v.0, v.1, v.2)), "{w:?}");
+            assert!(!w.iter().any(|m| m.contains("Dolt")), "{w:?}");
+        }
+    }
+
+    #[test]
+    fn warnings_for_0_50_through_0_56_include_dolt_note() {
+        for v in [(0, 50, 0), (0, 53, 2), (0, 56, 9), (0, 99, 0)] {
+            let w = cli_compatibility_warnings(CliClient::Bd, Some(v));
+            assert_eq!(w.len(), 2, "{v:?}: {w:?}");
+            assert!(w[0].contains(&format!("bd {}.{}.{}", v.0, v.1, v.2)), "{w:?}");
+            assert!(w[0].contains("legacy"), "{w:?}");
+            assert!(w[1].contains("Dolt"), "{w:?}");
+            assert!(w[1].contains("polling"), "{w:?}");
+        }
+    }
+
+    #[test]
+    fn warnings_mention_supported_floor_for_unparsable_bd() {
+        let w = cli_compatibility_warnings(CliClient::Bd, None);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains(&format!("bd {}.x", MIN_SUPPORTED_BD_MAJOR)), "{w:?}");
+    }
+
+    #[test]
+    fn warnings_for_br_and_unknown_ignore_version() {
+        assert_eq!(cli_compatibility_warnings(CliClient::Br, None).len(), 1);
+        assert_eq!(cli_compatibility_warnings(CliClient::Br, Some((9, 9, 9))).len(), 1);
+        assert_eq!(cli_compatibility_warnings(CliClient::Unknown, Some((1, 0, 0))).len(), 1);
+        assert_eq!(cli_compatibility_warnings(CliClient::Unknown, None).len(), 1);
+    }
+
+    #[test]
+    fn extended_path_entries_contain_platform_install_dirs_in_order() {
+        let entries = extended_path_entries();
+        assert!(entries.iter().all(|e| !e.is_empty()), "empty entry: {entries:?}");
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let idx = |needle: &str| {
+                entries
+                    .iter()
+                    .position(|e| e == needle)
+                    .unwrap_or_else(|| panic!("missing {needle}: {entries:?}"))
+            };
+            let homebrew = idx("/opt/homebrew/bin");
+            let usr_local = idx("/usr/local/bin");
+            let usr_bin = idx("/usr/bin");
+            assert!(homebrew < usr_local, "order not preserved: {entries:?}");
+            assert!(usr_local < usr_bin, "order not preserved: {entries:?}");
+            assert!(entries.iter().any(|e| e.ends_with("/.cargo/bin")), "{entries:?}");
+            assert!(
+                entries.iter().any(|e| e.ends_with("/bin") && (e.contains("/go/") || env::var("GOPATH").is_ok())),
+                "missing go bin dir: {entries:?}"
+            );
+        }
+        #[cfg(target_os = "windows")]
+        {
+            assert!(entries.iter().any(|e| e.ends_with(r"\go\bin")), "{entries:?}");
+            assert!(entries.iter().any(|e| e.ends_with(r"\.cargo\bin")), "{entries:?}");
+            assert!(entries.iter().any(|e| e.ends_with(r"\.local\bin")), "{entries:?}");
+            let go = entries.iter().position(|e| e.ends_with(r"\go\bin")).unwrap();
+            let cargo = entries.iter().position(|e| e.ends_with(r"\.cargo\bin")).unwrap();
+            assert!(go < cargo, "order not preserved: {entries:?}");
+        }
+    }
+
+    #[test]
+    fn extended_path_entries_precede_ambient_path() {
+        // The extra install dirs must come before whatever PATH the process
+        // inherited, so a GUI launch with a minimal PATH still finds bd.
+        let entries = extended_path_entries();
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(entries.first().map(String::as_str), Some("/opt/homebrew/bin"));
+        #[cfg(target_os = "windows")]
+        assert!(entries.first().map(|e| e.ends_with(r"\AppData\Local\bin")).unwrap_or(false), "{entries:?}");
+    }
+
+    #[test]
+    fn cli_client_name_mapping() {
+        assert_eq!(cli_client_name(CliClient::Bd), "bd");
+        assert_eq!(cli_client_name(CliClient::Br), "br");
+        assert_eq!(cli_client_name(CliClient::Unknown), "unknown");
+    }
+
+    #[test]
+    fn compatibility_info_arrays_and_null_tuple_serialize() {
+        let info = CompatibilityInfo {
+            binary: "bd".into(),
+            found: false,
+            version: "bd not found".into(),
+            client_type: cli_client_name(CliClient::Unknown).into(),
+            version_tuple: None,
+            legacy: false,
+            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
+            supports_daemon_flag: false,
+            uses_jsonl_files: false,
+            uses_dolt_backend: false,
+            supports_list_all_flag: false,
+            searched_paths: vec!["/a".into(), "/b".into()],
+            warnings: vec!["w1".into(), "w2".into()],
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert!(json["warnings"].is_array());
+        assert_eq!(json["warnings"].as_array().unwrap().len(), 2);
+        assert!(json["searchedPaths"].is_array());
+        assert_eq!(json["searchedPaths"], serde_json::json!(["/a", "/b"]));
+        // Present and null, not omitted: the frontend distinguishes "unknown" from "missing key".
+        assert!(json.as_object().unwrap().contains_key("versionTuple"));
+        assert!(json["versionTuple"].is_null());
+        assert_eq!(json["found"], serde_json::json!(false));
+        assert_eq!(json["clientType"], serde_json::json!("unknown"));
+        assert_eq!(json["minSupportedMajor"], serde_json::json!(MIN_SUPPORTED_BD_MAJOR));
+    }
+
+    #[test]
+    fn compatibility_info_empty_arrays_serialize_as_empty_not_null() {
+        let info = CompatibilityInfo {
+            binary: "bd".into(),
+            found: true,
+            version: "bd version 1.0.4".into(),
+            client_type: "bd".into(),
+            version_tuple: Some(vec![1, 0, 4]),
+            legacy: false,
+            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
+            supports_daemon_flag: false,
+            uses_jsonl_files: false,
+            uses_dolt_backend: true,
+            supports_list_all_flag: true,
+            searched_paths: vec![],
+            warnings: vec![],
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["warnings"], serde_json::json!([]));
+        assert_eq!(json["searchedPaths"], serde_json::json!([]));
+        assert_eq!(json["versionTuple"], serde_json::json!([1, 0, 4]));
+    }
+
+    #[test]
+    fn probe_returns_none_for_nonexistent_relative_path() {
+        // A candidate containing a path separator bypasses PATH lookup entirely,
+        // so this is None on every platform regardless of what is installed.
+        assert!(probe_cli_binary("./definitely/not/here").is_none());
+        #[cfg(target_os = "windows")]
+        assert!(probe_cli_binary(r".\definitely\not\here.exe").is_none());
+        #[cfg(not(target_os = "windows"))]
+        assert!(probe_cli_binary("/definitely/not/here").is_none());
+    }
+
+    #[test]
+    fn probe_returns_none_for_empty_binary_name() {
+        assert!(probe_cli_binary("").is_none());
     }
 
     fn minimal_issue_json(id: &str, title: &str) -> String {
