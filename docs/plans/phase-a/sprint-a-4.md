@@ -4,7 +4,7 @@ title: btit adopts the sc-observability-log bridge
 status: planned
 branch: feature/sprint-a-4-btit-adoption
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption
-target: develop
+target: integrate/phase-a
 recommended_model: standard (bounded integration; UI renderer is pure logic)
 dependency_relations:
   - prerequisite: a-1
@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-1 PR merged to `develop`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
+- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
 - a-2 and a-3 are **not** prerequisites (`parallel_safe`).
 
 ## Dependency Relations
@@ -55,7 +55,7 @@ PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 - a-4 ↔ a-3 — `parallel_safe`: same ownership split as a-2.
 - a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit; a-4 PR merges before a-5 development starts.
 
-Stack: `none (single PR on develop, created after the a-1 PR merges)`.
+Stack: `none (single PR on integrate/phase-a, created after the a-1 PR merges)`.
 
 ## Exact Targets
 
@@ -300,7 +300,7 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 ## Acceptance Criteria
 
 1. `tauri-plugin-log` appears nowhere in `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` or `src-tauri/src`.
-2. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changes. `git diff develop...HEAD` shows no changed lines matching those patterns, other than in `logging.rs` (`log_frontend`, `on_run_event`, `clear_logs`).
+2. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changes. `git diff integrate/phase-a...HEAD` shows no changed lines matching those patterns, other than in `logging.rs` (`log_frontend`, `on_run_event`, `clear_logs`).
 3. The built app writes `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`. Startup records carry the expected `target`, and bracket-tagged records carry the tag as `action`. Evidence is in the PR description.
 4. `read_logs`, `export_logs`, `clear_logs` and `get_log_path_string` work on the JSONL file. `clear_logs` truncates the active file and removes rotated files, and logging continues afterwards. Evidence is in the PR description.
 5. `formatLogLine`/`formatLogLines` tests pass, and the debug panel shows rendered, colorized lines.
@@ -320,6 +320,6 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 - `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets`
 - `! grep -nE '\.unwrap\(\)|\.expect\(|panic!|unreachable!|todo!|unimplemented!|eprintln!|println!' src-tauri/src/lib.rs src-tauri/src/logging.rs`
 - `python3 scripts/check_version_sync.py`
-- `git diff --exit-code develop...HEAD -- crates/`
+- `git diff --exit-code integrate/phase-a...HEAD -- crates/`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets`
 - `pnpm tauri:build` (manual verification per Required Work)

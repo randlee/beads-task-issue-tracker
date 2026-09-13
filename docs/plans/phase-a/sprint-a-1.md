@@ -4,7 +4,7 @@ title: sc-observability-log crate — log bridge
 status: planned
 branch: feature/sprint-a-1-log-bridge
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (global logger lifecycle, cross-platform CI)
 dependency_relations:
   - prerequisite: PR #36
@@ -50,7 +50,7 @@ PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 - a-1 → a-2 — `must_follow` (a-2 follows a-1): a-2 macros expand to a-1 `__private::{EventParts, enabled, emit, record_drop}` and label through the a-1 `mapping.rs` sanitizer (`__private::{target_label, action_label, field_key_label}`).
 - a-1 → a-4 — `must_follow` (a-4 follows a-1): a-4 consumes the frozen a-1 public API and runtime dependency graph; a-4 starts after the a-1 PR merges.
 
-Stack: `phase-a-core · layer 1 (trunk develop)`.
+Stack: `phase-a-core · layer 1 (trunk integrate/phase-a)`.
 
 ## Exact Targets
 

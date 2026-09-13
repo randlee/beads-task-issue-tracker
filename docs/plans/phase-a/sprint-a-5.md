@@ -4,7 +4,7 @@ title: sc-observability team critical review (btit-side closure)
 status: planned
 branch: feature/sprint-a-5-sc-review
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-5-sc-review
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (review triage, API-level fixes across both crates)
 dependency_relations:
   - prerequisite: a-3
@@ -14,7 +14,7 @@ dependency_relations:
   - prerequisite: a-4
     dependent: a-5
     relation: must_follow
-    rationale: "the review covers the crates as adopted by a real consumer; a-4 PR merged and the stack rebased onto develop before a-5 development starts"
+    rationale: "the review covers the crates as adopted by a real consumer; a-4 PR merged and the stack rebased onto integrate/phase-a before a-5 development starts"
   - prerequisite: a-5
     dependent: a-6
     relation: must_follow
@@ -40,7 +40,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-3 is pushed (it is the stack parent). The a-4 PR is merged to `develop`, and the `phase-a-core` layers have been rebased onto that `develop` before development starts.
+- a-3 is pushed (it is the stack parent). The a-4 PR is merged to `integrate/phase-a`, and the `phase-a-core` layers have been rebased onto that `integrate/phase-a` before development starts.
 - Review coordination runs over ATM between btit `team-lead` (team `bit`, `.atm.toml`) and `cobs` on team `sc-observability` (`../sc-observability/.atm.toml`), following `../sc-observability/docs/team-protocol.md` (ack on receipt, completion message, receiver ack). btit `team-lead` sends the review request and receives findings; `cobs` owns the review on the sc-observability side, including which of that team's reviewers it involves.
 
 ## Dependency Relations
@@ -50,7 +50,7 @@ merge parent → child before every dev/fix round. PR-completion trigger: parent
 PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 
 - a-3 → a-5 — `must_follow` (a-5 follows a-3): the review covers the complete crate API; stack parent.
-- a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit. The a-4 PR merges, and the stack is rebased onto `develop`, before a-5 development starts.
+- a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit. The a-4 PR merges, and the stack is rebased onto `integrate/phase-a`, before a-5 development starts.
 - a-5 → a-6 — `must_follow` (a-6 follows a-5): a-6 copies the reviewed, fixed crates.
 
 Stack: `phase-a-core` · layer 4.
@@ -71,7 +71,7 @@ the scope this sprint claims. If that cannot be done cleanly in one sprint, the
 sprint must be split before implementation begins. No deliverable may be
 silently dropped or partially deferred.
 
-1. **Review anchor.** Before sending the request, btit `team-lead` pushes the annotated tag `phase-a/review-a-5-r1` on the a-5 branch head (after the rebase onto `develop`). The tag keeps the reviewed commit reachable after later rebases; `review-a-5.md` records the tag and the content hash `git rev-parse phase-a/review-a-5-r1:crates` (a tree hash, which identifies the reviewed crate content independently of history rewrites).
+1. **Review anchor.** Before sending the request, btit `team-lead` pushes the annotated tag `phase-a/review-a-5-r1` on the a-5 branch head (after the rebase onto `integrate/phase-a`). The tag keeps the reviewed commit reachable after later rebases; `review-a-5.md` records the tag and the content hash `git rev-parse phase-a/review-a-5-r1:crates` (a tree hash, which identifies the reviewed crate content independently of history rewrites).
 2. **Review request.** btit `team-lead` sends it over ATM to `cobs` (`atm send cobs --team sc-observability …`) for the tag. It covers the crate paths, `docs/mapping.md`, `docs/compatibility.md`, `docs/field-value-dispatch.md`, btit's adoption diff from a-4, and the explicit review items below.
 3. **`review-a-5.md`.** Lists every finding with id, reviewer, severity (Blocking / Important / Minor), file:line at the review tag, and disposition (`fixed` or `rejected — reviewer agreed <message ref>`). A `fixed` disposition is proven by a commit on the branch whose message carries the trailer `Review-Finding: R-NNN`, not by a SHA, so it survives the rebase cascade.
 4. **Fixes.** Every Blocking and Important finding is fixed, and the full `crates` and btit gate sets are re-run after the last fix. Each Minor finding is either fixed, or recorded in `review-a-5.md` as a follow-up for a-6 or the sc-observability backlog.
@@ -146,7 +146,7 @@ Co-Authored-By: ...
 ## Acceptance Criteria
 
 1. `review-a-5.md` exists, with `review_tag`, `reviewed_crates_tree`, every finding in the table format above, and `open_blocking: 0`, `open_important: 0`. The tag is on `origin`: `git ls-remote --tags origin refs/tags/phase-a/review-a-5-r1` is non-empty and its object id equals the local `git rev-parse refs/tags/phase-a/review-a-5-r1` (the annotated tag object). `git rev-parse phase-a/review-a-5-r1:crates` equals `reviewed_crates_tree`.
-2. Every `fixed` disposition `R-NNN` has at least one commit whose message contains `Review-Finding: R-NNN`, reachable from the pushed branch head. The check runs before merge, after `git fetch origin develop feature/sprint-a-5-sc-review`, with the local `HEAD` equal to `origin/feature/sprint-a-5-sc-review`, and `git log -F --grep "Review-Finding: R-NNN" --format=%H origin/develop..origin/feature/sprint-a-5-sc-review` is non-empty for each id (the trailer command in Required Validation).
+2. Every `fixed` disposition `R-NNN` has at least one commit whose message contains `Review-Finding: R-NNN`, reachable from the pushed branch head. The check runs before merge, after `git fetch origin integrate/phase-a feature/sprint-a-5-sc-review`, with the local `HEAD` equal to `origin/feature/sprint-a-5-sc-review`, and `git log -F --grep "Review-Finding: R-NNN" --format=%H origin/integrate/phase-a..origin/feature/sprint-a-5-sc-review` is non-empty for each id (the trailer command in Required Validation).
 3. The type-placement table has a decision and an allowed-duplicate-names entry for all seven item groups, and `allowed_duplicate_names` is present.
 4. Every explicit review item in Deliverable 6 has a recorded position.
 5. The ATM review-request and `cobs` re-review confirmation message references are recorded.
@@ -178,7 +178,7 @@ Run from the repo root in bash.
 - `git diff --check`
 
 **review anchor and trailers** (run before merge, against the pushed branch)
-- `git fetch origin develop feature/sprint-a-5-sc-review && test "$(git rev-parse HEAD)" = "$(git rev-parse origin/feature/sprint-a-5-sc-review)"`
+- `git fetch origin integrate/phase-a feature/sprint-a-5-sc-review && test "$(git rev-parse HEAD)" = "$(git rev-parse origin/feature/sprint-a-5-sc-review)"`
 - `test -n "$(git ls-remote --tags origin refs/tags/phase-a/review-a-5-r1)" && test "$(git ls-remote --tags origin refs/tags/phase-a/review-a-5-r1 | cut -f1)" = "$(git rev-parse refs/tags/phase-a/review-a-5-r1)"`
 - `test "$(git rev-parse phase-a/review-a-5-r1:crates)" = "$(sed -n 's/^reviewed_crates_tree: //p' docs/plans/phase-a/review-a-5.md)"`
-- `for id in $(sed -nE 's/^[|] (R-[0-9]{3}) [|].*[|] fixed .*$/\1/p' docs/plans/phase-a/review-a-5.md); do test -n "$(git log -F --grep "Review-Finding: $id" --format=%H origin/develop..origin/feature/sprint-a-5-sc-review)" || { echo "no Review-Finding commit for $id"; exit 1; }; done`
+- `for id in $(sed -nE 's/^[|] (R-[0-9]{3}) [|].*[|] fixed .*$/\1/p' docs/plans/phase-a/review-a-5.md); do test -n "$(git log -F --grep "Review-Finding: $id" --format=%H origin/integrate/phase-a..origin/feature/sprint-a-5-sc-review)" || { echo "no Review-Finding commit for $id"; exit 1; }; done`

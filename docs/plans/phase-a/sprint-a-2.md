@@ -4,7 +4,7 @@ title: sc-observability-log-macros — tracing-compatible event macros
 status: planned
 branch: feature/sprint-a-2-event-macros
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (proc-macro parsing of the tracing field grammar)
 dependency_relations:
   - prerequisite: a-1
@@ -427,7 +427,7 @@ workspace = true
 
 ## Required Validation
 
-Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-1-log-bridge` before the a-1 PR merges and `origin/develop` after.
+Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-1-log-bridge` before the a-1 PR merges and `origin/integrate/phase-a` after.
 
 - `cargo fmt --check --all --manifest-path crates/Cargo.toml`
 - `cargo clippy --locked --manifest-path crates/Cargo.toml --workspace --all-targets --all-features -- -D warnings`

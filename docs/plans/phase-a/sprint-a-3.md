@@ -4,7 +4,7 @@ title: "#[instrument] — tracing-compatible attribute"
 status: planned
 branch: feature/sprint-a-3-instrument
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-3-instrument
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (sync/async codegen, trace context propagation)
 dependency_relations:
   - prerequisite: a-2
@@ -414,7 +414,7 @@ async fn bd_update(id: String, cwd: String, payload: UpdatePayload) -> Result<Is
 
 ## Required Validation
 
-Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-2-event-macros` while a-2 is unmerged and `origin/develop` after.
+Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-2-event-macros` while a-2 is unmerged and `origin/integrate/phase-a` after.
 
 - `cargo fmt --check --all --manifest-path crates/Cargo.toml`
 - `cargo clippy --locked --manifest-path crates/Cargo.toml --workspace --all-targets --all-features -- -D warnings`
