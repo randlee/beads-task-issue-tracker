@@ -122,9 +122,13 @@ jobs:
         run: cargo test --locked --manifest-path crates/Cargo.toml --workspace
 
       # The remaining steps are host-independent, so they run once, on Linux, in bash.
+      # CARGO_TERM_COLOR=always (set by the toolchain/cache actions) colors cargo tree's
+      # `(*)` marker, which the sed filter would then miss.
       - name: Runtime dependency graph
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          CARGO_TERM_COLOR: never
         run: cargo tree --locked --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --target all --prefix none --format '{p}' | sed -E 's/ \(.*$//' | LC_ALL=C sort -u | diff - crates/runtime-deps.txt
 
       - name: Test-isolation contract
