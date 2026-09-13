@@ -1,7 +1,7 @@
 ---
 id: a-1
 title: sc-observability-log crate — log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-1-log-bridge
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge
 target: integrate/phase-a
