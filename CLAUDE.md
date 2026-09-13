@@ -52,10 +52,10 @@ All steps mandatory. Work is NOT complete until `git push` succeeds.
 
 ### Logging
 - **Never use `console.log`** — always use the native logger so logs end up in the app log file.
-- **Frontend (TypeScript)**: `logFrontend('info', '[context] message')` — import from `~/utils/bd-api`. Calls the Rust `log_frontend` Tauri command which writes via `log::info!("[frontend] ...")`.
+- **Frontend (TypeScript)**: `logFrontend('info', '[context] message')` — import from `~/utils/bd-api`. Calls the Rust `log_frontend` Tauri command, which logs through the `sc-observability-log` bridge with `target: "frontend"`; a leading `[tag]` in the message becomes the record's `action`.
 - **Backend (Rust)**: `log_info!("[context] message")`, `log_error!(...)` macros — write directly to the native log.
 - Levels: `'info'`, `'warn'`, `'error'`
-- **Log file**: `~/Library/Logs/com.beads.manager/beads.log` — readable via `tail -f` or in the app.
+- **Log file**: `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl` (macOS: `~/Library/Logs/com.beads.manager/logs/beads-task-issue-tracker.log.jsonl`) — structured JSONL written by `sc_observability_log::init` (phase-a); the debug panel renders it through `app/utils/log-format.ts`.
 
 ### Dev Server
 Always kill zombies before starting: `pkill -f "beads-issue-tracker" 2>/dev/null && pnpm tauri:dev`

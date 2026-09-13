@@ -16,6 +16,7 @@ mod polling;
 mod issue_commands;
 mod fs_commands;
 
+use std::io::Write as _;
 use std::sync::Mutex;
 use watcher::WatcherState;
 
@@ -28,30 +29,12 @@ pub fn run() {
     // Load .env file (dev only — in prod there's no .env, env vars come from the system)
     let _ = dotenvy::dotenv();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(Mutex::new(WatcherState::default()))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Enable logging in both debug and release builds
-            let log_level = if cfg!(debug_assertions) {
-                log::LevelFilter::Debug
-            } else {
-                log::LevelFilter::Info
-            };
-            app.handle().plugin(
-                tauri_plugin_log::Builder::default()
-                    .level(log_level)
-                    .max_file_size(5_000_000) // 5 MB max per log file
-                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne) // Keep only one backup
-                    .target(tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::LogDir { file_name: Some("beads.log".into()) },
-                    ))
-                    .target(tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::Stdout,
-                    ))
-                    .build(),
-            )?;
+            logging::install_logging(app)?;
 
             // Log startup info
             log::info!("=== Beads Task-Issue Tracker starting ===");
@@ -60,7 +43,9 @@ pub fn run() {
             // Load config and set CLI binary (auto-detects br→bd if no config exists)
             let config = config::load_config();
             log::info!("[startup] CLI binary: {}", config.cli_binary);
-            *config::CLI_BINARY.lock().unwrap() = config.cli_binary.clone();
+            *config::CLI_BINARY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = config.cli_binary.clone();
 
             // Check if CLI binary is accessible
             // IMPORTANT: Run from /tmp to avoid bd auto-migrating projects in cwd
@@ -149,7 +134,18 @@ pub fn run() {
             probe::delete_external_data,
             probe::patch_external_data,
             probe::launch_probe,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        ]);
+    // `Builder::build` does not run `setup` (Tauri 2.10.2 runs it inside
+    // `App::run` on `RuntimeRunEvent::Ready`), so no logger is installed yet in
+    // the Err branch: report to stderr only, no `log::error!`.
+    match builder.build(tauri::generate_context!()) {
+        Ok(app) => app.run(|handle, event| logging::on_run_event(handle, &event)),
+        Err(e) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "beads-task-issue-tracker: failed to build tauri application: {e}"
+            );
+            std::process::exit(1);
+        }
+    }
 }

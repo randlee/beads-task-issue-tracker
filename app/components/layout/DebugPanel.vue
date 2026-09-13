@@ -2,6 +2,7 @@
 import { Button } from '~/components/ui/button'
 import { readLogs, clearLogs, exportLogs as exportLogsApi, getLogPath, getBdVersion, getLoggingEnabled, setLoggingEnabled, getVerboseLogging, setVerboseLogging, checkBdCliUpdate, fsExists, type BdCliUpdateInfo } from '~/utils/bd-api'
 import { openUrl } from '~/utils/open-url'
+import { formatLogLines } from '~/utils/log-format'
 
 const { isSyncing: isForceSyncing, forceSync, syncMessage, lastSyncSuccess } = useSyncStatus()
 const { beadsPath } = useBeadsPath()
@@ -115,7 +116,8 @@ const colorizedLogs = computed(() => {
 
 const fetchLogs = async () => {
   try {
-    logs.value = await readLogs(300) // Last 300 lines
+    // JSONL from the backend, rendered as `[<timestamp>][<LEVEL>][<target>] [<action>] <message>`.
+    logs.value = formatLogLines(await readLogs(300)) // Last 300 lines
     if (isUserAtBottom.value) {
       nextTick(() => {
         scrollToBottom()

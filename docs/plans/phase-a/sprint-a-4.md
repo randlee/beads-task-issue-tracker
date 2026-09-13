@@ -1,7 +1,7 @@
 ---
 id: a-4
 title: btit adopts the sc-observability-log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-4-btit-adoption
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption
 target: integrate/phase-a
@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
+- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `integrate/phase-a` after that merge, as a single PR on `integrate/phase-a` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children. (Corrected from an earlier draft that said `develop`; see "Implementation Notes" below — the frontmatter `target:` was already correct.)
 - a-2 and a-3 are **not** prerequisites (`parallel_safe`).
 
 ## Dependency Relations
@@ -323,3 +323,13 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 - `git diff --exit-code integrate/phase-a...HEAD -- crates/`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets`
 - `pnpm tauri:build` (manual verification per Required Work)
+
+## Implementation Notes
+
+- **Stale "Hard Dependencies" wording (corrected).** The original text said the a-4 branch is "created from `develop`" and is "a single PR on `develop`". That contradicted this doc's own frontmatter (`target: integrate/phase-a`) and `plan-phase-a.md` (`a-4` lane: "single PR on `integrate/phase-a`", created from `origin/integrate/phase-a`). The wording is corrected in place above; no behavior changed, this is a doc-only fix.
+- **PR base (final).** a-1 merged to `integrate/phase-a` as commit `d4967c9`. The a-4 branch was rebased onto `origin/integrate/phase-a` and PR #48 targets `integrate/phase-a` directly; the earlier unmerged-a-1 workaround (basing on `feature/sprint-a-1-log-bridge`) no longer applies.
+- **`crates/` diff check (final).** With the branch rebased onto `origin/integrate/phase-a`, `git diff --exit-code origin/integrate/phase-a...HEAD -- crates/` is empty, confirming a-4 touches no file under `crates/` (acceptance criterion 11).
+- **QA-1 (PR #48): `clear_logs`/`export_logs`/`read_logs` moved to `spawn_blocking`.** The three commands' blocking bodies (`LogGuard::flush`, `fs::write`, `remove_rotated_logs`, `fs::copy`, `fs::read_to_string`) now run inside `tauri::async_runtime::spawn_blocking(move || ..)`, awaited and mapped to the existing `Err(String)` style, instead of running inline on the async runtime (RSH-A4-001). `clear_logs` still clones the `Arc<LogGuard>` under the `LOG_GUARD` lock and releases the lock before moving the clone into the blocking closure, so `LOG_GUARD` is never held across the flush (Deliverable 3 invariant unchanged).
+- **QA-1 (PR #48): `[dev-dependencies] tokio` and `logging::tests`.** `src-tauri/Cargo.toml` gained `tokio = { version = "1", features = ["macros", "rt"] }` under `[dev-dependencies]` so the async log commands can be exercised with `#[tokio::test]`. `logging.rs` gained a `#[cfg(test)] mod tests` covering `get_log_path`, `read_logs`, `clear_logs`, `export_logs` (all against an uninitialized guard/path) and `remove_rotated_logs` (via a temp-dir-backed `ScratchDir` helper and a `TestError` that carries setup/teardown failures out through `?` instead of panicking).
+- **`log_frontend` unknown-level match arms.** Deliverable 7 describes the fallback as "other" mapping to `Info`. The implementation matches `"error"`, `"warn"`, `"info"` explicitly (rather than treating `"info"` as part of the fallback arm, as the original plain-text version did) so the `frontend_level` kv field is attached only to genuinely unrecognized strings, matching the deliverable's intent precisely. Behavior for `"error"`/`"warn"`/`"info"` is unchanged.
+- No other deviations from the spec were required; the a-1 public API (`init`, `BridgeOptions`, `LogGuard`, `InitError`, `FlushError`, `ShutdownError`, `DropCause`, `LevelFilter`, `ServiceName`, `ActionName`) matched the code samples in `sprint-a-1.md` exactly, so `logging.rs` and `lib.rs` were written directly against the code samples in this doc without any `crates/` changes.
