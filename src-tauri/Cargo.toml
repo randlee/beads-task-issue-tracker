@@ -1,12 +1,28 @@
-[package]
-name = "beads-issue-tracker"
+# Workspace root. `[workspace.package].version` is the single source of truth for
+# the app version: tauri.conf.json omits `version` (Tauri falls back to this crate's
+# version) and package.json mirrors it (checked by scripts/check_version_sync.py).
+# Future crates split out of this one should use `version.workspace = true` etc.
+[workspace]
+resolver = "2"
+
+[workspace.package]
 version = "1.24.5"
-description = "Beads Task-Issue Tracker - Desktop app for managing bd Beads issues"
 authors = ["Laurent Chapin <laurent.chapin@w3dev.fr>"]
 license = "MIT"
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+# Matches rust-toolchain.toml (repo root).
+rust-version = "1.98.1"
+
+[package]
+name = "beads-issue-tracker"
+version.workspace = true
+description = "Beads Task-Issue Tracker - Desktop app for managing bd Beads issues"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "app_lib"
