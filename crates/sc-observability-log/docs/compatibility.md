@@ -129,3 +129,22 @@ A bare field whose `Serialize` impl fails records `null` under its key and the
 error text under `fields["sc_observability_log.serialize_errors"][key]`.
 Non-finite floats are not failures: they record `null`. See
 `sc-observability-log-macros/docs/field-value-dispatch.md`.
+
+### Field value size
+
+Field values are inserted into events as produced by `serde_json::to_value`
+(when the field implements `Serialize`) or the `Debug` or `Display` string
+representation. There is no size cap or depth limit on individual field values,
+nor on the final formatted message. The a-1 queue bounds the event count per
+logger initialization (not the total bytes), so callers must not log unbounded
+collections or untrusted large payloads as field values without prior
+truncation or filtering.
+
+### Evaluation cost
+
+When the event's level is enabled (above `LoggerConfig.level`), field values are
+serialized or formatted synchronously on the calling thread inside the macro
+expansion, the same as with `tracing`. When the level is disabled, field value
+expressions are not evaluated at all. In async code, keep field `Serialize` and
+`Debug` implementations cheap because the evaluation work runs on the executor
+thread and can block the reactor.
