@@ -123,6 +123,13 @@ impl DroppedEvents {
 }
 
 /// Timeout used by `Drop for LogGuard` when `shutdown` was not called.
+///
+/// `Drop for LogGuard` runs the same flush-and-shutdown sequence as
+/// [`LogGuard::shutdown`], bounded by this timeout, but it has no `Result` to
+/// return to a caller and therefore discards the outcome (`let _ = ..`):
+/// an implicit teardown failure (a timeout, a final-flush error or a lost
+/// helper thread) is silent. Call [`LogGuard::shutdown`] explicitly whenever
+/// that `Result` matters, for example to log or retry on failure.
 pub const DEFAULT_DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Keeps the bridge installed; dropping it shuts the logger down.
@@ -178,6 +185,10 @@ impl Drop for LogGuard {
     fn drop(&mut self) {
         if !self.shut_down {
             self.shut_down = true;
+            // The Result is intentionally discarded: `Drop` has no channel to report
+            // failure to a caller. See `DEFAULT_DROP_SHUTDOWN_TIMEOUT` for the gap
+            // this leaves and prefer an explicit `LogGuard::shutdown` call when the
+            // outcome matters.
             let _ = handle::shutdown_sequence(DEFAULT_DROP_SHUTDOWN_TIMEOUT);
         }
     }

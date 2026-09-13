@@ -61,6 +61,13 @@ would let any caller hang. Call `LogGuard::flush(timeout)` instead.
 `LogGuard::shutdown(timeout)` and `Drop for LogGuard` (with
 `DEFAULT_DROP_SHUTDOWN_TIMEOUT`) are bounded the same way.
 
+`Drop for LogGuard` has no `Result` to hand back to a caller, so it discards
+the outcome of its flush-and-shutdown sequence (`let _ = ..`). An implicit
+teardown failure (timeout, final-flush error or a lost helper thread) is
+therefore silent. Call `LogGuard::shutdown(timeout)` explicitly, and act on
+its `Result`, whenever the outcome matters (for example at a controlled
+process exit).
+
 ## Lockstep and `__private` policy
 
 `sc-observability-log` depends on `sc-observability-log-macros` through an exact
