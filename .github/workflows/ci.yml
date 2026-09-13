@@ -8,6 +8,7 @@ on:
       - 'integrate/*'
       - 'sprint/*'
       - 'fix/*'
+      - 'feature/**'
 
 # The app ships macOS, Windows, and Linux builds, and several code paths
 # (extended PATH, attachment path guards, CREATE_NO_WINDOW) are
@@ -87,3 +88,62 @@ jobs:
 
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  crates:
+    name: crates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Keep in sync with rust-toolchain.toml (enforced by the version-sync job).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+
+      - name: Format
+        run: cargo fmt --check --all --manifest-path crates/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --locked --manifest-path crates/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --manifest-path crates/Cargo.toml --workspace
+
+      # The remaining steps are host-independent, so they run once, on Linux, in bash.
+      - name: Runtime dependency graph
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo tree --locked --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --target all --prefix none --format '{p}' | sed -E 's/ \(.*$//' | LC_ALL=C sort -u | diff - crates/runtime-deps.txt
+
+      - name: Test-isolation contract
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for f in crates/*/tests/*.rs; do if grep -qE '\binit\(' "$f"; then n=$(grep -cE '#\[([A-Za-z_]+::)*test\b' "$f"); [ "$n" -eq 1 ] || { echo "isolation violation: $f has $n test fns"; exit 1; }; fi; done
+
+      - name: Rustdoc missing-docs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo rustdoc --locked --manifest-path crates/Cargo.toml -p sc-observability-log -- -D missing-docs
+          cargo rustdoc --locked --manifest-path crates/Cargo.toml -p sc-observability-log-macros -- -D missing-docs
+
+      # The MSRV toolchain is installed with rustup rather than a workflow `toolchain` key:
+      # scripts/check_version_sync.py:108-114 requires every such key to equal rust-toolchain.toml.
+      - name: MSRV check (1.94.1)
+        if: runner.os == 'Linux'
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal --no-self-update
+          cargo +1.94.1 check --locked --manifest-path crates/Cargo.toml --workspace --all-targets
