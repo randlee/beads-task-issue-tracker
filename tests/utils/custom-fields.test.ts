@@ -258,10 +258,10 @@ describe('ado.* aliases (what bd Azure DevOps sync writes)', () => {
     expect(s.remaining).toBe(1)
   })
 
-  it('schedule summary falls back through ado.finish_date / target_date / due_date', () => {
+  it('schedule summary falls back through ado.finish_date / target_date', () => {
     expect(buildScheduleSummary({ 'ado.start_date': '2026-03-01T00:00:00Z', 'ado.target_date': '2026-03-10T00:00:00Z' }))
       .toEqual({ start: '2026-03-01', end: '2026-03-10', durationDays: 10, inverted: false })
-    expect(buildScheduleSummary({ 'ado.due_date': '2026-04-01' })!.end).toBe('2026-04-01')
+    expect(buildScheduleSummary({ 'ado.finish_date': '2026-04-01' })!.end).toBe('2026-04-01')
   })
 
   it('alias keys are hidden from the field list when folded into a summary', () => {

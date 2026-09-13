@@ -94,12 +94,11 @@ const GROUP_PREFIXES: Array<{ prefix: string; group: string }> = [
   { prefix: 'execution_', group: 'execution' },
 ]
 
+/** Tiers named in issue #3. Unknown values render with NEUTRAL_TONE. */
 export const PROJECT_TONES: Record<string, string> = {
   iron: 'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30',
   bronze: 'bg-amber-700/15 text-amber-800 dark:text-amber-300 border-amber-700/30',
-  silver: 'bg-slate-400/15 text-slate-700 dark:text-slate-200 border-slate-400/30',
   gold: 'bg-yellow-500/15 text-yellow-800 dark:text-yellow-300 border-yellow-500/30',
-  platinum: 'bg-sky-400/15 text-sky-800 dark:text-sky-200 border-sky-400/30',
 }
 
 export const SEVERITY_TONES: Record<string, string> = {
@@ -129,15 +128,13 @@ export const KNOWN_FIELDS: Record<string, FieldDef> = {
   'ado.remaining_work': { key: 'ado.remaining_work', label: 'Remaining work', kind: 'number', group: 'ado', unit: 'h' },
   'ado.severity': { key: 'ado.severity', label: 'Severity', kind: 'severity', group: 'ado' },
   'ado.rev': { key: 'ado.rev', label: 'Revision', kind: 'number', group: 'ado' },
-  // ADO scheduling fields (Microsoft.VSTS.Scheduling.*) — recognised so the panel keeps working
-  // if bd starts syncing them; today they may also be written by app-side tooling
+  // ADO scheduling keys per docs/azure-devops-mapping.md (written by the custom sync; not by bd today)
   'ado.original_estimate': { key: 'ado.original_estimate', label: 'Original estimate', kind: 'effort', group: 'ado', unit: 'h' },
   'ado.completed_work': { key: 'ado.completed_work', label: 'Completed work', kind: 'effort', group: 'ado', unit: 'h' },
   'ado.effort': { key: 'ado.effort', label: 'Effort', kind: 'number', group: 'ado' },
   'ado.start_date': { key: 'ado.start_date', label: 'Start date', kind: 'date', group: 'ado' },
   'ado.finish_date': { key: 'ado.finish_date', label: 'Finish date', kind: 'date', group: 'ado' },
   'ado.target_date': { key: 'ado.target_date', label: 'Target date', kind: 'date', group: 'ado' },
-  'ado.due_date': { key: 'ado.due_date', label: 'Due date', kind: 'date', group: 'ado' },
   beads_priority: { key: 'beads_priority', label: 'Original priority', kind: 'number', group: 'ado' },
   // --- bd: execution hints (docs/core-concepts/metadata.md) ---
   execution_agent_type: { key: 'execution_agent_type', label: 'Agent type', kind: 'text', group: 'execution' },
@@ -161,7 +158,7 @@ export const EFFORT_SOURCES = {
 
 export const SCHEDULE_SOURCES = {
   start: ['start_date', 'ado.start_date'],
-  end: ['end_date', 'ado.finish_date', 'ado.target_date', 'ado.due_date'],
+  end: ['end_date', 'ado.finish_date', 'ado.target_date'],
 } as const
 
 /** First defined, non-empty value among the candidate keys. */
