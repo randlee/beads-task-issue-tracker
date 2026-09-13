@@ -1,5 +1,6 @@
-//! trybuild compile-fail cases: one per row of the rejected-forms table in
-//! `docs/compatibility.md`, each with its expected stderr checked in.
+//! trybuild compile-fail cases: one per row of the rejected-forms tables in
+//! `docs/compatibility.md` (event macros and `#[instrument]`), plus the
+//! `Entered`-across-`.await` `!Send` case, each with its expected stderr checked in.
 //! Does not install the logger.
 
 #[test]
