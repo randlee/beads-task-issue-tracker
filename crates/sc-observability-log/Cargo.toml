@@ -1,0 +1,25 @@
+[package]
+name = "sc-observability-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "log facade bridge and tracing-compatible macros for sc-observability structured JSONL logging."
+publish = false
+
+[dependencies]
+sc-observability.workspace = true
+sc-observability-types.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Exact `=` pin (lockstep): macro expansions target the `#[doc(hidden)] __private`
+# module, which is outside semver. Same policy as serde -> serde_core.
+sc-observability-log-macros.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
