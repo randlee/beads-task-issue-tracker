@@ -1,5 +1,9 @@
 [workspace]
-members = ["sc-observability-log", "sc-observability-log-macros"]
+members = [
+    "sc-observability-log",
+    "sc-observability-log-macros",
+    "sc-observability-log-consumer-check",
+]
 resolver = "3"
 
 [workspace.package]
@@ -19,6 +23,8 @@ syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
 tempfile = "3"
+trybuild = "1"   # dev-only: compile-fail UI tests for the rejected macro forms
+tracing = "0.1" # dev-only: proves the compatibility fixture is genuine tracing syntax
 sc-observability-log-macros = { version = "=0.1.0", path = "sc-observability-log-macros" }
 
 [workspace.lints.rust]
