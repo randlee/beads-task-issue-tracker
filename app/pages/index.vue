@@ -66,8 +66,6 @@ const {
   sortField,
   sortDirection,
   setSort,
-  // Epic expand
-  expandEpic,
   // Actions
   fetchIssues,
   fetchPollData,
@@ -341,6 +339,12 @@ const {
   bdDotNotationParent, availableIssuesForDeps, initRelationTypes,
 } = useIssueDialogs()
 
+// Issue navigation: single choke point for opening issues + back/forward history
+const {
+  openIssue, openFromHistory, back: historyBack, forward: historyForward,
+  canGoBack, canGoForward, historyEntries, resetHistory: resetIssueHistory,
+} = useIssueNavigation({ isMobileView, mobilePanel, isRightSidebarOpen, isEditMode, isCreatingNew })
+
 const leftSidebarStateBeforeEdit = ref<boolean | null>(null)
 
 // Watch edit mode to manage left sidebar state
@@ -449,6 +453,7 @@ const handlePathChange = async () => {
   if (oldPath) probeUnregisterProject(oldPath)
 
   selectIssue(null)
+  resetIssueHistory()  // History is per-session/per-project
   isEditMode.value = false
   isCreatingNew.value = false
   clearIssues()  // Reset issue list so new-issue detection doesn't flash all rows
@@ -521,6 +526,7 @@ const handleReset = () => {
   // Last project removed - clear all data to show onboarding
   clearIssues()
   clearStats()
+  resetIssueHistory()
   isEditMode.value = false
   isCreatingNew.value = false
 }
@@ -536,33 +542,10 @@ const handleAddIssue = () => {
   }
 }
 
-const handleSelectIssue = async (issue: Issue) => {
-  // First set the issue from list for immediate feedback
-  selectIssue(issue)
-  isEditMode.value = false
-  isCreatingNew.value = false
-  if (isMobileView.value) {
-    mobilePanel.value = 'details'
-  } else {
-    isRightSidebarOpen.value = true
-  }
-  // Then fetch full details (including extended fields) in background
-  await fetchIssue(issue.id)
-}
-
-const handleEditIssueFromTable = async (issue: Issue) => {
-  // First set the issue from list for immediate feedback
-  selectIssue(issue)
-  isEditMode.value = true
-  isCreatingNew.value = false
-  if (isMobileView.value) {
-    mobilePanel.value = 'details'
-  } else {
-    isRightSidebarOpen.value = true
-  }
-  // Then fetch full details (including extended fields) in background
-  await fetchIssue(issue.id)
-}
+// All issue-open paths delegate to useIssueNavigation.openIssue (records history)
+const handleSelectIssue = (issue: Issue) => openIssue(issue)
+const handleEditIssueFromTable = (issue: Issue) => openIssue(issue, { edit: true })
+const handleNavigateToIssue = (id: string) => openIssue(id)
 
 const handleDeselectIssue = () => {
   selectIssue(null)
@@ -637,24 +620,6 @@ const handleAddComment = async (content: string) => {
   }
 }
 
-
-const handleNavigateToIssue = async (id: string) => {
-  // Check if this is a child issue (format: parent-id.number)
-  // If so, expand the parent epic to make the child visible
-  const lastDotIndex = id.lastIndexOf('.')
-  if (lastDotIndex > 0) {
-    const parentId = id.slice(0, lastDotIndex)
-    expandEpic(parentId)
-  }
-
-  // Find the issue in the current list or fetch it
-  const existingIssue = issues.value.find(i => i.id === id)
-  if (existingIssue) {
-    selectIssue(existingIssue)
-  }
-  // Fetch full details (including extended fields, parent, children)
-  await fetchIssue(id)
-}
 
 
 // Search handler - search is prioritary over filters (always starts empty)
@@ -994,11 +959,17 @@ watch(
             v-if="selectedIssue && !isEditMode && !isCreatingNew"
             :selected-issue="selectedIssue"
             :is-pinned="isPinned(selectedIssue.id)"
+            :can-go-back="canGoBack"
+            :can-go-forward="canGoForward"
+            :history-entries="historyEntries"
             @edit="handleEditIssue"
             @reopen="handleReopenIssue"
             @close="handleCloseIssue"
             @delete="handleDeleteIssue"
             @toggle-pin="togglePin(selectedIssue.id)"
+            @back="historyBack"
+            @forward="historyForward"
+            @select-history="openFromHistory"
           />
 
           <!-- Form mode: form gère son propre scroll -->
@@ -1169,11 +1140,17 @@ watch(
           v-if="selectedIssue && !isEditMode && !isCreatingNew"
           :selected-issue="selectedIssue"
           :is-pinned="isPinned(selectedIssue.id)"
+          :can-go-back="canGoBack"
+          :can-go-forward="canGoForward"
+          :history-entries="historyEntries"
           @edit="handleEditIssue"
           @reopen="handleReopenIssue"
           @close="handleCloseIssue"
           @delete="handleDeleteIssue"
           @toggle-pin="togglePin(selectedIssue.id)"
+          @back="historyBack"
+          @forward="historyForward"
+          @select-history="openFromHistory"
         />
 
         <!-- Form mode: form gère son propre scroll -->
