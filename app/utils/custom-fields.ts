@@ -129,6 +129,15 @@ export const KNOWN_FIELDS: Record<string, FieldDef> = {
   'ado.remaining_work': { key: 'ado.remaining_work', label: 'Remaining work', kind: 'number', group: 'ado', unit: 'h' },
   'ado.severity': { key: 'ado.severity', label: 'Severity', kind: 'severity', group: 'ado' },
   'ado.rev': { key: 'ado.rev', label: 'Revision', kind: 'number', group: 'ado' },
+  // ADO scheduling fields (Microsoft.VSTS.Scheduling.*) — recognised so the panel keeps working
+  // if bd starts syncing them; today they may also be written by app-side tooling
+  'ado.original_estimate': { key: 'ado.original_estimate', label: 'Original estimate', kind: 'effort', group: 'ado', unit: 'h' },
+  'ado.completed_work': { key: 'ado.completed_work', label: 'Completed work', kind: 'effort', group: 'ado', unit: 'h' },
+  'ado.effort': { key: 'ado.effort', label: 'Effort', kind: 'number', group: 'ado' },
+  'ado.start_date': { key: 'ado.start_date', label: 'Start date', kind: 'date', group: 'ado' },
+  'ado.finish_date': { key: 'ado.finish_date', label: 'Finish date', kind: 'date', group: 'ado' },
+  'ado.target_date': { key: 'ado.target_date', label: 'Target date', kind: 'date', group: 'ado' },
+  'ado.due_date': { key: 'ado.due_date', label: 'Due date', kind: 'date', group: 'ado' },
   beads_priority: { key: 'beads_priority', label: 'Original priority', kind: 'number', group: 'ado' },
   // --- bd: execution hints (docs/core-concepts/metadata.md) ---
   execution_agent_type: { key: 'execution_agent_type', label: 'Agent type', kind: 'text', group: 'execution' },
@@ -138,9 +147,36 @@ export const KNOWN_FIELDS: Record<string, FieldDef> = {
   execution_parallel_group: { key: 'execution_parallel_group', label: 'Parallel group', kind: 'text', group: 'execution' },
 }
 
+/**
+ * Summary sources. Bare keys are the app-side convention from #3; the ado.* keys are what bd's
+ * Azure DevOps sync writes (remaining_work today; the rest once bd syncs scheduling fields).
+ * The first key present wins.
+ */
+export const EFFORT_SOURCES = {
+  original: ['original_estimate', 'ado.original_estimate'],
+  remaining: ['remaining_work', 'ado.remaining_work'],
+  completed: ['completed_work', 'ado.completed_work'],
+  percent: ['percent_complete'],
+} as const
+
+export const SCHEDULE_SOURCES = {
+  start: ['start_date', 'ado.start_date'],
+  end: ['end_date', 'ado.finish_date', 'ado.target_date', 'ado.due_date'],
+} as const
+
+/** First defined, non-empty value among the candidate keys. */
+export function firstPresent(meta: IssueMetadata, keys: readonly string[]): unknown {
+  for (const k of keys) {
+    const v = meta[k]
+    if (v !== undefined && v !== null && v !== '') return v
+  }
+  return undefined
+}
+
 /** Keys folded into the effort/schedule summaries and therefore hidden from the field list. */
-const SUMMARY_KEYS = new Set([
-  'original_estimate', 'remaining_work', 'completed_work', 'percent_complete', 'start_date', 'end_date',
+const SUMMARY_KEYS = new Set<string>([
+  ...Object.values(EFFORT_SOURCES).flat(),
+  ...Object.values(SCHEDULE_SOURCES).flat(),
 ])
 
 // ---------------------------------------------------------------------------
@@ -283,10 +319,10 @@ export function badgeTone(def: FieldDef, v: unknown): string {
 // ---------------------------------------------------------------------------
 
 export function buildEffortSummary(meta: IssueMetadata): EffortSummary | null {
-  const original = coerceNumber(meta.original_estimate)
-  const remaining = coerceNumber(meta.remaining_work)
-  const completed = coerceNumber(meta.completed_work)
-  let percent = clampPercent(meta.percent_complete)
+  const original = coerceNumber(firstPresent(meta, EFFORT_SOURCES.original))
+  const remaining = coerceNumber(firstPresent(meta, EFFORT_SOURCES.remaining))
+  const completed = coerceNumber(firstPresent(meta, EFFORT_SOURCES.completed))
+  let percent = clampPercent(firstPresent(meta, EFFORT_SOURCES.percent))
   if (percent === null && completed !== null && remaining !== null && completed + remaining > 0) {
     percent = clampPercent((completed / (completed + remaining)) * 100)
   }
@@ -295,12 +331,12 @@ export function buildEffortSummary(meta: IssueMetadata): EffortSummary | null {
 }
 
 export function buildScheduleSummary(meta: IssueMetadata): ScheduleSummary | null {
-  const hasStart = 'start_date' in meta && meta.start_date != null && meta.start_date !== ''
-  const hasEnd = 'end_date' in meta && meta.end_date != null && meta.end_date !== ''
-  if (!hasStart && !hasEnd) return null
-  const start = hasStart ? formatDateOnly(meta.start_date) : null
-  const end = hasEnd ? formatDateOnly(meta.end_date) : null
-  const diff = daysBetween(meta.start_date, meta.end_date)
+  const startRaw = firstPresent(meta, SCHEDULE_SOURCES.start)
+  const endRaw = firstPresent(meta, SCHEDULE_SOURCES.end)
+  if (startRaw === undefined && endRaw === undefined) return null
+  const start = startRaw !== undefined ? formatDateOnly(startRaw) : null
+  const end = endRaw !== undefined ? formatDateOnly(endRaw) : null
+  const diff = daysBetween(startRaw, endRaw)
   return {
     start,
     end,

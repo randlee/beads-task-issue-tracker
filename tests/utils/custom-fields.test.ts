@@ -17,6 +17,7 @@ import {
   buildEffortSummary,
   buildScheduleSummary,
   partitionMetadata,
+  firstPresent,
   KNOWN_FIELDS,
   SEVERITY_TONES,
   NEUTRAL_TONE,
@@ -236,5 +237,43 @@ describe('partitionMetadata', () => {
     const p = partitionMetadata({})
     expect(p.count).toBe(0)
     expect(p.groups).toEqual([])
+  })
+})
+
+describe('ado.* aliases (what bd Azure DevOps sync writes)', () => {
+  it('firstPresent skips undefined, null, and empty strings', () => {
+    expect(firstPresent({ a: '', b: null, c: 0 }, ['a', 'b', 'c'])).toBe(0)
+    expect(firstPresent({ a: 'x' }, ['zz', 'a'])).toBe('x')
+    expect(firstPresent({}, ['a'])).toBeUndefined()
+  })
+
+  it('effort summary reads ado.remaining_work (bd today) when the bare key is absent', () => {
+    const s = buildEffortSummary({ 'ado.remaining_work': 3.5, 'ado.rev': 4 })!
+    expect(s.remaining).toBe(3.5)
+    expect(s.original).toBeNull()
+  })
+
+  it('bare keys win over ado.* aliases', () => {
+    const s = buildEffortSummary({ remaining_work: 1, 'ado.remaining_work': 9 })!
+    expect(s.remaining).toBe(1)
+  })
+
+  it('schedule summary falls back through ado.finish_date / target_date / due_date', () => {
+    expect(buildScheduleSummary({ 'ado.start_date': '2026-03-01T00:00:00Z', 'ado.target_date': '2026-03-10T00:00:00Z' }))
+      .toEqual({ start: '2026-03-01', end: '2026-03-10', durationDays: 10, inverted: false })
+    expect(buildScheduleSummary({ 'ado.due_date': '2026-04-01' })!.end).toBe('2026-04-01')
+  })
+
+  it('alias keys are hidden from the field list when folded into a summary', () => {
+    const p = partitionMetadata({ 'ado.remaining_work': 2, 'ado.area_path': 'A', 'ado.start_date': '2026-01-01' })
+    const keys = p.groups.flatMap(g => g.fields.map(f => f.key))
+    expect(keys).toEqual(['ado.area_path'])
+    expect(p.effort?.remaining).toBe(2)
+    expect(p.schedule?.start).toBe('2026-01-01')
+  })
+
+  it('ado scheduling keys are registered under the Azure DevOps group with typed widgets', () => {
+    expect(KNOWN_FIELDS['ado.original_estimate']).toMatchObject({ group: 'ado', kind: 'effort' })
+    expect(KNOWN_FIELDS['ado.finish_date']).toMatchObject({ group: 'ado', kind: 'date' })
   })
 })
