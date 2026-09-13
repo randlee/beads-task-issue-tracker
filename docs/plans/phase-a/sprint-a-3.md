@@ -409,8 +409,9 @@ Developer deviations from the plan text, each minimal and recorded here for QA a
    When it is not, `finish_err` receives a placeholder
    `FieldRecord::Value(Value::Null)` that `complete` discards before use; the
    `finish_ok`/`finish_err` signatures are as specified.
-3. **Where `emit` attaches the trace.** Exact Targets lists `handle.rs`, but
-   `__private::emit` is defined in `src/lib.rs`; the `current_trace()`
+3. **Where `emit` attaches the trace.** The plan originally listed `handle.rs`
+   (corrected in Exact Targets at QA-1), but `__private::emit` is defined in
+   `src/lib.rs`; the `current_trace()`
    assignment is made there (after `assemble_event`), so it covers bridge
    records, event macros and completion events alike. `handle.rs` is unchanged.
    `src/mapping.rs` changes only the `assemble_event` doc comment (it no longer
