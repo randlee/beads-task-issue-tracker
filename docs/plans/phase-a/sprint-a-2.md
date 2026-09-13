@@ -103,6 +103,7 @@ Every deliverable must land at a production-ready level for the scope this sprin
 - Stability: this relies only on Rust's documented method-call autoref/autoderef probing order, not on the unstable `specialization` feature. It is verified on both pinned toolchains in CI (`cargo +1.94.1` MSRV check and the pinned 1.98.1 test run) by the dispatch tests below.
 - Neither trait: expansion fails with rustc's `no method named __sc_field_value found` error. The macro attaches a span on the field value so the error points at the offending field; the trybuild case `tests/ui/field_not_serialize_or_debug.rs` checks in the exact stderr, and `docs/compatibility.md` tells users to use `?v` (Debug) or `%v` (Display) instead.
 - Size: field JSON is inserted into `LogEvent.fields` as produced by `serde_json::to_value`, with no size or depth cap (matching `LogEvent.fields: serde_json::Map<String, Value>`).
+- Serialization failure never panics: `SerializeField::__sc_field_value` returns `Value`, not `Result`. When `serde_json::to_value` returns `Err` (verified sources in serde_json 1.0.151: a map key that is not a string, `KeyMustBeAString`, or a custom `Serialize` impl returning `Err`), the field is recorded as `Value::String(format!("<serialize error: {err}>"))`. Non-finite floats are not errors: `to_value(f64::NAN)` yields `Value::Null` (`serde_json/src/value/from.rs`, `impl From<f64> for Value`). No `unwrap`/`expect` appears on this path, preserving a-1's "logging never blocks and never panics" guarantee.
 
 
 **Implementation constraints:**
@@ -113,7 +114,7 @@ Every deliverable must land at a production-ready level for the scope this sprin
 **Tests:**
 - `tests/macros_jsonl.rs` initializes the a-1 guard and asserts each grammar row against the JSONL output: exact `target`, `action`, `message` and `fields` JSON types.
 - trybuild `tests/ui/` has one case per rejected form, with the expected stderr checked in, including `field_not_serialize_or_debug.rs`.
-- Dispatch tests in `tests/macros_jsonl.rs`: a type implementing both `Serialize` and `Debug` is recorded as its Serialize JSON; a Debug-only type is recorded as its Debug string.
+- Dispatch tests in `tests/macros_jsonl.rs`: a type implementing both `Serialize` and `Debug` is recorded as its Serialize JSON; a Debug-only type is recorded as its Debug string; a `HashMap<(i32, i32), i32>` (non-string keys) and a custom `Serialize` impl returning `Err` are recorded as `"<serialize error: …>"` strings without panicking; `f64::NAN` is recorded as `null`.
 - Test isolation: follows the a-1 test-isolation contract — `tests/macros_jsonl.rs` and `tests/compat_events.rs` are separate binaries, each with exactly one `#[test]` fn that calls `init()`; the disabled-level (no evaluation) case runs inside `macros_jsonl.rs`'s single test using a level below the configured max.
 
 ## Explicit Code Samples
@@ -152,8 +153,30 @@ pub mod __private {
         message: Option<String>,
         fields: serde_json::Map<String, Value>,
     ) -> sc_observability_types::LogEvent;                                  // new in a-2; sanitizes target/action
-    pub struct FieldValue<'a, T: ?Sized>(pub &'a T);                        // autoref specialization:
-    // impl Serialize → Value::from serde_json::to_value; else → Debug string
+    pub struct FieldValue<'a, T: ?Sized>(pub &'a T);
+
+    // Autoref dispatch: macro expands a bare field `k = v` / shorthand `v` to
+    //     (&&::sc_observability_log::__private::FieldValue(&v)).__sc_field_value()
+    pub trait SerializeField {
+        fn __sc_field_value(&self) -> serde_json::Value;
+    }
+    impl<T: ?Sized + serde::Serialize> SerializeField for &FieldValue<'_, T> {
+        fn __sc_field_value(&self) -> serde_json::Value {
+            match serde_json::to_value(self.0) {
+                Ok(value) => value,
+                Err(err) => serde_json::Value::String(format!("<serialize error: {err}>")),
+            }
+        }
+    }
+    pub trait DebugField {
+        fn __sc_field_value(&self) -> serde_json::Value;
+    }
+    impl<T: ?Sized + core::fmt::Debug> DebugField for FieldValue<'_, T> {
+        fn __sc_field_value(&self) -> serde_json::Value {
+            serde_json::Value::String(format!("{:?}", self.0))
+        }
+    }
+    // Macro expansion brings both traits into scope: `use ::sc_observability_log::__private::{DebugField as _, SerializeField as _};`
 }
 ```
 
@@ -168,7 +191,7 @@ pub mod __private {
 1. Every grammar-table row has a JSONL assertion in `tests/macros_jsonl.rs`, with the exact JSON type (number, bool, string, object) for `Serialize` values and strings for `?`/`%`.
 2. `tests/compat/events.rs` compiles unchanged against `tracing` 0.1 and against `sc_observability_log`. The `sc_observability_log` build passes its runtime assertions.
 3. Every rejected form has a trybuild case whose checked-in stderr names the unsupported form (for the neither-trait case, the stderr points at the offending field span).
-3a. `docs/field-value-dispatch.md` exists and matches the design record above; the both-traits and Debug-only dispatch tests pass on the MSRV check and the pinned toolchain.
+3a. `docs/field-value-dispatch.md` exists and matches the design record above, including the literal trait signatures in Explicit Code Samples; serialization-failure cases (non-string map keys, custom `Serialize` error) record `"<serialize error: …>"` and never panic, and `f64::NAN` records `null`; the both-traits and Debug-only dispatch tests pass on the MSRV check and the pinned toolchain.
 3b. `tests/macros_jsonl.rs` and `tests/compat_events.rs` each contain exactly one `#[test]` fn that calls `init()`.
 4. With the max level below the call's level, arguments are not evaluated, formatted or allocated. A test uses an argument whose `Debug`/`Serialize` implementation panics.
 5. Expanded code compiles in a consumer that depends only on `sc-observability-log`. The trybuild pass cases do not declare `sc-observability` as a dependency.

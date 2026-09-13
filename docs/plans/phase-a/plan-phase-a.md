@@ -208,6 +208,7 @@ No other pair is related. a-1 precedes everything; a-5 and a-6 follow everything
 
 - **a-1** creates `crates/sc-observability-log/README.md` (bridge section) and `crates/sc-observability-log/docs/mapping.md` (the record → `LogEvent` mapping).
 - **a-2 and a-3** extend `crates/sc-observability-log/docs/compatibility.md` (tracing/log API compatibility table, rejected arguments).
+- **a-2** also creates `crates/sc-observability-log-macros/docs/field-value-dispatch.md` (Serialize/Debug dispatch design record).
 - **a-4** updates btit `CLAUDE.md` → `### Logging` (file location and format), `.claude/codebase-map.md` (logging section) and `CHANGELOG.md`.
 - **a-5** owns `docs/plans/phase-a/review-a-5.md`.
 - **a-6** owns `docs/plans/phase-a/handoff-a-6.md` and every document added to `../sc-observability`.
