@@ -1,7 +1,7 @@
 ---
 id: a-2
 title: sc-observability-log-macros — tracing-compatible event macros
-status: planned
+status: complete
 branch: feature/sprint-a-2-event-macros
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros
 target: integrate/phase-a
