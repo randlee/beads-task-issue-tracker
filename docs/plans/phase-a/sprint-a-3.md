@@ -61,8 +61,7 @@ Stack: `phase-a-core · layer 3`.
 - `crates/sc-observability-log-macros/src/instrument.rs` (new)
 - `crates/sc-observability-log-macros/src/lib.rs` (export `instrument`)
 - `crates/sc-observability-log/src/context.rs` (new; `CallSpan`, `Entered`, `CallOutcome`, outcome-label cache, thread-local stack, id generation)
-- `crates/sc-observability-log/src/lib.rs` (re-export `instrument`; `__private` span helpers)
-- `crates/sc-observability-log/src/handle.rs` (`emit` attaches `current_trace()` to every event, bridge records included)
+- `crates/sc-observability-log/src/lib.rs` (re-export `instrument`; `__private` span helpers; `__private::emit` attaches `current_trace()` to every event, bridge records included — see Implementation Note 3)
 - `crates/sc-observability-log/docs/mapping.md` (replace the a-1 `trace = None` row with the ambient-context rule)
 - `crates/sc-observability-log/tests/instrument_jsonl.rs` (new)
 - `crates/sc-observability-log/tests/compat/instrument.rs` (new; shared fixture module)
@@ -451,6 +450,21 @@ Developer deviations from the plan text, each minimal and recorded here for QA a
    test thread and resumes it on a spawned OS thread, which deterministically
    proves context restoration after resuming on a different thread (a tokio
    worker hop cannot be forced).
+9. **QA-1 fix (RBP-F001): completion keys shadow, not silently overwrite.**
+   `CallSpan::complete` originally inserted the reserved completion keys
+   (`duration_ms`, `return`/`error`) with plain `Map::insert` after user
+   fields/args, so a same-named user field (a parameter named `duration_ms` or
+   `error`, or a `fields(duration_ms = ..)` entry) was silently dropped. The
+   completion key stays authoritative (no compile error: `error` is a common
+   tracing parameter name, and this is a `#[non_exhaustive]`-free frozen API),
+   but the displaced value is now preserved: `context.rs`'s new
+   `insert_completion_field` uses `Map::insert`'s returned `Option<Value>` to
+   detect the collision and moves the old value to
+   `fields["sc_observability_log.shadowed_fields"][key]`, mirroring
+   `sc_observability_log.serialize_errors` in `callsite.rs`. No new
+   `DropCause`. **a-5 review item:** confirm this precedence rule (completion
+   key wins, user value preserved under `shadowed_fields`) is the one to keep
+   long-term, versus e.g. renaming the colliding user field automatically.
 
 ## This Sprint Does Not Close
 

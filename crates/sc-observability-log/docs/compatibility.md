@@ -230,6 +230,19 @@ the executor thread polling it) with no size cap.
 | `fields` | recorded arguments (including `self` unless skipped), plus `fields(..)`, plus `duration_ms` (u64 milliseconds, saturating), plus `return` / `error` when applicable |
 | `trace` | this call's `TraceContext` (its own `span_id`) |
 
+**Completion keys shadow same-named user fields.** `duration_ms`, `return` and
+`error` are reserved completion keys, always inserted last and always
+authoritative. If a recorded argument or a `fields(..)` entry already occupies
+one of these keys (for example a parameter named `duration_ms`, or `err` on a
+function with a parameter named `error`), the completion value replaces it
+rather than compiling to an error: `error` is a common parameter name and
+rejecting it would break tracing compatibility. The displaced user value is
+not lost — it is moved to
+`fields["sc_observability_log.shadowed_fields"][key]`, a JSON object keyed by
+the original field name, mirroring how a serialize failure is recorded under
+`sc_observability_log.serialize_errors` (see "Serialization failures" above).
+A call with no such collision has no `shadowed_fields` key at all.
+
 ### Outcomes
 
 - **`ok` / `error`.** A sync body runs as `(move || body)()`, so `return` and

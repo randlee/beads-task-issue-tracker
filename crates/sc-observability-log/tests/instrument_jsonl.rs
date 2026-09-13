@@ -270,6 +270,36 @@ fn fields_forms(count: u32, label: &str, path: &str) -> usize {
 #[instrument(name = "", skip_all, fields({ EMPTY } = 1, { RESERVED } = 2, kept = 3))]
 fn label_failures() {}
 
+// ---- QA-1 RBP-F001: completion keys shadow same-named user fields ----
+
+/// A parameter named `error`, combined with `err`, collides with the
+/// completion key written for the `Err` outcome.
+#[instrument(name = "jsonl.shadow_error_param", err)]
+fn shadow_error_param(error: &str) -> Result<u32, Failure> {
+    let _ = error;
+    Err(Failure(9))
+}
+
+/// A `fields(duration_ms = ..)` entry collides with the real `duration_ms`.
+#[instrument(
+    name = "jsonl.shadow_duration_field",
+    skip_all,
+    fields(duration_ms = 7)
+)]
+fn shadow_duration_field() {}
+
+/// A parameter named `duration_ms` collides with the real `duration_ms`.
+#[instrument(name = "jsonl.shadow_duration_param")]
+fn shadow_duration_param(duration_ms: u32) -> u32 {
+    duration_ms
+}
+
+/// No collision: `sc_observability_log.shadowed_fields` must not appear.
+#[instrument(name = "jsonl.no_collision")]
+fn no_collision(count: u32) -> u32 {
+    count
+}
+
 #[derive(Debug)]
 struct Service {
     id: u32,
@@ -578,6 +608,13 @@ fn call_argument_table() {
         let _ = err_display_level(fail);
         let _ = ret_err(fail);
     }
+
+    // QA-1 RBP-F001: completion keys (`duration_ms`, `return`/`error`) shadow
+    // same-named user fields instead of silently overwriting them.
+    let _ = shadow_error_param("boom");
+    shadow_duration_field();
+    assert_eq!(shadow_duration_param(42), 42);
+    assert_eq!(no_collision(5), 5);
 }
 
 #[expect(
@@ -742,6 +779,36 @@ fn assert_argument_table(events: &[Value]) {
         calls[1],
         ("Error", m, Some("error")),
         &json!({"fail": true, "error": "Failure(7)"}),
+    );
+
+    // QA-1 RBP-F001: the completion key wins; the displaced user value is
+    // preserved under `sc_observability_log.shadowed_fields`.
+    assert_completion(
+        one(events, "jsonl.shadow_error_param"),
+        ("Error", m, Some("error")),
+        &json!({
+            "error": "failure 9",
+            "sc_observability_log.shadowed_fields": {"error": "boom"},
+        }),
+    );
+    assert_completion(
+        one(events, "jsonl.shadow_duration_field"),
+        ok("Info"),
+        &json!({"sc_observability_log.shadowed_fields": {"duration_ms": 7}}),
+    );
+    assert_completion(
+        one(events, "jsonl.shadow_duration_param"),
+        ok("Info"),
+        &json!({"sc_observability_log.shadowed_fields": {"duration_ms": 42}}),
+    );
+    // No collision: `shadowed_fields` must not appear at all.
+    let no_collision_event = one(events, "jsonl.no_collision");
+    assert_completion(no_collision_event, ok("Info"), &json!({"count": 5}));
+    assert!(
+        no_collision_event["fields"]
+            .get("sc_observability_log.shadowed_fields")
+            .is_none(),
+        "no shadowed_fields key without a collision"
     );
 }
 
