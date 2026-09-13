@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 ## Hard Dependencies
 
 - a-3 is pushed (it is the stack parent). The a-4 PR is merged to `develop`, and the `phase-a-core` layers have been rebased onto that `develop` before development starts.
-- The sc-observability team reviews over ATM, per `../sc-observability/docs/team-protocol.md`, using its review agents in `../sc-observability/.claude/agents/`: `rust-architect`, `rust-code-reviewer` and `arch-qa`.
+- Review coordination runs over ATM between btit `team-lead` (team `bit`, `.atm.toml`) and `cobs` on team `sc-observability` (`../sc-observability/.atm.toml`), following `../sc-observability/docs/team-protocol.md` (ack on receipt, completion message, receiver ack). btit `team-lead` sends the review request and receives findings; `cobs` owns the review on the sc-observability side, including which of that team's reviewers it involves.
 
 ## Dependency Relations
 
@@ -67,7 +67,7 @@ the scope this sprint claims. If that cannot be done cleanly in one sprint, the
 sprint must be split before implementation begins. No deliverable may be
 silently dropped or partially deferred.
 
-1. **Review request.** Sent to the sc-observability team for the reviewed commit, which is the a-5 branch head after rebasing onto `develop`. It covers the crate paths, `docs/mapping.md`, `docs/compatibility.md`, and btit's adoption diff from a-4.
+1. **Review request.** btit `team-lead` sends it over ATM to `cobs` (`atm send cobs --team sc-observability …`) for the reviewed commit, which is the a-5 branch head after rebasing onto `develop`. It covers the crate paths, `docs/mapping.md`, `docs/compatibility.md`, and btit's adoption diff from a-4.
 2. **`review-a-5.md`.** Lists every finding with id, reviewer, severity (Blocking / Important / Minor), file:line, disposition (`fixed <commit>` or `rejected — reviewer agreed <message ref>`), and reviewed commit.
 3. **Fixes.** Every Blocking and Important finding is fixed in `crates/`, and the full `crates` gate set is re-run after the last fix. Each Minor finding is either fixed, or recorded in `review-a-5.md` as a follow-up for a-6 or the sc-observability backlog.
 4. **Type-placement decision.** `review-a-5.md` records the team's decision and target crate (`sc-observability-types` or the new crates) for each of these item groups:
@@ -75,7 +75,7 @@ silently dropped or partially deferred.
    - `TraceId`/`SpanId` generation
    - `TargetCategory`/`ActionName` sanitizers
    - `LevelFilter` conversions
-5. **Re-review confirmation.** The sc-observability team confirms that no Blocking or Important finding remains open, and the message reference is recorded in `review-a-5.md`.
+5. **Re-review confirmation.** `cobs` confirms to btit `team-lead` over ATM that no Blocking or Important finding remains open, and the ATM message reference is recorded in `review-a-5.md`.
 
 ## Required Work
 
@@ -88,11 +88,12 @@ silently dropped or partially deferred.
 <!-- docs/plans/phase-a/review-a-5.md -->
 # a-5 review record
 reviewed_commit: <sha>
-reviewers: rust-architect, rust-code-reviewer, arch-qa (sc-observability team)
+coordination: team-lead@bit ⇄ cobs@sc-observability (ATM)
+review_request: <atm message ref>
 
-| id | reviewer | severity | file:line | finding | disposition |
+| id | reported by | severity | file:line | finding | disposition |
 |----|----------|----------|-----------|---------|-------------|
-| R-001 | rust-code-reviewer | Important | crates/sc-observability-log/src/bridge.rs:42 | ... | fixed abc1234 |
+| R-001 | cobs | Important | crates/sc-observability-log/src/bridge.rs:42 | ... | fixed abc1234 |
 
 ## Type placement
 | item | decision | target crate | decided by (message ref) |
@@ -114,7 +115,7 @@ confirmation: <message ref>   open_blocking: 0   open_important: 0
 1. `review-a-5.md` exists, with the reviewed commit, every finding in the table format above, and `open_blocking: 0`, `open_important: 0`.
 2. Every `fixed` disposition references a commit on `feature/sprint-a-5-sc-review` that exists in the branch history.
 3. The type-placement table has a decision for all four item groups.
-4. The re-review confirmation message reference is recorded.
+4. The ATM review-request and `cobs` re-review confirmation message references are recorded.
 5. All `crates` gates and btit gates pass at the branch head.
 
 ## Required Validation
