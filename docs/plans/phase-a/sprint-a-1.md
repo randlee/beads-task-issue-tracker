@@ -1,7 +1,7 @@
 ---
 id: a-1
 title: sc-observability-log crate — log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-1-log-bridge
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge
 target: integrate/phase-a
@@ -833,6 +833,25 @@ jobs:
           rustup toolchain install 1.94.1 --profile minimal --no-self-update
           cargo +1.94.1 check --locked --manifest-path crates/Cargo.toml --workspace --all-targets
 ```
+
+## Implementation Notes
+
+Approved developer deviations from the plan text, recorded here for a-2/a-3/a-5:
+
+1. `record_to_parts` returns `Result<EventParts, LabelError>`, not the bare
+   `EventParts` shown in the Deliverable 7/lib.rs skeleton sample. The
+   sanitizer can reject a target after sanitizing (`LabelError::Rejected`),
+   and `record_to_parts` must surface that instead of silently substituting
+   a value; its caller (`bridge::Bridge::log`) maps `Err` to
+   `record_drop(DropCause::InvalidEvent)` and drops the record. Approved by
+   arch-qa, req-qa, rust-qa, rust-best-practices during QA-1 triage.
+2. `crates/sc-observability-log/tests/api_freeze.rs` carries an extra
+   file-level `#![allow(clippy::items_after_statements, clippy::match_same_arms, reason = "...")]`
+   beyond the no-panic allowances in Deliverable 1, because the signature-lock
+   style (derive-probe functions beside the assertions they serve, and one
+   `match` arm per variant for exhaustiveness-by-name) trips those two
+   pedantic lints. Approved by arch-qa, req-qa, rust-qa, rust-best-practices
+   during QA-1 triage; the file remains frozen otherwise.
 
 ## This Sprint Does Not Close
 
