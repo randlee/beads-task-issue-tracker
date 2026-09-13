@@ -1,7 +1,7 @@
 ---
 id: a-4
 title: btit adopts the sc-observability-log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-4-btit-adoption
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption
 target: integrate/phase-a
@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
+- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `integrate/phase-a` after that merge, as a single PR on `integrate/phase-a` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children. (Corrected from an earlier draft that said `develop`; see "Implementation Notes" below — the frontmatter `target:` was already correct.)
 - a-2 and a-3 are **not** prerequisites (`parallel_safe`).
 
 ## Dependency Relations
@@ -323,3 +323,11 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 - `git diff --exit-code integrate/phase-a...HEAD -- crates/`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets`
 - `pnpm tauri:build` (manual verification per Required Work)
+
+## Implementation Notes
+
+- **Stale "Hard Dependencies" wording (corrected).** The original text said the a-4 branch is "created from `develop`" and is "a single PR on `develop`". That contradicted this doc's own frontmatter (`target: integrate/phase-a`) and `plan-phase-a.md` (`a-4` lane: "single PR on `integrate/phase-a`", created from `origin/integrate/phase-a`). The wording is corrected in place above; no behavior changed, this is a doc-only fix.
+- **PR base while a-1 is unmerged.** At the time of this sprint's development, a-1's PR (#43) had not yet merged to `integrate/phase-a`. The a-4 branch was created from `origin/feature/sprint-a-1-log-bridge` (a-1's tip) per the task's worktree setup, not from `integrate/phase-a` directly (which does not yet contain `crates/`). The a-4 PR is opened with base `feature/sprint-a-1-log-bridge` so its diff shows only a-4's changes; it will be retargeted to `integrate/phase-a` after #43 merges, per the plan's stated workflow.
+- **`crates/` diff check timing.** The Required Validation command `git diff --exit-code integrate/phase-a...HEAD -- crates/` is written for the post-a-1-merge state, where `integrate/phase-a` already contains `crates/`. Run today (before #43 merges), that exact command reports a diff consisting entirely of a-1's own content (because `integrate/phase-a` has no `crates/` yet), not anything a-4 added. The equivalent check against a-4's actual parent, `git diff --exit-code origin/feature/sprint-a-1-log-bridge...HEAD -- crates/`, is empty, confirming a-4 touches no file under `crates/` (acceptance criterion 11). This is a sequencing artifact of running a-4 while a-1 is unmerged, not a deviation from the spec.
+- **`log_frontend` unknown-level match arms.** Deliverable 7 describes the fallback as "other" mapping to `Info`. The implementation matches `"error"`, `"warn"`, `"info"` explicitly (rather than treating `"info"` as part of the fallback arm, as the original plain-text version did) so the `frontend_level` kv field is attached only to genuinely unrecognized strings, matching the deliverable's intent precisely. Behavior for `"error"`/`"warn"`/`"info"` is unchanged.
+- No other deviations from the spec were required; the a-1 public API (`init`, `BridgeOptions`, `LogGuard`, `InitError`, `FlushError`, `ShutdownError`, `DropCause`, `LevelFilter`, `ServiceName`, `ActionName`) matched the code samples in `sprint-a-1.md` exactly, so `logging.rs` and `lib.rs` were written directly against the code samples in this doc without any `crates/` changes.

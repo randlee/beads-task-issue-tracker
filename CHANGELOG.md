@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Internal
+- **btit adopts the sc-observability-log bridge** (phase-a sprint a-4): `tauri-plugin-log` is replaced by `sc_observability_log::init`. The active log file is now `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`, structured JSONL instead of plain text. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changed; the debug panel renders the JSONL through the new `app/utils/log-format.ts`. Exit is bounded: `RunEvent::Exit` takes the log guard and makes exactly one call (`shutdown` or `flush`) bounded by 2s.
+
 ## [1.24.5] - 2026-09-13
 
 > Targets **bd 1.x**. bd < 1.0 is legacy and should trigger a warning. **br** remains supported as a secondary CLI.

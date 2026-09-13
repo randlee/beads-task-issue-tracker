@@ -388,7 +388,7 @@ Polling: useAdaptivePolling → bdCheckChanged() (mtime) → if changed → bdPo
 |---------|----------|---------|
 | CLI binary | `~/.config/com.beads.manager/settings.json` | bd or br path |
 | Backend mode | `localStorage beads:proj:{hash}:backendMode` | Per-project: `br`/`bd`/`built-in` |
-| Logs | `~/Library/Logs/com.beads.manager/beads.log` | Backend logs (5MB max) |
+| Logs | `~/Library/Logs/com.beads.manager/logs/beads-task-issue-tracker.log.jsonl` | Structured JSONL via `sc-observability-log` bridge (phase-a); rendered by `app/utils/log-format.ts` |
 | Project settings | `localStorage beads:proj:{hash}:*` | Filters, columns, expanded epics, collapsible states |
 | Global settings | `localStorage beads:*` | Theme, favorites, zoom, notifications |
 | Window | `tauri.conf.json` | 1400x900, min 800x600, overlay title bar |
