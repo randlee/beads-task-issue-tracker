@@ -5,6 +5,15 @@ This document records how `sc-observability-log` turns a `log::Record` into a
 semantics of the emit path, and the error inventory. The sections below are
 taken verbatim from the sprint a-1 plan (`docs/plans/phase-a/sprint-a-1.md`).
 
+## Implementation notes (approved deviations)
+
+`record_to_parts` returns `Result<EventParts, LabelError>` rather than a bare
+`EventParts`: the target sanitizer can reject a value after sanitizing
+(`LabelError::Rejected`), and the caller must be able to drop that record and
+count `DropCause::InvalidEvent` instead of receiving a placeholder. See
+`docs/plans/phase-a/sprint-a-1.md` (Implementation Notes) for the full record
+of this and the `tests/api_freeze.rs` lint-allow deviation.
+
 ## Record mapping
 
 Implemented in `src/mapping.rs`.
