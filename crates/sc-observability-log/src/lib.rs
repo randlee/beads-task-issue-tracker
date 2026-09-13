@@ -39,6 +39,7 @@
 pub mod error_codes;
 
 mod bridge;
+mod callsite;
 mod error;
 mod handle;
 mod mapping;
@@ -58,8 +59,54 @@ pub use sc_observability_types::{
     ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
     TargetCategory,
 };
-// `Level` is intentionally NOT re-exported: a-2 defines a tracing-style
-// `sc_observability_log::Level` (associated consts TRACE..ERROR).
+// `sc_observability_types::Level` is intentionally NOT re-exported: the crate
+// root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
+
+/// tracing 0.1 compatible event macros; migrating is an import rename.
+#[doc(inline)]
+pub use sc_observability_log_macros::{debug, error, event, info, trace, warn};
+
+/// tracing-compatible level type (mirrors the `tracing::Level` constants).
+///
+/// It has no `PartialOrd`/`Ord`: tracing orders by verbosity, which would
+/// surprise here. Its associated consts make `const LVL: Level = Level::WARN;
+/// event!(LVL, ..)` work as in tracing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Level(LevelInner);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum LevelInner {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    /// The most verbose level.
+    pub const TRACE: Level = Level(LevelInner::Trace);
+    /// Diagnostic detail for development.
+    pub const DEBUG: Level = Level(LevelInner::Debug);
+    /// Normal operation.
+    pub const INFO: Level = Level(LevelInner::Info);
+    /// Degraded or unexpected behavior.
+    pub const WARN: Level = Level(LevelInner::Warn);
+    /// Failures.
+    pub const ERROR: Level = Level(LevelInner::Error);
+}
+
+impl From<Level> for sc_observability_types::Level {
+    fn from(level: Level) -> Self {
+        match level.0 {
+            LevelInner::Trace => sc_observability_types::Level::Trace,
+            LevelInner::Debug => sc_observability_types::Level::Debug,
+            LevelInner::Info => sc_observability_types::Level::Info,
+            LevelInner::Warn => sc_observability_types::Level::Warn,
+            LevelInner::Error => sc_observability_types::Level::Error,
+        }
+    }
+}
 
 use handle::{INSTALLED, Installed, SLOT, THRESHOLD};
 
@@ -275,6 +322,16 @@ pub mod __private {
 
     pub use serde_json::{Map, Value};
 
+    /// The `LogEvent` level type the expansions pass to `emit_callsite`.
+    pub use sc_observability_types::Level;
+
+    /// Call-site label caches and field-value dispatch for the event macros.
+    pub use crate::callsite::{
+        Callsite, DebugKind, DebugKindTag, DynamicKey, FieldDebug, FieldRecord, FieldValue,
+        SerializeKind, SerializeKindTag, debug_value, display_value, emit_callsite,
+        record_dynamic_field, record_field,
+    };
+
     /// The single label sanitizer (`mapping.rs`).
     pub use crate::mapping::{
         LabelError, LabelKind, RESERVED_FIELD_PREFIX, action_label, field_key_label,
@@ -344,5 +401,23 @@ pub mod __private {
     /// A wrapper, not `pub use`: re-exporting the `pub(crate)` fn is E0364.
     pub fn record_drop(cause: DropCause) {
         handle::record_drop(cause);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Level;
+
+    #[test]
+    fn level_converts_one_to_one() {
+        for (level, expected) in [
+            (Level::TRACE, sc_observability_types::Level::Trace),
+            (Level::DEBUG, sc_observability_types::Level::Debug),
+            (Level::INFO, sc_observability_types::Level::Info),
+            (Level::WARN, sc_observability_types::Level::Warn),
+            (Level::ERROR, sc_observability_types::Level::Error),
+        ] {
+            assert_eq!(sc_observability_types::Level::from(level), expected);
+        }
     }
 }
