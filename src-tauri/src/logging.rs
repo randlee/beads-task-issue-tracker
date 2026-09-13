@@ -357,10 +357,13 @@ mod tests {
 
     impl ScratchDir {
         fn new(label: &str) -> Result<Self, TestError> {
+            // Path-safe on every OS: `Instant`'s Debug output contains `:` and
+            // braces, which Windows rejects in directory names (os error 267).
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let unique = format!(
-                "btit-logging-test-{label}-{}-{:?}",
+                "btit-logging-test-{label}-{}-{}",
                 std::process::id(),
-                std::time::Instant::now()
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             let dir = std::env::temp_dir().join(unique);
             fs::create_dir_all(&dir)?;
