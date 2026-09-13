@@ -1,7 +1,7 @@
 ---
 id: a-3
 title: "#[instrument] — tracing-compatible attribute"
-status: planned
+status: complete
 branch: feature/sprint-a-3-instrument
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-3-instrument
 target: integrate/phase-a
@@ -390,6 +390,67 @@ async fn bd_update(id: String, cwd: String, payload: UpdatePayload) -> Result<Is
     __sc_out
 }
 ```
+
+## Implementation Notes
+
+Developer deviations from the plan text, each minimal and recorded here for QA and a-5:
+
+1. **`CallSpan::new` signature.** Implemented as
+   `CallSpan::new(callsite: &'static Callsite, levels: CallLevels, fields: impl FnOnce() -> Map<String, Value>)`
+   instead of `new(callsite, level, error_level, fields: Map<String, Value>)`.
+   The completion level precedence in Required Work needs three distinct
+   levels (`ok` → `ret(level)` else `level`; `error` → `err(level)` else
+   `ERROR`; `panicked`/`cancelled` → `level`), which two parameters cannot
+   carry when `ret(level = ..)` is given. `CallLevels { level, ok, error }`
+   (new `#[doc(hidden)] __private` item) carries them; without `err`,
+   `error = level` (the `error` outcome cannot occur). The closure makes
+   argument recording lazy (note 5).
+2. **`CallSpan::enabled(outcome)`.** Added (`__private`) so the expansion formats
+   `ret`/`err` values only when that outcome's completion event is enabled.
+   When it is not, `finish_err` receives a placeholder
+   `FieldRecord::Value(Value::Null)` that `complete` discards before use; the
+   `finish_ok`/`finish_err` signatures are as specified.
+3. **Where `emit` attaches the trace.** Exact Targets lists `handle.rs`, but
+   `__private::emit` is defined in `src/lib.rs`; the `current_trace()`
+   assignment is made there (after `assemble_event`), so it covers bridge
+   records, event macros and completion events alike. `handle.rs` is unchanged.
+   `src/mapping.rs` changes only the `assemble_event` doc comment (it no longer
+   claims to fill `trace`); its `trace: None` initializer and unit test are
+   unchanged.
+4. **Files beyond Exact Targets.**
+   - `src/callsite.rs`: the a-2 label handling of `emit_callsite` is extracted into
+     the crate-private `callsite_parts` (with an `outcome` parameter), so the
+     completion event follows a-2 Deliverables 5 and 6 through the same code
+     rather than a copy. `emit_callsite` behaves as before.
+   - `sc-observability-log-macros/src/fields.rs`: the `FieldContext::Instrument`
+     messages now match the rejected-forms table (the deferred-field message
+     names the key; string-literal keys are rejected in instrument context), and
+     `unraw` became `pub(crate)`; the a-2 unit test for instrument context was
+     updated to the new messages. `src/event.rs`: `expand_field` became
+     `pub(crate)` for reuse. No event-macro behavior changed.
+   - `tests/ui.rs`: doc comment only (the glob already picks up the new cases).
+5. **Laziness.** Arguments and `fields(..)` are recorded only when one of the
+   completion levels is enabled when the call starts, and `complete` returns
+   without emitting (and without counting) when the outcome's level is disabled,
+   matching the event macros' `enabled` gate. The plan does not state a laziness
+   rule for `#[instrument]`; the trace context is still created for every call.
+   `tests/instrument_jsonl.rs` proves it with a `level = "trace"` call whose
+   argument's `Debug` and `Serialize` impls panic.
+6. **Fake return edge.** As tracing-attributes does (`expand.rs`), the rewritten
+   sync closure and async block start with an unreachable
+   `if false { let x: Ret = loop {}; return x; }` (`impl Trait` erased to `_`,
+   omitted for `-> !`), so `?` in the body infers the fn's return type. The
+   sample expansions omit it; without it `?` fails with E0282.
+7. **Argument parsing strictness.** An unknown argument is a compile error
+   (`` unknown `#[instrument]` argument `x` ``); tracing-attributes 0.1.31 only
+   emits a deprecation warning. `name = ..`/`target = ..` accept any `const`
+   path (tracing: a single identifier) and `level = ..` any path; both are
+   supersets of the tracing grammar.
+8. **Cross-worker test.** Besides the 4-worker tokio test (32 tasks hopping across
+   `.await`), `tests/instrument_jsonl.rs` polls an instrumented future once on the
+   test thread and resumes it on a spawned OS thread, which deterministically
+   proves context restoration after resuming on a different thread (a tokio
+   worker hop cannot be forced).
 
 ## This Sprint Does Not Close
 

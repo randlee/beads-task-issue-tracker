@@ -28,7 +28,7 @@ Implemented in `src/mapping.rs`.
 | `key_values()` (the `log` `kv` feature) | `fields[key] = serde_json::Value` (numbers, bools and strings typed; others `to_string()`) |
 | `module_path()`, `file()`, `line()` | `fields["code.module"]`, `fields["code.file"]`, `fields["code.line"]` (omitted when `None`) |
 | none | `service` = `LoggerConfig.service_name`; `identity` = the value `init` resolved (resolved once from `LoggerConfig.process_identity`); `version` = envelope version; `timestamp` = `Timestamp::now_utc()` |
-| none | `trace` = `None` (a-3 replaces this row: ambient span context at emit time) |
+| none | `trace` = the ambient `#[instrument]` context at emit time: `__private::emit` reads `current_trace()`, the innermost `TraceContext` entered on the emitting thread, for every event (`log` bridge records, event macros and `#[instrument]` completion events alike); `None` outside any instrumented call, or when the thread-local context stack is unavailable. Events inside an instrumented call carry that call's `trace_id` and `span_id` (and its parent's `span_id` as `parent_span_id`); the completion event carries the call's own `span_id`. See `compatibility.md`, "Context rules". |
 | none | `request_id`, `correlation_id`, `outcome`, `diagnostic`, `state_transition` = `None` |
 | `log::Log::flush()` | no-op; nothing is flushed (use `LogGuard::flush(timeout)`) |
 

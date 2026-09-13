@@ -127,7 +127,9 @@ impl CompatWidget {
 
 // ---- ret ----
 
+/// Outer attributes (this doc comment and `#[inline]`) are kept on the rewritten fn.
 #[instrument(name = "compat.ret", ret)]
+#[inline]
 fn compat_ret(n: u32) -> u32 {
     n * 2
 }

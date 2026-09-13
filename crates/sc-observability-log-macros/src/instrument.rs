@@ -4,7 +4,7 @@
 //! rewrite keeps the signature, visibility, generics, `where` clause, attributes
 //! and `async`-ness of the function and replaces only its body:
 //!
-//! - a `static` `Callsite` holds the unsanitized `target` and `name`, labelled at
+//! - a `static` `Callsite` holds the raw `target` and `name` values, labelled at
 //!   runtime by `sc-observability-log` (this crate never rewrites labels);
 //! - a `CallSpan` records the arguments and `fields(..)` and owns the trace
 //!   context;

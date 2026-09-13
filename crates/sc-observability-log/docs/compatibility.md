@@ -7,7 +7,7 @@ crates, so migrating is a dependency change plus an import rename.
   `target:` and `key = value; "msg"`, keep working unchanged through the bridge
   installed by `sc_observability_log::init` (see `mapping.md`).
 - **`tracing` 0.1 events:** this document, section "Events" (sprint a-2).
-- **`tracing::instrument`:** added in sprint a-3.
+- **`tracing::instrument`:** this document, section "`#[instrument]`" (sprint a-3).
 
 ## Events
 
@@ -147,3 +147,171 @@ inside the macro expansion, as with `tracing`. When the level is disabled, the
 field and message expressions are not evaluated. In async code, keep field
 `Serialize`, `Debug` and `Display` implementations cheap: the work runs on the
 executor thread that called the macro.
+
+## `#[instrument]`
+
+`#[sc_observability_log::instrument]` accepts the `tracing::instrument`
+arguments below with the same meanings (verified against `tracing-attributes`
+0.1.31). It works on sync and `async` free functions and methods, including
+`self`, `&self` and `&mut self` receivers, and keeps the signature, visibility,
+generics, `where` clause, attributes and `async`-ness unchanged. Instead of a
+span, each call emits exactly one **completion** `LogEvent` carrying the
+duration and the outcome, and every event emitted inside the call carries the
+call's `TraceContext`.
+
+### Migration how-to
+
+```rust
+// before: use tracing::{info, instrument};
+use sc_observability_log::{info, instrument};
+
+const ISSUES: &str = "btit.issues";
+
+#[instrument(name = "bd_update", target = ISSUES, skip(payload), fields(project = %cwd), err(level = "warn"))]
+async fn bd_update(id: String, cwd: String, payload: UpdatePayload) -> Result<Issue, String> {
+    info!(name: "bd_update", id = %id, "updating"); // carries this call's TraceContext
+    run(&id, &cwd, payload).await
+}
+```
+
+Nothing else changes for any form in the argument table. The shared fixture
+`tests/compat/instrument.rs` proves it: the same source compiles against
+`tracing::instrument`, against `sc_observability_log::instrument` (where
+`tests/compat_instrument.rs` asserts its JSONL output), and inside
+`sc-observability-log-consumer-check`, whose only dependency is
+`sc-observability-log`.
+
+### Argument table (supported forms)
+
+| Argument | Behavior |
+|---|---|
+| `name = "n"`, `name = NAME` (a `const &'static str`), or a positional string literal `#[instrument("n")]` | `action` = the value (default: the fn name), stored unchanged in the `static` `Callsite` and labelled at runtime by `action_label` on first use |
+| `target = "t"`, `target = TGT` | `target` = the value (default: `module_path!()`), labelled at runtime by `target_label` through the same `Callsite` cache |
+| `level = "info"` (case-insensitive), `level = Level::INFO`, `level = LVL` (a `const` of type `sc_observability_log::Level`), or `level = 1..=5` (1 = trace … 5 = error) | level of the completion event (default `INFO`) |
+| `skip(a, b)` | the listed arguments (including `self`) are not recorded; naming a parameter that does not exist is a compile error, as in tracing |
+| `skip_all` | no arguments are recorded |
+| `fields(k = v, ?x, %y, a.b = 1, { C } = 1, { C } = ?v, r#type = 1)` | extra fields, parsed and recorded exactly like the event-macro field rows ("Grammar table" above): bare values use the Serialize-else-Debug dispatch, `?`/`%` record Debug/Display strings, `{ C } = v` is labelled at runtime by `field_key_label` (an empty or reserved key omits only that field and is counted), `r#type` records `"type"`. A field whose single-segment key equals a parameter name replaces that parameter's recording, as in tracing |
+| *(default)* | every non-skipped typed argument is recorded as `fields["arg"]` with the bare-field dispatch; identifiers bound by tuple, struct and reference patterns are recorded individually. The receiver (`self`, `&self`, `&mut self`) **is** recorded as `fields["self"]` with Debug, as tracing does (a non-`Debug` receiver gets the `FieldDebug` diagnostic); `skip(self)` removes it |
+| `ret` / `ret(Debug)` / `ret(Display)` | `fields["return"]`; bare `ret` formats with **Debug**. With `err` present it records the `Ok` value; without `err` it records the whole return value |
+| `ret(level = L)`, `ret(Debug, level = L)`, `ret(Display, level = L)` | as `ret`; the completion level is `L` when the outcome is `ok` |
+| `err` / `err(Debug)` / `err(Display)` | when the fn returns `Err`: outcome `error`, completion `level = ERROR` and `fields["error"]`; bare `err` formats with **Display** |
+| `err(level = L)`, `err(Debug, level = L)`, `err(Display, level = L)` | as `err`; the completion level is `L` instead of `ERROR` |
+
+`L` accepts the same forms as `level = ..`.
+
+**Completion level precedence:** `ok` → the `ret(level = ..)` level if given,
+else `level`; `error` → the `err(level = ..)` level if given, else `ERROR`;
+`panicked` / `cancelled` → `level`.
+
+**Static-type dispatch.** As for event macros, the Serialize-or-Debug choice is
+made from the argument's static type: in `fn f<T: Debug>(t: T)` a value whose
+concrete type also implements `Serialize` records its **Debug string**; bound
+`T: Debug + Serialize` to record JSON.
+
+**Laziness.** Arguments and `fields(..)` are recorded only when one of the
+completion levels (`level`, the `ok` level, and the `err` level when `err` is
+present) is enabled when the call starts; `ret`/`err` values are formatted only
+when the completion event for that outcome is enabled. A call whose completion
+level is disabled still creates its trace context, so events inside it keep
+their `trace`. The event-macro "Field value size" and "Evaluation cost" rules
+above apply equally to recorded arguments, `fields(..)` values and `ret`/`err`
+values: they are recorded synchronously on the calling thread (for an async fn,
+the executor thread polling it) with no size cap.
+
+### Completion event
+
+| Field | Value |
+|---|---|
+| `action` | `name`, labelled and cached by the `Callsite` |
+| `target` | `target`, labelled and cached by the `Callsite` |
+| `level` | by the completion level precedence above |
+| `message` | `None` |
+| `outcome` | `ok` / `error` (`err` present and `Err` returned) / `panicked` (sync or async unwind) / `cancelled` (async future dropped after its first poll, before completion) |
+| `fields` | recorded arguments (including `self` unless skipped), plus `fields(..)`, plus `duration_ms` (u64 milliseconds, saturating), plus `return` / `error` when applicable |
+| `trace` | this call's `TraceContext` (its own `span_id`) |
+
+### Outcomes
+
+- **`ok` / `error`.** A sync body runs as `(move || body)()`, so `return` and
+  `?` leave only the closure: an early `return Ok(..)` or `?` on the `Ok` path
+  is `ok`, an early `return Err(..)` or `?` on an `Err` is `error` (with `err`),
+  and a fn without `err` that returns early is `ok`. An async body is an
+  `async move` block driven in place, with the same rules.
+- **`panicked`.** The instrumented function's own panic is **never caught and
+  never re-raised**: it unwinds through the call's guards, which only record
+  `panicked` and emit the completion event while the panic propagates. For an
+  async fn that panics inside `poll`, the flag is set during unwinding and the
+  event is emitted when the runtime drops the future.
+- **`cancelled`.** An async future dropped **after its first poll** and before
+  completion (for example by `tokio::time::timeout`) emits `cancelled`.
+- **Never polled.** The call context is created inside the async body, on the
+  first poll. A future dropped before its first poll has not run its body, so
+  it creates no context and emits **nothing**. This is not an outcome.
+
+### Context rules
+
+- Each call gets a new `span_id`. Its `trace_id` and `parent_span_id` are the
+  `trace_id` and `span_id` of the innermost context entered on the calling
+  thread when the call starts (the first poll for an async fn); with none, the
+  call starts a new trace (`parent_span_id = None`).
+- The context is entered for the sync body, and for **each poll** of an async
+  body, so it is restored after every `.await`, on whichever thread resumes the
+  future. It is never left entered between polls.
+- Every event emitted while the context is entered carries it: event macros,
+  `log` bridge records and the completion event itself, whose `trace.span_id`
+  is the call's own `span_id`. Outside any instrumented call, `trace` is `None`.
+- Ids are generated with std only: `trace_id` is 32 and `span_id` 16 lowercase
+  hex digits, never all zero, validated by `TraceId::new` / `SpanId::new`. A
+  validation failure (unreachable) records `trace = None` instead of panicking.
+- The per-thread stack is reached only through `LocalKey::try_with` and
+  `RefCell::try_borrow`/`try_borrow_mut`. During thread teardown, or if the
+  stack is already borrowed, entering does nothing and the current context
+  reads as `None`.
+- The entry guard is `!Send`: holding it across `.await` makes the future
+  `!Send` (`ui/instrument_entered_across_await.rs`). The generated async code
+  never does, so an instrumented `async fn` whose body is `Send` still returns
+  a `Send` future.
+
+### Runtime labels
+
+Label failures follow the event-macro rules ("Runtime labels and keys"):
+
+- a `name` failing `action_label`: the completion event **still emits** with
+  the bridge default action, counted as `DropCause::InvalidEvent`;
+- a target failing `target_label` (unreachable): the completion event is not
+  emitted, counted;
+- a `fields({ C } = v)` key failing `field_key_label`: only that field is
+  omitted, counted.
+
+A `CallOutcome` label failing `OutcomeLabel::new` (unreachable; a unit test
+proves all four validate) emits the completion event with `outcome = None` and
+counts `DropCause::InvalidEvent`.
+
+### Rejected `#[instrument]` forms
+
+#### Valid in tracing, deliberately rejected
+
+Each fails to compile with the message shown; the trybuild case under
+`tests/ui/` checks in the expected stderr.
+
+| Form | trybuild case | Message |
+|---|---|---|
+| `parent = ..` | `ui/instrument_parent.rs` | `` `parent` is not supported (no span parents) `` |
+| `follows_from = ..` | `ui/instrument_follows_from.rs` | `` `follows_from` is not supported (no span links) `` |
+| deferred field without a value: `fields(x)`, `fields(a.b)` | `ui/instrument_deferred_field.rs` | `` deferred field `x` without a value is not supported (tracing `field::Empty`) `` |
+| deferred field `fields(x = tracing::field::Empty)` | `ui/instrument_field_empty.rs` | `` deferred fields (`field::Empty`) are not supported `` |
+| reserved dotted key `fields(sc_observability_log.x = 1)` | `ui/instrument_reserved_key.rs` | `` field keys starting with `sc_observability_log.` are reserved `` |
+
+Keep span parents, span links and deferred fields on `tracing`.
+
+#### Not valid in tracing either
+
+| Form | trybuild case | Message |
+|---|---|---|
+| string-literal key `fields("k" = 1)` (covers `""` and reserved strings) | `ui/instrument_literal_key.rs` | `` string-literal field keys are not supported in `#[instrument(fields(..))]`; use an identifier `` |
+| applied to a non-fn item | `ui/instrument_non_fn.rs` | `` `#[instrument]` can only be applied to functions `` |
+
+An unknown argument fails with `` unknown `#[instrument]` argument `x` ``
+(tracing-attributes only warns), and other malformed arguments fail with the
+same messages as tracing-attributes (for example
+`` expected only a single `level` argument ``).
