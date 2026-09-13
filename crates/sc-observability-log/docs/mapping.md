@@ -29,6 +29,12 @@ Implementation notes:
   `code.module`, `code.file` or `code.line` is overwritten by the record location.
 - A target that the sanitizer cannot label (`LabelError::Rejected`, not expected
   for sanitized input) drops the record and counts `DropCause::InvalidEvent`.
+- Neither `record_to_parts` nor sc-observability 1.2.0 caps the size of a
+  message or a `kv` field: `LoggerConfig.rotation_max_bytes` bounds the active
+  JSONL file, and `queue_capacity` bounds the emit queue by event count, but
+  no setting bounds the byte size of one event. Unusually large messages or
+  fields are copied and emitted as-is (see the README `No message or field
+  size cap` section).
 
 ## Label sanitizer
 

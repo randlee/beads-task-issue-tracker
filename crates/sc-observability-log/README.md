@@ -103,6 +103,19 @@ dropped event is counted under exactly one `DropCause`, readable with
 instead of being counted as `DropCause::LoggerPanicked`. The helper threads used
 by `flush` and `shutdown` likewise cannot contain such a panic.
 
+## No message or field size cap
+
+`record_to_parts` copies `log::Record::args()` and every `kv` field into the
+`LogEvent` unbounded; sc-observability 1.2.0 has no per-event or per-field
+byte-size limit either (`rotation_max_bytes` on `LoggerConfig` bounds the
+active JSONL *file*, not a single event, and `Logger::try_log`'s queue is
+bounded by event *count*, via `queue_capacity`, not by bytes). An unusually
+large message or field set is therefore emitted as-is; it is bounded only by
+available memory and by the sink's own write path. No truncation is
+implemented in this crate: adding one would need a documented, callable
+policy (which limit, which fields, silent vs. counted truncation) and is left
+for a future sprint if event or field sizes prove to be a real-world problem.
+
 ## Process identity
 
 sc-observability 1.2.0 stores `LoggerConfig.process_identity` but never applies
