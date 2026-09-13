@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
-use sc_observability_types::{ActionName, TargetCategory};
+use sc_observability_types::{ActionName, OutcomeLabel, TargetCategory};
 
 use crate::__private::{
     EventParts, LabelError, Level, Map, Value, action_label, emit, field_key_label, record_drop,
@@ -73,10 +73,26 @@ pub fn emit_callsite(
     message: Option<String>,
     fields: Map<String, Value>,
 ) {
+    if let Some(parts) = callsite_parts(callsite, level, message, None, fields) {
+        emit(parts);
+    }
+}
+
+/// Builds `EventParts` from the cached call-site labels; shared with `#[instrument]`.
+///
+/// Returns `None`, after counting `DropCause::InvalidEvent`, when the target
+/// failed `target_label`. An invalid `name` is counted and yields `action = None`.
+pub(crate) fn callsite_parts(
+    callsite: &'static Callsite,
+    level: Level,
+    message: Option<String>,
+    outcome: Option<OutcomeLabel>,
+    fields: Map<String, Value>,
+) -> Option<EventParts> {
     let labels = callsite.labels();
     let Ok(target) = labels.target.clone() else {
         record_drop(DropCause::InvalidEvent);
-        return;
+        return None;
     };
     let action = match &labels.action {
         None => None,
@@ -86,14 +102,14 @@ pub fn emit_callsite(
             None
         }
     };
-    emit(EventParts {
+    Some(EventParts {
         level,
         target,
         action,
         message,
-        outcome: None,
+        outcome,
         fields,
-    });
+    })
 }
 
 /// One per `{ KEY } = v` expansion; `KEY` is a constant `&'static str`, as tracing requires.

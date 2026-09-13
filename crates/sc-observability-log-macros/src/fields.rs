@@ -234,6 +234,13 @@ pub(crate) fn parse_field_list(
 ) -> syn::Result<(Vec<Field>, Option<TokenStream>)> {
     let mut fields = Vec::new();
     while !input.is_empty() {
+        if context == FieldContext::Instrument && input.peek(LitStr) {
+            let lit: LitStr = input.parse()?;
+            return Err(syn::Error::new(
+                lit.span(),
+                "string-literal field keys are not supported in `#[instrument(fields(..))]`; use an identifier",
+            ));
+        }
         if !starts_field(input) {
             if context == FieldContext::Instrument {
                 return Err(input.error("expected a field"));
@@ -286,7 +293,7 @@ fn parse_dotted_key(input: ParseStream<'_>) -> syn::Result<(String, Span, Expr)>
     Ok((key, span, expr))
 }
 
-fn unraw(ident: &Ident) -> String {
+pub(crate) fn unraw(ident: &Ident) -> String {
     let text = ident.to_string();
     match text.strip_prefix("r#") {
         Some(stripped) => stripped.to_owned(),
@@ -384,7 +391,9 @@ fn parse_field(input: ParseStream<'_>, context: FieldContext) -> syn::Result<Fie
         }),
         FieldContext::Instrument => Err(syn::Error::new_spanned(
             &shorthand,
-            "deferred fields (a field without a value) are not supported",
+            format!(
+                "deferred field `{key}` without a value is not supported (tracing `field::Empty`)"
+            ),
         )),
     }
 }
@@ -509,13 +518,33 @@ mod tests {
     #[test]
     fn instrument_context_rejects_value_less_fields() {
         let parser = |input: ParseStream<'_>| parse_field_list(input, FieldContext::Instrument);
-        assert!(parser.parse2(quote!(a.b = 1, c = ?d)).is_ok());
-        let Err(err) = parser.parse2(quote!(x)) else {
-            panic!("value-less field accepted");
-        };
-        assert_eq!(
-            err.to_string(),
-            "deferred fields (a field without a value) are not supported"
+        assert!(
+            parser
+                .parse2(quote!(a.b = 1, c = ?d, %e, { K } = 1))
+                .is_ok()
         );
+        for (tokens, message) in [
+            (
+                quote!(x),
+                "deferred field `x` without a value is not supported (tracing `field::Empty`)",
+            ),
+            (
+                quote!(k = 1, a.b),
+                "deferred field `a.b` without a value is not supported (tracing `field::Empty`)",
+            ),
+            (
+                quote!("k" = 1),
+                "string-literal field keys are not supported in `#[instrument(fields(..))]`; use an identifier",
+            ),
+            (
+                quote!(x = tracing::field::Empty),
+                "deferred fields (`field::Empty`) are not supported",
+            ),
+        ] {
+            let Err(err) = parser.parse2(tokens) else {
+                panic!("expected {message:?}");
+            };
+            assert_eq!(err.to_string(), message);
+        }
     }
 }

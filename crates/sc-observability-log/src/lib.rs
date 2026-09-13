@@ -40,6 +40,7 @@ pub mod error_codes;
 
 mod bridge;
 mod callsite;
+mod context;
 mod error;
 mod handle;
 mod mapping;
@@ -62,9 +63,9 @@ pub use sc_observability_types::{
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
 
-/// tracing 0.1 compatible event macros; migrating is an import rename.
+/// tracing 0.1 compatible event macros and `#[instrument]`; migrating is an import rename.
 #[doc(inline)]
-pub use sc_observability_log_macros::{debug, error, event, info, trace, warn};
+pub use sc_observability_log_macros::{debug, error, event, info, instrument, trace, warn};
 
 /// tracing-compatible level type (mirrors the `tracing::Level` constants).
 ///
@@ -332,6 +333,9 @@ pub mod __private {
         record_dynamic_field, record_field,
     };
 
+    /// `#[instrument]` call context: trace ids, the thread-local stack and the completion event.
+    pub use crate::context::{CallLevels, CallOutcome, CallSpan, Entered, current_trace};
+
     /// The single label sanitizer (`mapping.rs`).
     pub use crate::mapping::{
         LabelError, LabelKind, RESERVED_FIELD_PREFIX, action_label, field_key_label,
@@ -363,6 +367,9 @@ pub mod __private {
 
     /// Submits one event to the installed `Logger` with `try_log`.
     ///
+    /// `LogEvent.trace` is the innermost `#[instrument]` context entered on the
+    /// calling thread (`current_trace()`), or `None` outside any instrumented call.
+    ///
     /// Never blocks on I/O or queue capacity and never panics: the slot read, event
     /// assembly and `try_log` run inside a `catch_unwind` guard. It is not
     /// reentrant: a call on a thread already inside `emit` (a panic hook, sink or
@@ -378,12 +385,14 @@ pub mod __private {
             else {
                 return Err(DropCause::NotInstalled);
             };
-            let event = mapping::assemble_event(
+            let mut event = mapping::assemble_event(
                 parts,
                 &installed.service,
                 &installed.identity,
                 &installed.options.default_action,
             );
+            // Ambient `#[instrument]` context of the emitting thread; bridge records included.
+            event.trace = crate::context::current_trace();
             installed
                 .logger
                 .try_log(event)

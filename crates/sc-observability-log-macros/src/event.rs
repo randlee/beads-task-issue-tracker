@@ -113,7 +113,7 @@ pub(crate) fn expand(spec: &EventSpec, source: LevelSource<'_>) -> TokenStream {
 }
 
 /// Expands one field into a statement inserting it into the field map.
-fn expand_field(
+pub(crate) fn expand_field(
     field: &Field,
     index: usize,
     fields_ident: &syn::Ident,

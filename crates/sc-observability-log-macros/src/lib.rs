@@ -8,16 +8,17 @@
 //! on this crate directly.
 //!
 //! The event macros [`trace!`], [`debug!`], [`info!`], [`warn!`], [`error!`] and
-//! [`event!`] accept the `tracing` 0.1 event syntax; migrating is an import
-//! rename. See `sc-observability-log/docs/compatibility.md` for the supported
-//! grammar and the forms rejected at compile time. `#[instrument]` arrives in
-//! sprint a-3.
+//! [`event!`] accept the `tracing` 0.1 event syntax, and [`macro@instrument`]
+//! accepts the `tracing::instrument` arguments; migrating is an import rename.
+//! See `sc-observability-log/docs/compatibility.md` for the supported grammar
+//! and the forms rejected at compile time.
 //!
 //! This crate never rewrites labels: `target:` / `name:` values and `{ KEY }`
 //! keys are labelled at runtime by `sc-observability-log`.
 
 mod event;
 mod fields;
+mod instrument;
 
 use proc_macro::TokenStream;
 
@@ -106,4 +107,21 @@ pub fn event(input: TokenStream) -> TokenStream {
             .to_compile_error()
             .into(),
     }
+}
+
+/// Instruments a sync or `async` function with `tracing::instrument` arguments.
+///
+/// Each call emits one completion event carrying `duration_ms` and an outcome
+/// (`ok`, `error`, `panicked` or `cancelled`), and every event emitted inside
+/// the call carries the call's trace context. See
+/// `sc-observability-log/docs/compatibility.md`, section "`#[instrument]`".
+///
+/// ```ignore
+/// use sc_observability_log::instrument;
+/// #[instrument(name = "bd_update", target = "btit.issues", skip(payload), err(level = "warn"))]
+/// async fn bd_update(id: String, payload: Payload) -> Result<Issue, String> { .. }
+/// ```
+#[proc_macro_attribute]
+pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
+    instrument::expand(args.into(), &item.into()).into()
 }

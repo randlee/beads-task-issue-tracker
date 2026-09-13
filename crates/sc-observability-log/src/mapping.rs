@@ -259,7 +259,7 @@ pub(crate) fn record_to_parts(
     })
 }
 
-/// Completes the envelope: version, timestamp, service, identity and trace.
+/// Completes the envelope: version, timestamp, service and identity (`trace` is set by `emit`).
 pub(crate) fn assemble_event(
     parts: EventParts,
     service: &ServiceName,
