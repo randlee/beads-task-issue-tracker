@@ -60,6 +60,16 @@ All steps mandatory. Work is NOT complete until `git push` succeeds.
 ### Dev Server
 Always kill zombies before starting: `pkill -f "beads-issue-tracker" 2>/dev/null && pnpm tauri:dev`
 
+### Plan Hardening
+- **`.claude/skills/plan-hardening/`** — multi-pass hardening for a
+  phase/sprint plan before implementation starts or resumes (scope review →
+  sprint-scope hardening → critical review → consistency hardening → quality
+  gates). Ported from atm-core; see that skill's `SKILL.md` for the full
+  process and `references/plan-construction-notes.md` for btit's plan
+  naming/ordering convention (`docs/plans/phase-<X>/plan-phase-<X>.md` +
+  `docs/plans/phase-<X>/sprint-<X><n>.md`, sprints ordered `<Phase>.<number>`
+  e.g. `A.1`, `A.2`).
+
 ## GitHub — Account: w3dev33
 
 ### Releases
@@ -93,3 +103,10 @@ Keep `Co-Authored-By: Claude Code <noreply@anthropic.com>` for transparency.
 ## Plan Mode
 
 Save plans in `.claude/plans/` (local to project), never `~/.claude/plans/`.
+This covers ephemeral, single-session plans (Plan Mode / `ExitPlanMode`
+output). It does not apply to the durable, reviewed, checked-in phase/sprint
+plan docs produced by `.claude/skills/plan-hardening/` — those follow that
+skill's own convention and live under `docs/plans/phase-<X>/` instead (see
+`.claude/skills/plan-hardening/references/plan-construction-notes.md`),
+since they are multi-document, cross-referenced artifacts meant to persist
+and be reviewed, not a single scratch plan file.
