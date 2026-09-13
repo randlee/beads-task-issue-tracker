@@ -146,7 +146,7 @@ git worktree add -b feature/sprint-a-5-sc-review    ../beads-task-issue-tracker-
 git worktree add -b feature/sprint-a-6-sc-handoff   ../beads-task-issue-tracker-worktrees/feature/sprint-a-6-sc-handoff   feature/sprint-a-5-sc-review    # when a-5 development is pushed
 
 # GitHub stack: create with the first two layers, then append each new layer by stack number
-git -C ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros push -u origin HEAD
+# (gh stack link pushes the named branches itself; no separate push step is needed)
 gh stack link --base develop feature/sprint-a-1-log-bridge feature/sprint-a-2-event-macros
 gh stack link <stack-number> feature/sprint-a-3-instrument        # likewise for a-5 and a-6, each after its first push
 
