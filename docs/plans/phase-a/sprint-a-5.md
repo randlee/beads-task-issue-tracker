@@ -14,7 +14,7 @@ dependency_relations:
   - prerequisite: a-4
     dependent: a-5
     relation: must_follow
-    rationale: "the review covers the crates as adopted by a real consumer; a-4 PR merged and gh stack sync run before a-5 development starts"
+    rationale: "the review covers the crates as adopted by a real consumer; a-4 PR merged and the stack rebased onto develop before a-5 development starts"
   - prerequisite: a-5
     dependent: a-6
     relation: must_follow
@@ -40,7 +40,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-3 is pushed (it is the stack parent). The a-4 PR is merged to `develop`, and `gh stack sync` has been run on `phase-a-core` before development starts.
+- a-3 is pushed (it is the stack parent). The a-4 PR is merged to `develop`, and the `phase-a-core` layers have been rebased onto that `develop` before development starts.
 - The sc-observability team reviews over ATM, per `../sc-observability/docs/team-protocol.md`, using its review agents in `../sc-observability/.claude/agents/`: `rust-architect`, `rust-code-reviewer` and `arch-qa`.
 
 ## Dependency Relations
@@ -50,7 +50,7 @@ merge parent → child before every dev/fix round. PR-completion trigger: parent
 PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 
 - a-3 → a-5 — `must_follow` (a-5 follows a-3): the review covers the complete crate API; stack parent.
-- a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit. The a-4 PR merges and `gh stack sync` runs before a-5 development starts.
+- a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit. The a-4 PR merges, and the stack is rebased onto `develop`, before a-5 development starts.
 - a-5 → a-6 — `must_follow` (a-6 follows a-5): a-6 copies the reviewed, fixed crates.
 
 Stack: `phase-a-core` · layer 4.
@@ -67,7 +67,7 @@ the scope this sprint claims. If that cannot be done cleanly in one sprint, the
 sprint must be split before implementation begins. No deliverable may be
 silently dropped or partially deferred.
 
-1. **Review request.** Sent to the sc-observability team for the reviewed commit, which is the a-5 branch head after `gh stack sync`. It covers the crate paths, `docs/mapping.md`, `docs/compatibility.md`, and btit's adoption diff from a-4.
+1. **Review request.** Sent to the sc-observability team for the reviewed commit, which is the a-5 branch head after rebasing onto `develop`. It covers the crate paths, `docs/mapping.md`, `docs/compatibility.md`, and btit's adoption diff from a-4.
 2. **`review-a-5.md`.** Lists every finding with id, reviewer, severity (Blocking / Important / Minor), file:line, disposition (`fixed <commit>` or `rejected — reviewer agreed <message ref>`), and reviewed commit.
 3. **Fixes.** Every Blocking and Important finding is fixed in `crates/`, and the full `crates` gate set is re-run after the last fix. Each Minor finding is either fixed, or recorded in `review-a-5.md` as a follow-up for a-6 or the sc-observability backlog.
 4. **Type-placement decision.** `review-a-5.md` records the team's decision and target crate (`sc-observability-types` or the new crates) for each of these item groups:

@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-1 PR merged to `develop`: `init`, `BridgeOptions`, `LogGuard`, the `LevelFilter` re-export, and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as its own gh-stack (`phase-a-adoption`), because a branch in two stacks breaks non-interactive gh-stack commands.
+- a-1 PR merged to `develop`: `init`, `BridgeOptions`, `LogGuard`, the `LevelFilter` re-export, and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
 - a-2 and a-3 are **not** prerequisites (`parallel_safe`).
 
 ## Dependency Relations
@@ -55,7 +55,7 @@ PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 - a-4 ↔ a-3 — `parallel_safe`: non-intersecting: same ownership split as a-2
 - a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit; a-4 PR merges before a-5 development starts
 
-Stack: `phase-a-adoption · layer 1 (trunk develop; created after the a-1 PR merges)`.
+Stack: `none (single PR on develop, created after the a-1 PR merges)`.
 
 ## Exact Targets
 

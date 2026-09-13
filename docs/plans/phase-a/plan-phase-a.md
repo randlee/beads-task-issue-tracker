@@ -95,7 +95,7 @@ These rules apply to both crates from the first sprint onward:
 | `a-1` | `feature/sprint-a-1-log-bridge` | `phase-a-core` · 1 | PR #36 | none | [`sprint-a-1.md`](./sprint-a-1.md) | `crates/` workspace, both crate manifests with final runtime dependencies, `sc-observability-log` bridge, `crates` CI job on 3 OSes |
 | `a-2` | `feature/sprint-a-2-event-macros` | `phase-a-core` · 2 | a-1 | a-4 | [`sprint-a-2.md`](./sprint-a-2.md) | tracing-compatible event macros plus a compatibility fixture |
 | `a-3` | `feature/sprint-a-3-instrument` | `phase-a-core` · 3 | a-2 | a-4 | [`sprint-a-3.md`](./sprint-a-3.md) | tracing-compatible `#[instrument]` (sync and async) plus a compatibility fixture |
-| `a-4` | `feature/sprint-a-4-btit-adoption` | `phase-a-adoption` · 1 | a-1 (PR merged) | a-2, a-3 | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel |
+| `a-4` | `feature/sprint-a-4-btit-adoption` | none (single PR on `develop`) | a-1 (PR merged) | a-2, a-3 | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel |
 | `a-5` | `feature/sprint-a-5-sc-review` | `phase-a-core` · 4 | a-3, a-4 (PR merged) | none | [`sprint-a-5.md`](./sprint-a-5.md) | sc-observability team critical review; every Blocking/Important finding fixed in btit `crates/`; type-placement decision recorded |
 | `a-6` | `feature/sprint-a-6-sc-handoff` | `phase-a-core` · 5 | a-5 | none | [`sprint-a-6.md`](./sprint-a-6.md) | crates copied into `../sc-observability` with every CI gate green; PR merged; handoff record in btit |
 
@@ -109,52 +109,67 @@ flowchart LR
   subgraph core["stack phase-a-core (trunk develop)"]
     A1["a-1 bridge"] --> A2["a-2 event macros"] --> A3["a-3 #[instrument]"] --> A5["a-5 sc review"] --> A6["a-6 sc handoff"]
   end
-  subgraph adoption["stack phase-a-adoption (trunk develop)"]
+  subgraph adoption["lane 2: single PR on develop"]
     A4["a-4 btit adoption"]
   end
   A1 -. "a-1 PR merged to develop" .-> A4
-  A4 -. "a-4 PR merged; gh stack sync" .-> A5
+  A4 -. "a-4 PR merged; rebase stack onto develop" .-> A5
 ```
 
 - **Lane 1, `phase-a-core`:** a-1 → a-2 → a-3 → a-5 → a-6. These are sequential and share one gh-stack.
-- **Lane 2, `phase-a-adoption`:** a-4. It starts once the a-1 PR is merged to `develop`, and runs in parallel with a-2 and a-3.
-- **Join:** a-5 development starts only after the a-4 PR is merged to `develop` and `gh stack sync` has rebased `phase-a-core` onto that `develop`.
+- **Lane 2:** a-4, a single PR on `develop` with no stack. It starts once the a-1 PR is merged to `develop`, and runs in parallel with a-2 and a-3.
+- **Join:** a-5 development starts only after the a-4 PR is merged to `develop` and the remaining `phase-a-core` layers have been rebased onto that `develop` (merge-forward commands below).
 
 ### Why a-4 starts at the a-1 merge rather than the a-1 push
 
-gh-stack refuses to run non-interactively when a branch belongs to more than one stack. This was verified locally with gh-stack v0.1.0: `gh stack init --base s-a1 s-a4` succeeds, but `gh stack view` on `s-a1` then fails with `branch "s-a1" belongs to multiple stacks; use an interactive terminal to select one`.
+GitHub stacks are strictly linear. A branch has exactly one parent and at most one child. `gh stack link` rejects a PR that is already in a different stack (`~/.claude/skills/gh-stack/SKILL.md`, "Known limitations" and `link`).
 
-Stacking a-4 on the a-1 branch would put a-1 in two stacks. So a-4 gets its own stack rooted on `develop`, and is created from `develop` after the a-1 PR merges.
+Stacking a-4 on the a-1 branch would give a-1 two children, which a stack cannot hold. a-4 is therefore a single PR on `develop`, branched after the a-1 PR merges. It has no stack because it is not part of a sequence.
 
 ## gh-stack and worktree workflow
 
-Every sequential run of sprints lives in one gh-stack. Each layer has its own `/sc-git-worktree` worktree under `../beads-task-issue-tracker-worktrees/<branch>`, recorded in `worktree-tracking.md`.
+Every sequential run of sprints, here `phase-a-core` (a-1 → a-2 → a-3 → a-5 → a-6), is one GitHub stack. Each layer is developed in its own `/sc-git-worktree` worktree under `../beads-task-issue-tracker-worktrees/<branch>`, recorded in `worktree-tracking.md`.
+
+**Verified constraint:** gh-stack's local tracking commands do not work with a worktree per layer. Tested locally with gh-stack v0.1.0 on 2026-09-13:
+- `gh stack rebase` fails with `fatal: 's2' is already used by worktree at …`.
+- Inside a linked worktree, `init`, `add`, `rebase`, `sync` and `view` all fail with `current branch "s2" is not part of a stack`.
+- A plain `git rebase <parent>` inside the child's own worktree works.
+
+The stack is therefore managed on GitHub with `gh stack link`, which creates no local tracking, and layers are rebased with git in each worktree. This is the pattern already used for btit stack #31 (PRs #29, #30, #32).
 
 ```bash
-# Lane 1 — create a-1 on develop (after PR #36 merges), then add layers as each parent is pushed
-gh stack init --base develop feature/sprint-a-1-log-bridge
-gh stack add feature/sprint-a-2-event-macros      # when a-1 development is pushed
-gh stack add feature/sprint-a-3-instrument        # when a-2 development is pushed
-gh stack add feature/sprint-a-5-sc-review         # when a-3 is pushed AND a-4 PR is merged (run gh stack sync first)
-gh stack add feature/sprint-a-6-sc-handoff        # when a-5 development is pushed
-gh stack submit                                   # open or refresh the stacked PRs
+# Layer creation: from the repo root, branch each layer from its parent (sc-git-worktree convention)
+git worktree add -b feature/sprint-a-1-log-bridge   ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge   origin/develop
+git worktree add -b feature/sprint-a-2-event-macros ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros feature/sprint-a-1-log-bridge   # when a-1 development is pushed
+git worktree add -b feature/sprint-a-3-instrument   ../beads-task-issue-tracker-worktrees/feature/sprint-a-3-instrument   feature/sprint-a-2-event-macros # when a-2 development is pushed
+git worktree add -b feature/sprint-a-5-sc-review    ../beads-task-issue-tracker-worktrees/feature/sprint-a-5-sc-review    feature/sprint-a-3-instrument   # when a-3 is pushed AND the a-4 PR is merged (rebase a-3 onto develop first)
+git worktree add -b feature/sprint-a-6-sc-handoff   ../beads-task-issue-tracker-worktrees/feature/sprint-a-6-sc-handoff   feature/sprint-a-5-sc-review    # when a-5 development is pushed
 
-# Lane 2 — after the a-1 PR is merged to develop
-gh stack init --base develop feature/sprint-a-4-btit-adoption
+# GitHub stack: create with the first two layers, then append each new layer by stack number
+git -C ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros push -u origin HEAD
+gh stack link --base develop feature/sprint-a-1-log-bridge feature/sprint-a-2-event-macros
+gh stack link <stack-number> feature/sprint-a-3-instrument        # likewise for a-5 and a-6, each after its first push
 
-# Before every dev/fix round on any layer: pull parent changes forward
-gh stack sync                                     # fetch, rebase the stack onto develop, push
+# Merge-forward before every dev/fix round on layer N (bottom → top, each in its own worktree)
+git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> fetch origin
+git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> rebase <layer-(N-1)-branch>   # layer 1 rebases onto origin/develop
+git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> push --force-with-lease
+
+# Lane 2 (not a sequence, so no stack): after the a-1 PR merges
+git worktree add -b feature/sprint-a-4-btit-adoption ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption origin/develop
 ```
 
 **Merge rules:**
-- Stacked PRs are merged with `gh stack merge <PR> --yes` (bottom-up up to that PR), never `gh pr merge`.
+- Stacked PRs are merged with `gh stack merge <PR> --yes` (bottom-up, up to that PR) or `gh stack merge <stack-number> --yes`. Never `gh pr merge`. Neither form needs a local checkout.
 - The user completes merges unless they delegate one.
 - In lane 1, the a-1 PR is merged as soon as it passes (`gh stack merge <a-1 PR> --yes`), which unblocks lane 2.
+- After a merge to `develop`, rebase the lowest remaining layer onto `origin/develop` and cascade upward with the merge-forward commands.
+- Stack state is inspected only with `gh stack view --json`, run from the main checkout, never from a layer worktree.
 
 ## Dependency relations
 
 The `must_follow` rules (from the sprint planning guidelines):
-- **Merge-forward trigger:** parent development is pushed, not QA-approved. The parent is merged into the child before every dev/fix round; in a stack, this is `gh stack sync` / `gh stack rebase`.
+- **Merge-forward trigger:** parent development is pushed, not QA-approved. The parent is merged into the child before every dev/fix round; in `phase-a-core`, this is a `git rebase <parent>` inside each layer's worktree (see the workflow above).
 - **PR-completion trigger:** the parent PR merges first.
 
 `parallel_safe` requires modules, crates, public contracts, artifacts and ownership that do not intersect.
@@ -166,7 +181,7 @@ The `must_follow` rules (from the sprint planning guidelines):
 | `a-3 must_follow a-2` | a-3 reuses a-2's `crates/sc-observability-log-macros/src/fields.rs` (`EventSpec`). Events inside an instrumented fn inherit trace context through the a-2 expansion. |
 | `a-4 must_follow a-1` | a-4 consumes a-1's `init` / `BridgeOptions` / `LogGuard` / `LevelFilter` API and the runtime dependency graph a-1 freezes. PR-completion trigger: a-1 PR merged before the a-4 branch is created (see "Why a-4 starts at the a-1 merge"). |
 | `a-5 must_follow a-3` | The review covers the complete crate API (bridge, event macros, `#[instrument]`). |
-| `a-5 must_follow a-4` | The review covers the crates as adopted by a real consumer. The a-4 PR merges and `gh stack sync` runs before a-5 development starts. |
+| `a-5 must_follow a-4` | The review covers the crates as adopted by a real consumer. The a-4 PR merges, and the stack is rebased onto `develop`, before a-5 development starts. |
 | `a-6 must_follow a-5` | a-6 copies the crates after every Blocking/Important review finding is fixed, and implements the recorded type-placement decision in `../sc-observability`. |
 | `a-2 parallel_safe a-4` | Non-intersecting ownership: see the ownership table below. |
 | `a-3 parallel_safe a-4` | Non-intersecting ownership: see the ownership table below. |
