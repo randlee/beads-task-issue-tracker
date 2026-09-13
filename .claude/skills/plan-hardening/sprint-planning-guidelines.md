@@ -58,16 +58,12 @@ Important traits, enums, protocol types, interfaces, and boundary contracts
 must have explicit code samples or signatures in the sprint doc when prose
 alone would leave implementation choices open.
 
-## Recommended Model
+## Recommended Agent / Model
 
-btit has no separate developer-agent pool (unlike atm-core's ATM swarm), so
-this is advice for the driving Claude Code session rather than an assignment:
-a faster/cheaper model (e.g. Sonnet, or Haiku for background reviewer
-agents — see `.claude/agents/phb-plan-scope-reviewer.md` and
-`.claude/agents/phb-critical-plan-reviewer.md`, both pinned to `sonnet`) is
-usually sufficient for bounded or documentation-only sprints; reserve a
-higher-effort model for algorithmic, architectural, or performance-sensitive
-sprints. Note this per sprint in the sprint doc when it matters.
+Optional `recommended_agent`/`recommended_model` select from the current
+developer pool: Cipher-311d/fast for bounded or documentation work;
+arch-ctm/deep-reasoning for algorithmic, architectural, or performance work.
+They are advice, not an assignment.
 
 ## Dependency Relations
 

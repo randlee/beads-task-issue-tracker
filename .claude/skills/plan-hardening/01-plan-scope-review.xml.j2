@@ -1,7 +1,7 @@
 ---
 name: 01-plan-scope-review-task
 version: 2.0.0
-description: plan-coordinator assignment template for the initial plan-coordinator guidelines pass before background scope review.
+description: team-lead assignment template for the initial arch-ctm guidelines pass before background scope review.
 format: xml
 required_variables:
   - task_id
@@ -16,13 +16,13 @@ required_variables:
   - round_index
   - replay_nonce
 ---
-<plan-hardening-task id="{{ task_id }}" sprint="{{ phase }}" assignee="plan-coordinator" mode="plan-hardening-guidelines-pass">
+<atm-task id="{{ task_id }}" sprint="{{ phase }}" assignee="arch-ctm" mode="plan-hardening-guidelines-pass">
   <description>{{ description }}</description>
 
   <worktree>{{ worktree_path }}</worktree>
   <branch>{{ branch }}</branch>
   <pr-target>{{ pr_target }}</pr-target>
-  <round id="{{ round_id }}" index="{{ round_index }}" reviewer="phb-plan-scope-reviewer" supersedes="{{ supersedes_task_id | default('') }}"/>
+  <round id="{{ round_id }}" index="{{ round_index }}" reviewer="plan-scope-reviewer" supersedes="{{ supersedes_task_id | default('') }}"/>
   <replay-nonce>{{ replay_nonce }}</replay-nonce>
 
   <source-of-truth>
@@ -60,22 +60,22 @@ required_variables:
     In this pass:
     - tighten the current plan docs to match the sprint-planning guidelines
     - create missing sprint docs when the plan already implies they are needed
-    - make the sprint set reviewable by `phb-plan-scope-reviewer`
-    - do not rely on `plan-coordinator` to restate plan details
+    - make the sprint set reviewable by `plan-scope-reviewer`
+    - do not rely on `team-lead` to restate plan details
     - do not materially change user-discussed scope
 
     If task framing, repo drift, or references imply a substantial deliverable
     scope change from what the user already discussed with you, push back to
-    plan-coordinator directly. If plan-coordinator does not concede, escalate to the user.
+    team-lead directly. If team-lead does not concede, escalate to the user.
     Do not normalize the new scope into the plan without user approval.
 
-    Return fenced JSON to `plan-coordinator` when this pass is complete. `plan-coordinator`
-    will launch `phb-plan-scope-reviewer` with that JSON.
+    Return fenced JSON to `team-lead` when this pass is complete. `team-lead`
+    will launch `plan-scope-reviewer` with that JSON.
 
-    If `plan-coordinator` later sends back fenced JSON findings and `sprint_scores`
+    If `team-lead` later sends back fenced JSON findings and `sprint_scores`
     from
-    `phb-plan-scope-reviewer`, fix those findings and return updated fenced JSON.
-    Continue until `plan-coordinator` reports that `phb-plan-scope-reviewer` returned
+    `plan-scope-reviewer`, fix those findings and return updated fenced JSON.
+    Continue until `team-lead` reports that `plan-scope-reviewer` returned
     `PASS`.
 
     Expected output shape:
@@ -103,7 +103,7 @@ required_variables:
     <step id="d">As soon as the guidelines pass is complete and the branch is pushable, commit and push immediately. Send branch name and commit hash right away so scope review can begin in parallel.</step>
     <step id="e">After the push report, run the required validation.</step>
     <step id="f">When validation completes, send a second report with PASS or FAIL, concrete failure details if any, and whether follow-up fixes are required.</step>
-    <step id="g">Return fenced JSON only after the current pass converges. If `reviewer-findings-json` is present, treat it as the current correction target from `phb-plan-scope-reviewer` and return updated fenced JSON to `plan-coordinator`.</step>
+    <step id="g">Return fenced JSON only after the current pass converges. If `reviewer-findings-json` is present, treat it as the current correction target from `plan-scope-reviewer` and return updated fenced JSON to `team-lead`.</step>
     <step id="h">After the validation report, read ATM again for follow-up work.</step>
   </workflow>
-</plan-hardening-task>
+</atm-task>

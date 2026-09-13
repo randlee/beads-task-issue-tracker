@@ -1,13 +1,8 @@
-# Step 3 — Sprint Scope Hardening (`plan-coordinator`, in-session)
-
-As in Step 1, this pass is performed directly by the driving Claude Code
-session — btit has no `arch-ctm` teammate to route this to.
+# Step 3 — Sprint Scope Hardening (`arch-ctm`)
 
 ## Execute
 
-**1. Render the task (optional but recommended)**
-
-If `sc-compose` is installed:
+**1. Render the message**
 
 ```bash
 sc-compose render \
@@ -18,7 +13,8 @@ sc-compose render \
 ```
 
 The vars file or rendered task must include `step-2` fenced JSON as the
-required input payload. It must also carry current round metadata:
+required input payload.
+It must also carry current round metadata:
 - `round_id`
 - `round_index`
 - `replay_nonce`
@@ -26,32 +22,30 @@ required input payload. It must also carry current round metadata:
 - `previous_reviewed_commit`
 - `findings_hash`
 
-If `sc-compose` is not available, read `02-sprint-scope-hardening.xml.j2`
-directly and follow its `<plan-hardening>` instructions inline, passing in
-the Step 2 fenced JSON as required input.
+**2. Send to `arch-ctm`**
 
-**2. Perform the pass**
+```bash
+atm send arch-ctm --stdin < /tmp/step-3-message.xml
+```
 
-Follow the `<plan-hardening>` audit-phase / fix-phase / repeat loop
-described in `02-sprint-scope-hardening.xml.j2`, using
-`sprint-planning-guidelines.md` and
-`references/plan-construction-notes.md` as required references. Work
-through every finding from Step 2 (or from a prior Step 4 `FAIL`) until the
-audit phase produces zero findings.
+**3. Check the response**
 
-**3. Produce the fenced JSON**
-
-Produce fenced JSON matching the expected output shape specified inside
-`02-sprint-scope-hardening.xml.j2`. Do not proceed to Step 4 until that
-fenced JSON is present and well formed. Save it to `/tmp/step-3.json`.
+Read the `arch-ctm` response and confirm it contains fenced JSON.
+The expected output shape is specified inside
+`02-sprint-scope-hardening.xml.j2`.
+Do not proceed to Step 4 until that fenced JSON is present and well formed.
+If the response is incomplete or malformed, send a correction request to
+`arch-ctm` immediately.
+Save the extracted fenced JSON to `/tmp/step-3.json`.
 
 **4. Route by status**
 
 - `PASS` -> proceed to Step 4
-- `FAIL` -> repeat this pass
-- if this pass would otherwise return unchanged fenced JSON on a rerun of
-  an already-fixed round, increment `round_index`, update `round_id`, and
-  refresh `replay_nonce` with the current UTC timestamp before repeating
+- `FAIL` -> re-render and re-send Step 3 to `arch-ctm`
+- if `arch-ctm` ACKs but responds as though the same already-fixed round is
+  being replayed, increment `round_index`, update `round_id`, refresh
+  `replay_nonce` with the current UTC timestamp, and re-render before
+  re-sending
 
 Maintain the round table after every Step 3 / Step 4 loop:
 
@@ -61,7 +55,7 @@ Maintain the round table after every Step 3 / Step 4 loop:
 ## Hard stops
 
 - `step-2` fenced JSON from the Step 2 response is missing or malformed: do
-  not advance; identify the missing or malformed fields explicitly and
-  request a corrected Step 2 response
-- fenced JSON is missing or malformed: do not advance; identify the missing
-  or malformed fields explicitly and redo the pass
+  not advance; send a correction request immediately and identify the missing
+  or malformed fields explicitly
+- fenced JSON is missing or malformed: do not advance; send a correction
+  request immediately and identify the missing or malformed fields explicitly
