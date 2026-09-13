@@ -315,21 +315,31 @@ pub(crate) async fn log_frontend(level: String, message: String) {
 mod tests {
     use super::*;
 
+    /// A test-local error: setup/teardown failures fail the test via `?`
+    /// (returning `Result` from a `#[test]` fn) rather than panicking, so this
+    /// module stays clean under the repo's no-panic grep check.
+    #[derive(Debug)]
+    struct TestError(String);
+
+    impl<E: std::fmt::Display> From<E> for TestError {
+        fn from(e: E) -> Self {
+            Self(e.to_string())
+        }
+    }
+
     /// Unique scratch directory under `std::env::temp_dir()`, removed on drop.
     struct ScratchDir(PathBuf);
 
     impl ScratchDir {
-        fn new(label: &str) -> Self {
+        fn new(label: &str) -> Result<Self, TestError> {
             let unique = format!(
                 "btit-logging-test-{label}-{}-{:?}",
                 std::process::id(),
                 std::time::Instant::now()
             );
             let dir = std::env::temp_dir().join(unique);
-            fs::create_dir_all(&dir).unwrap_or_else(|e| {
-                panic!("failed to create scratch dir {}: {e}", dir.display())
-            });
-            Self(dir)
+            fs::create_dir_all(&dir)?;
+            Ok(Self(dir))
         }
 
         fn path(&self) -> &Path {
@@ -369,22 +379,22 @@ mod tests {
     }
 
     #[test]
-    fn remove_rotated_logs_deletes_only_numeric_suffixed_siblings() {
-        let scratch = ScratchDir::new("rotated");
+    fn remove_rotated_logs_deletes_only_numeric_suffixed_siblings() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("rotated")?;
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
-        fs::write(&active, "active").unwrap_or_else(|e| panic!("write active: {e}"));
+        fs::write(&active, "active")?;
         let rotated_one = scratch
             .path()
             .join("beads-task-issue-tracker.log.jsonl.1");
-        fs::write(&rotated_one, "rotated").unwrap_or_else(|e| panic!("write rotated: {e}"));
+        fs::write(&rotated_one, "rotated")?;
         let rotated_two = scratch
             .path()
             .join("beads-task-issue-tracker.log.jsonl.2");
-        fs::write(&rotated_two, "rotated").unwrap_or_else(|e| panic!("write rotated: {e}"));
+        fs::write(&rotated_two, "rotated")?;
         let unrelated = scratch.path().join("beads-task-issue-tracker.log.jsonl.bak");
-        fs::write(&unrelated, "kept").unwrap_or_else(|e| panic!("write unrelated: {e}"));
+        fs::write(&unrelated, "kept")?;
 
-        remove_rotated_logs(&active).unwrap_or_else(|e| panic!("remove_rotated_logs: {e}"));
+        remove_rotated_logs(&active)?;
 
         assert!(active.exists(), "the active file must not be removed");
         assert!(!rotated_one.exists(), "rotated.1 must be removed");
@@ -393,15 +403,18 @@ mod tests {
             unrelated.exists(),
             "a non-numeric suffix must not be treated as rotated"
         );
+        Ok(())
     }
 
     #[test]
-    fn remove_rotated_logs_is_a_noop_when_the_directory_has_no_siblings() {
-        let scratch = ScratchDir::new("no-siblings");
+    fn remove_rotated_logs_is_a_noop_when_the_directory_has_no_siblings() -> Result<(), TestError>
+    {
+        let scratch = ScratchDir::new("no-siblings")?;
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
-        fs::write(&active, "active").unwrap_or_else(|e| panic!("write active: {e}"));
+        fs::write(&active, "active")?;
 
         assert_eq!(remove_rotated_logs(&active), Ok(()));
         assert!(active.exists());
+        Ok(())
     }
 }
