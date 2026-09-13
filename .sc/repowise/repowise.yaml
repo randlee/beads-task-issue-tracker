@@ -1,0 +1,36 @@
+repo:
+  name: beads-task-issue-tracker
+  description: "Beads Task Issue Tracker — Nuxt 3 web dashboard + Tauri 1 desktop shell wrapping the bd CLI and Dolt-backed issue tracking"
+
+modules:
+  - app          # Nuxt 3 frontend (pages, composables, utils)
+  - server       # Nuxt server API handlers (bd proxy, fs bridge, attachments)
+  - src-tauri    # Tauri 1 desktop shell (Rust) — bd CLI bridge
+  - tests        # Vitest suites (kept in scope, report uses --scope production by default)
+
+annotated:
+  - path: src-tauri
+    label: "Tauri crate — entry via tauri! macro, not import graph; reachable/unreachable findings here are false signals (see zombie_package caveat)"
+  - path: app/utils/bd-api.ts
+    label: "Nuxt composables resolved via #imports/auto-import — in-degree=0 findings are often false positives"
+  - path: server/utils
+    label: "Server-internal helpers, imported by API handlers only"
+
+diagrams:
+  - type: layer-dependency
+    description: "app (Nuxt UI) -> server (Nuxt API) -> src-tauri (Rust bridge to bd CLI / Dolt)"
+
+# ── Standard repowise artifact layout (randlee repos) ───────────────────
+#   .sc/repowise/repowise.yaml          — this config (scope + annotations)
+#   .sc/repowise/data/repowise-health.json            — KPIs + per-file metrics
+#   .sc/repowise/data/repowise-health-rt.json         — refactoring targets/plans/opportunities
+#   .sc/repowise/data/repowise-dead-code.json         — dead-code findings
+#   .repowise/                                   — index (NOT committed: see .gitignore)
+#   docs/repowise/health.md                      — latest human-readable report
+#   docs/repowise/history.md                     — between-run trend tracker (append)
+#   docs/repowise/README.md                      — workflow documentation
+# Regenerate:
+#   repowise update --provider codex_cli --yes
+#   repowise health --format json            > .sc/repowise/data/repowise-health.json
+#   repowise health --format json --refactoring-targets > .sc/repowise/data/repowise-health-rt.json
+#   repowise dead-code --format json          > .sc/repowise/data/repowise-dead-code.json

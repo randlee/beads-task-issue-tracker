@@ -36,3 +36,16 @@ coverage
 # Build cache
 .temp
 *.cache
+
+# repowise — index & caches are machine-local artifacts (regenerable via
+# `repowise update --provider codex_cli --yes`). Config, data exports, and
+# generated reports live in .sc/repowise/ and docs/repowise/ (committed).
+# sc-compose parity: sc-compose/.gitignore:41-56
+.repowise/wiki.db
+.repowise/lancedb/
+.repowise/jobs/
+.repowise/sessions/
+.repowise/episodes/
+.repowise/state.json
+.repowise/.update.log
+.repowise/*.pkl
