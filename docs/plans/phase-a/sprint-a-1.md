@@ -64,7 +64,8 @@ Stack: `phase-a-core · layer 1 (trunk develop)`.
 - `crates/sc-observability-log/src/bridge.rs` (new)
 - `crates/sc-observability-log/src/mapping.rs` (new)
 - `crates/sc-observability-log/src/handle.rs` (new)
-- `crates/sc-observability-log/tests/bridge_jsonl.rs` (new)
+- `crates/sc-observability-log/tests/bridge_jsonl.rs` (new; one `init` test)
+- `crates/sc-observability-log/tests/bridge_queue_full.rs` (new; one `init` test with minimal `queue_capacity`)
 - `crates/sc-observability-log/README.md` (new)
 - `crates/sc-observability-log/docs/mapping.md` (new)
 - `.github/workflows/ci.yml` (new `crates` job)
@@ -81,11 +82,11 @@ Every deliverable must land production-ready for the scope this sprint claims. I
    - `sc-observability-log` runtime dependencies: exactly `sc-observability`, `sc-observability-types`, `log`, `serde`, `serde_json`, `thiserror`, `sc-observability-log-macros`. Dev dependencies: exactly `tempfile`.
    - `sc-observability-log-macros` runtime dependencies: exactly `syn`, `quote`, `proc-macro2`. No exported macros yet; a-2 and a-3 add them.
    - `crates/runtime-deps.txt` holds the sorted output of `cargo tree --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --prefix none`. The `crates` CI job fails if the live output differs.
-3. **Public API:** `init`, `BridgeOptions`, `LogGuard` and `InitError`, exactly as in the code samples. There is one global handle; a second `init` returns `InitError::AlreadyInstalled`.
+3. **Public API:** `init`, `BridgeOptions`, `LogGuard` and `InitError`, exactly as in the code samples. `init` succeeds at most once per process: any later `init` call — including after the `LogGuard` was dropped — returns `InitError::AlreadyInstalled`, because the `log` facade logger cannot be uninstalled.
 4. **Mapping:** the pure function `record_to_event`, as specified in the mapping table below.
 5. **Hidden emit path:** `__private::{emit, enabled}` (`#[doc(hidden)]`). It is the only way events reach the `Logger`, and a-2 and a-3 use it.
 6. **Non-blocking delivery:** events are sent with `Logger::try_log`. When `TryLogError::QueueFull` or another error occurs, the event is dropped and counted. `LogGuard::dropped_events()` reports the count. Logging never blocks and never panics.
-7. **Guard:** `LogGuard` flushes on `flush()`. On `Drop` it shuts down the logger and uninstalls the handle, so later records are dropped silently.
+7. **Guard:** `LogGuard` flushes on `flush()`. On `Drop` it flushes, shuts down the `Logger`, and empties the `HANDLE` slot. The installed `log::Log` implementation stays registered with the `log` facade (it cannot be removed) and silently drops every later record because the slot is empty.
 8. **Docs:** `README.md` (quick start) and `docs/mapping.md` (the mapping table, verbatim from this sprint).
 9. **CI:** a new `crates` job in btit `.github/workflows/ci.yml` on `ubuntu-latest`, `windows-latest`, `macos-latest`. It runs every command listed under Required Validation for the `crates/` workspace, including the runtime-dependency check.
 
@@ -107,9 +108,16 @@ Every deliverable must land production-ready for the scope this sprint claims. I
 - **Service and timestamp:** `service` comes from the `LoggerConfig.service_name` passed to `init`. `timestamp` is `Timestamp::now_utc()`, and `version` is the envelope version.
 - **Level filtering:** `log::set_max_level` is set from `options.max_level`, and `Log::enabled` honors it.
 - **Global state:** it lives in `handle.rs` as `static HANDLE: OnceLock<Mutex<Option<Logger<Running>>>>`. The `Mutex` requires only `Send`, so no `Sync` bound is placed on `Logger`.
+- **Test-isolation contract for the process-global logger** (applies to every test that calls `init()`; inherited by a-2 and a-3):
+  - `log::set_boxed_logger` can be called once per process and the `log` crate has no uninstall API (`log-0.4.34/src/lib.rs`). `cargo test` runs `#[test]` fns of one test binary on parallel threads.
+  - Each integration test file that calls `init()` is its own test binary (own process) and contains **exactly one** `#[test]` fn that calls `init()`. All sub-cases for that configuration run sequentially inside that fn via plain helper functions sharing the one guard.
+  - A test needing a different `LoggerConfig`/`BridgeOptions` (e.g. a small `queue_capacity`) gets its **own** test file.
+  - Pure mapping/unit tests never call `init()`.
+  - No `--test-threads=1` and no `serial_test` dependency are used; isolation comes from the one-`init`-per-binary rule, so `cargo test --workspace` stays the only command.
 - **Tests:**
   - Unit tests cover every mapping row, including invalid targets and tags, an empty target, a tag without a space, and `kv` values of each JSON type.
-  - `tests/bridge_jsonl.rs` initializes into a `tempfile` log root and logs one record at each level, plus one tagged record and one `kv` record. It then flushes and reads the records back with `Logger::query` or the JSONL file. It asserts `target`, `action`, `message` and `fields`, and that a second `init` fails with `AlreadyInstalled`.
+  - `tests/bridge_jsonl.rs` initializes into a `tempfile` log root and logs one record at each level, plus one tagged record and one `kv` record. It then flushes and reads the records back with `Logger::query` or the JSONL file. It asserts `target`, `action`, `message` and `fields`. In the same single `#[test]` fn it then asserts a second `init` returns `AlreadyInstalled`, drops the guard, logs again, asserts that record is absent, and asserts `init` still returns `AlreadyInstalled`.
+  - `tests/bridge_queue_full.rs` (its own binary) initializes with the smallest accepted `queue_capacity`, floods records without blocking, and asserts `dropped_events()` increased.
 
 ## Explicit Code Samples
 
@@ -145,7 +153,7 @@ impl LogGuard {
     pub fn flush(&self) -> Result<(), sc_observability_types::FlushError>;
     pub fn dropped_events(&self) -> u64;
 }
-impl Drop for LogGuard { /* flush, shutdown, uninstall handle */ }
+impl Drop for LogGuard { /* flush, shutdown, empty HANDLE; the log::Log impl stays installed and drops records */ }
 
 pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, InitError>;
 
@@ -177,8 +185,9 @@ pub mod __private {
 3. The public API matches the code samples (names, signatures, error variants). Nothing is exported beyond them except `#[doc(hidden)] __private`.
 4. Every row of the mapping table has at least one unit test. Invalid or empty targets and tags never panic, and produce a valid `TargetCategory`/`ActionName`.
 5. The integration test proves the JSONL on disk contains the mapped `target`, `action`, `message` and `fields` for tagged, untagged and `kv` records at all five levels.
-6. A second `init` returns `InitError::AlreadyInstalled`. Records logged after `LogGuard` is dropped do not panic and are not written.
-7. Logging while the queue is full does not block. `dropped_events()` increases, and this is covered by a test with `queue_capacity` set to the smallest accepted value.
+6. A second `init` returns `InitError::AlreadyInstalled`, both while the guard is alive and after it is dropped. Records logged after `LogGuard` is dropped do not panic and are not written.
+6a. Every integration test file that calls `init()` contains exactly one `#[test]` fn calling it (checked by `grep -c 'init(' crates/sc-observability-log/tests/*.rs` review in QA and by the test-isolation contract in Required Work).
+7. Logging while the queue is full does not block. `dropped_events()` increases, and this is covered by `tests/bridge_queue_full.rs` with `queue_capacity` set to the smallest accepted value.
 8. The `crates` CI job passes on ubuntu, windows and macOS.
 9. `crates/runtime-deps.txt` exists and the CI runtime-dependency check passes. Both crates declare exactly the runtime dependency sets in Deliverable 2.
 

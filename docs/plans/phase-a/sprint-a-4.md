@@ -88,7 +88,7 @@ Every listed deliverable is expected to land at a production-ready level for the
    - `export_logs` copies the active file under the same export-folder rules, keeping the `.log.jsonl` name.
    - `clear_logs` flushes the guard, truncates the active file (the sink opens it in append mode, `sc-observability/src/sinks.rs:123-126`), and deletes the rotated `*.log.jsonl.N` files.
    - `get_log_path_string` returns the new path.
-6. **Frontend log command.** `log_frontend(level, message)` keeps its signature and logs with `target: "frontend"`. A leading `[tag]` in the message becomes `action` through the bridge.
+6. **Frontend log command.** `log_frontend(level, message)` keeps its signature and logs with `target: "frontend"`. A leading `[tag]` in the message becomes `action` through the bridge. Frontend records are deliberately categorized by `target` (replacing today's literal `[frontend]` message prefix), which is why the debug panel's existing `\[frontend\]` highlight keeps matching the rendered `[<target>]` segment.
 7. **Log line formatting.** `app/utils/log-format.ts` exports `formatLogLine` and `formatLogLines` as shown in the code samples. Unit tests cover valid, partial, non-JSON and empty lines.
 8. **Debug panel.** `DebugPanel.vue` shows `formatLogLines(await readLogs(300))`. Its existing level and tag colorization regexes still apply, because rendered lines contain `[LEVEL]`, `[target]` and `[action]`.
 9. **Docs.** `CLAUDE.md`, `.claude/codebase-map.md` and `CHANGELOG.md` document the new log location and JSONL format. The old `beads.log` is left on disk and neither read nor deleted.

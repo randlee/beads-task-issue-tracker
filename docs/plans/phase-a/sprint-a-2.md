@@ -58,6 +58,7 @@ Stack: `phase-a-core · layer 2`.
 - `crates/sc-observability-log-macros/src/lib.rs` (export the event macros; created empty by a-1)
 - `crates/sc-observability-log-macros/src/fields.rs` (new; shared with a-3)
 - `crates/sc-observability-log-macros/src/event.rs` (new)
+- `crates/sc-observability-log-macros/docs/field-value-dispatch.md` (new; design record for Serialize/Debug dispatch)
 - `crates/sc-observability-log/Cargo.toml` (dev-dependencies `trybuild`, `tracing` only)
 - `crates/sc-observability-log/src/lib.rs` (re-exports and `__private` helpers)
 - `crates/sc-observability-log/tests/macros_jsonl.rs` (new)
@@ -95,7 +96,14 @@ Every deliverable must land at a production-ready level for the scope this sprin
 | fields followed by a message: `info!(k = v, "fmt {}", a)` | fields plus message |
 | `event!(Level::INFO, ...)` / `event!(target: "t", Level::WARN, ...)` | level from the `Level` argument. `sc_observability_log::Level` is a new crate-owned type (a foreign `sc_observability_types::Level` cannot get associated consts) exposing tracing's `Level::TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` constants, with `From<Level> for sc_observability_types::Level` |
 
-**Rejected forms:** `parent: ...`, `info!(k)` with a non-identifier path, empty-key fields, and any span macro name (`span!`, `info_span!` etc. are not exported).
+**Rejected forms:** `parent: ...`, `info!(k)` with a non-identifier path, empty-key fields, any span macro name (`span!`, `info_span!` etc. are not exported), and a bare `k = v` / shorthand field whose value implements neither `serde::Serialize` nor `core::fmt::Debug`.
+
+**Field value dispatch (design record — `crates/sc-observability-log-macros/docs/field-value-dispatch.md`):**
+- Mechanism: autoref-based method resolution. The macro expands a bare field to `(&&::sc_observability_log::__private::FieldValue(&v)).__sc_field_value()`. `__private` defines two traits with that method: `SerializeField` implemented for `&FieldValue<'_, T> where T: Serialize` (resolves at the first autoref level) and `DebugField` implemented for `FieldValue<'_, T> where T: Debug` (resolves one autoderef later). The compiler picks the first candidate that satisfies its bound, so a type implementing both always takes the `Serialize` path.
+- Stability: this relies only on Rust's documented method-call autoref/autoderef probing order, not on the unstable `specialization` feature. It is verified on both pinned toolchains in CI (`cargo +1.94.1` MSRV check and the pinned 1.98.1 test run) by the dispatch tests below.
+- Neither trait: expansion fails with rustc's `no method named __sc_field_value found` error. The macro attaches a span on the field value so the error points at the offending field; the trybuild case `tests/ui/field_not_serialize_or_debug.rs` checks in the exact stderr, and `docs/compatibility.md` tells users to use `?v` (Debug) or `%v` (Display) instead.
+- Size: field JSON is inserted into `LogEvent.fields` as produced by `serde_json::to_value`, with no size or depth cap (matching `LogEvent.fields: serde_json::Map<String, Value>`).
+
 
 **Implementation constraints:**
 - `fields.rs` owns parsing of `target:`, `name:`, the field list and the format tail into one `EventSpec`, so a-3 can reuse it.
@@ -104,7 +112,9 @@ Every deliverable must land at a production-ready level for the scope this sprin
 
 **Tests:**
 - `tests/macros_jsonl.rs` initializes the a-1 guard and asserts each grammar row against the JSONL output: exact `target`, `action`, `message` and `fields` JSON types.
-- trybuild `tests/ui/` has one case per rejected form, with the expected stderr checked in.
+- trybuild `tests/ui/` has one case per rejected form, with the expected stderr checked in, including `field_not_serialize_or_debug.rs`.
+- Dispatch tests in `tests/macros_jsonl.rs`: a type implementing both `Serialize` and `Debug` is recorded as its Serialize JSON; a Debug-only type is recorded as its Debug string.
+- Test isolation: follows the a-1 test-isolation contract — `tests/macros_jsonl.rs` and `tests/compat_events.rs` are separate binaries, each with exactly one `#[test]` fn that calls `init()`; the disabled-level (no evaluation) case runs inside `macros_jsonl.rs`'s single test using a level below the configured max.
 
 ## Explicit Code Samples
 
@@ -157,7 +167,9 @@ pub mod __private {
 
 1. Every grammar-table row has a JSONL assertion in `tests/macros_jsonl.rs`, with the exact JSON type (number, bool, string, object) for `Serialize` values and strings for `?`/`%`.
 2. `tests/compat/events.rs` compiles unchanged against `tracing` 0.1 and against `sc_observability_log`. The `sc_observability_log` build passes its runtime assertions.
-3. Every rejected form has a trybuild case whose checked-in stderr names the unsupported form.
+3. Every rejected form has a trybuild case whose checked-in stderr names the unsupported form (for the neither-trait case, the stderr points at the offending field span).
+3a. `docs/field-value-dispatch.md` exists and matches the design record above; the both-traits and Debug-only dispatch tests pass on the MSRV check and the pinned toolchain.
+3b. `tests/macros_jsonl.rs` and `tests/compat_events.rs` each contain exactly one `#[test]` fn that calls `init()`.
 4. With the max level below the call's level, arguments are not evaluated, formatted or allocated. A test uses an argument whose `Debug`/`Serialize` implementation panics.
 5. Expanded code compiles in a consumer that depends only on `sc-observability-log`. The trybuild pass cases do not declare `sc-observability` as a dependency.
 6. Both crates meet the fmt/clippy `-D warnings`/MSRV gates, and the `crates` CI job passes on all three OSes.

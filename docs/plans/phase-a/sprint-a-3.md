@@ -111,6 +111,7 @@ Every deliverable must land production-ready for the scope this sprint claims. I
 - `tests/instrument_jsonl.rs` covers every argument-table row and every outcome.
 - Nested sync calls, and an async call across an `.await` on a multi-thread runtime, prove `trace_id`/`parent_span_id` propagation. Use tokio as a **dev-dependency only**: add `tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }` to `[workspace.dependencies]`.
 - A panicking sync fn under `catch_unwind` produces `outcome = panicked`.
+- Test isolation: follows the a-1 test-isolation contract — `tests/instrument_jsonl.rs` and `tests/compat_instrument.rs` are separate binaries, each with exactly one `#[test]` fn that calls `init()` (the async case builds its tokio runtime inside that fn rather than using `#[tokio::test]`).
 - trybuild has one case per unsupported argument.
 
 ## Explicit Code Samples
@@ -156,6 +157,7 @@ pub mod __private {
 ## Acceptance Criteria
 
 1. Every argument-table row and every completion-event field has a JSONL assertion in `tests/instrument_jsonl.rs`.
+1a. `tests/instrument_jsonl.rs` and `tests/compat_instrument.rs` each contain exactly one `#[test]` fn that calls `init()`.
 2. `tests/compat/instrument.rs` compiles unchanged against `tracing::instrument` and `sc_observability_log::instrument`, and passes its runtime assertions under the latter.
 3. Nested and async-across-await tests prove each inner event carries the same `trace_id` with the correct `span_id`/`parent_span_id`. a-2 macro events and a-1 bridge records both carry it.
 4. A sync panic yields `outcome = panicked` and still re-raises the panic. `Err` under `err` yields `level = ERROR` with `fields.error`.
