@@ -57,8 +57,11 @@ jobs:
         with:
           version: 10
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      # Keep in sync with rust-toolchain.toml (enforced by scripts/check_version_sync.py).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
 
       - name: Add Rust targets (macOS)
         if: matrix.platform == 'macos-latest'

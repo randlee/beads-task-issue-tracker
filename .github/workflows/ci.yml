@@ -13,6 +13,16 @@ on:
 # (extended PATH, attachment path guards, CREATE_NO_WINDOW) are
 # platform-specific, so the same gates run on all three runners.
 jobs:
+  version-sync:
+    name: version sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check version and toolchain pins agree
+        run: python3 scripts/check_version_sync.py
+
   frontend:
     name: frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -60,8 +70,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      # Keep in sync with rust-toolchain.toml (enforced by the version-sync job).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

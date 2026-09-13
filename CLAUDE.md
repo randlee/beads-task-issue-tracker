@@ -74,7 +74,7 @@ Always kill zombies before starting: `pkill -f "beads-issue-tracker" 2>/dev/null
 
 ### Releases
 1. **Update `CHANGELOG.md`** with the target version heading and all changes
-2. `npm version X.Y.Z --no-git-tag-version && python3 ~/.claude/scripts/sync-version.py` (same version as CHANGELOG)
+2. `python3 scripts/check_version_sync.py --set X.Y.Z` (same version as CHANGELOG). SSOT is `[workspace.package].version` in `src-tauri/Cargo.toml`; the script mirrors it into `package.json` and `src-tauri/Cargo.lock` (`tauri.conf.json` has no `version` — Tauri falls back to Cargo). CI's `version sync` job runs the script without `--set` and fails on any drift, including the Rust toolchain pin (`rust-toolchain.toml` ↔ `rust-version` ↔ workflow `toolchain:`).
 3. Commit, tag (`git tag -a vX.Y.Z`), push with tags
 4. `gh release create vX.Y.Z --title "..." --notes "..."`
 5. **Update `.claude/codebase-map.md`** to reflect any structural changes (new files, composables, commands, etc.)
