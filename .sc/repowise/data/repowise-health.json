@@ -1,0 +1,5863 @@
+{
+  "kpis": {
+    "hotspot_health": 1.65,
+    "average_health": 5.82,
+    "worst_performer_path": "src-tauri/src/lib.rs",
+    "worst_performer_score": 1.65,
+    "file_count": 231,
+    "maintainability_average": 5.3,
+    "maintainability_hotspot": 1.3,
+    "performance_average": 9.24,
+    "performance_hotspot": 8.0,
+    "structure_average": 2.85,
+    "structure_hotspot": 4.86,
+    "history_average": 1.33,
+    "history_hotspot": 3.5,
+    "production_average": 5.21,
+    "production_file_count": 217
+  },
+  "scope": "all",
+  "counts": "everything",
+  "metrics": [
+    {
+      "file_path": "src-tauri/src/lib.rs",
+      "score": 1.65,
+      "max_ccn": 102,
+      "max_nesting": 12,
+      "nloc": 4572,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 25.44
+    },
+    {
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "score": 5.94,
+      "max_ccn": 81,
+      "max_nesting": 5,
+      "nloc": 463,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 36.54
+    },
+    {
+      "file_path": "app/composables/useIssues.ts",
+      "score": 5.94,
+      "max_ccn": 130,
+      "max_nesting": 6,
+      "nloc": 648,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 52.52
+    },
+    {
+      "file_path": "app/utils/bd-api.ts",
+      "score": 6.17,
+      "max_ccn": 14,
+      "max_nesting": 4,
+      "nloc": 697,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 23.4
+    },
+    {
+      "file_path": "app/composables/useFavorites.ts",
+      "score": 6.89,
+      "max_ccn": 13,
+      "max_nesting": 6,
+      "nloc": 171,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useBeadsPath.ts",
+      "score": 7.17,
+      "max_ccn": 11,
+      "max_nesting": 5,
+      "nloc": 77,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "server/api/fs/list.get.ts",
+      "score": 7.25,
+      "max_ccn": 14,
+      "max_nesting": 5,
+      "nloc": 62,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/issue-helpers.ts",
+      "score": 7.55,
+      "max_ccn": 24,
+      "max_nesting": 3,
+      "nloc": 300,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 27.07
+    },
+    {
+      "file_path": "app/composables/useKeyboardNavigation.ts",
+      "score": 7.56,
+      "max_ccn": 22,
+      "max_nesting": 4,
+      "nloc": 76,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useRepairDatabase.ts",
+      "score": 7.69,
+      "max_ccn": 13,
+      "max_nesting": 4,
+      "nloc": 91,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 10.31
+    },
+    {
+      "file_path": "app/composables/useUpdateChecker.ts",
+      "score": 7.84,
+      "max_ccn": 14,
+      "max_nesting": 4,
+      "nloc": 95,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "server/utils/bd-executor.ts",
+      "score": 7.85,
+      "max_ccn": 13,
+      "max_nesting": 3,
+      "nloc": 224,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 52.03
+    },
+    {
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "score": 8.05,
+      "max_ccn": 40,
+      "max_nesting": 3,
+      "nloc": 142,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useChangeDetection.ts",
+      "score": 8.05,
+      "max_ccn": 11,
+      "max_nesting": 3,
+      "nloc": 141,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 22.75
+    },
+    {
+      "file_path": "app/composables/useMarkdownPreview.ts",
+      "score": 8.15,
+      "max_ccn": 10,
+      "max_nesting": 1,
+      "nloc": 122,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 33.59
+    },
+    {
+      "file_path": "app/composables/useMigrateToDolt.ts",
+      "score": 8.28,
+      "max_ccn": 11,
+      "max_nesting": 3,
+      "nloc": 69,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 81.58
+    },
+    {
+      "file_path": "app/composables/useFilters.ts",
+      "score": 8.43,
+      "max_ccn": 12,
+      "max_nesting": 1,
+      "nloc": 94,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 56.84
+    },
+    {
+      "file_path": "app/composables/useMigrateRefs.ts",
+      "score": 8.65,
+      "max_ccn": 10,
+      "max_nesting": 3,
+      "nloc": 62,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 76.47
+    },
+    {
+      "file_path": "server/utils/bd-transformers.ts",
+      "score": 8.7,
+      "max_ccn": 13,
+      "max_nesting": 1,
+      "nloc": 92,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 10.81
+    },
+    {
+      "file_path": "app/composables/useAppMenu.ts",
+      "score": 8.78,
+      "max_ccn": 6,
+      "max_nesting": 2,
+      "nloc": 113,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 52.94
+    },
+    {
+      "file_path": "server/api/bd/count.get.ts",
+      "score": 8.85,
+      "max_ccn": 14,
+      "max_nesting": 2,
+      "nloc": 55,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "server/api/bd/list.get.ts",
+      "score": 8.95,
+      "max_ccn": 8,
+      "max_nesting": 1,
+      "nloc": 25,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 65.38
+    },
+    {
+      "file_path": "server/api/bd/ready.get.ts",
+      "score": 8.95,
+      "max_ccn": 4,
+      "max_nesting": 1,
+      "nloc": 15,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/composables/useLocalStorage.ts",
+      "score": 9.06,
+      "max_ccn": 6,
+      "max_nesting": 4,
+      "nloc": 29,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useDashboard.ts",
+      "score": 9.15,
+      "max_ccn": 9,
+      "max_nesting": 3,
+      "nloc": 55,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "tests/composables/useCliClient.test.ts",
+      "score": 9.15,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 81,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 42.35
+    },
+    {
+      "file_path": "tests/utils/dashboard-stats.test.ts",
+      "score": 9.15,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 124,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 99.19
+    },
+    {
+      "file_path": "app/composables/useExclusionFilters.ts",
+      "score": 9.28,
+      "max_ccn": 6,
+      "max_nesting": 1,
+      "nloc": 88,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 59.09
+    },
+    {
+      "file_path": "app/composables/useImagePreview.ts",
+      "score": 9.28,
+      "max_ccn": 6,
+      "max_nesting": 1,
+      "nloc": 69,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 60.53
+    },
+    {
+      "file_path": "tests/utils/cli-compat.test.ts",
+      "score": 9.35,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 128,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 22.66
+    },
+    {
+      "file_path": "app/utils/markdown.ts",
+      "score": 9.5,
+      "max_ccn": 5,
+      "max_nesting": 1,
+      "nloc": 98,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 36.5
+    },
+    {
+      "file_path": "app/components/ui/badge/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 24,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 75.0
+    },
+    {
+      "file_path": "app/components/ui/button/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 36,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 50.0
+    },
+    {
+      "file_path": "app/components/ui/card/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 7,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/components/ui/dialog/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 10,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 15,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/components/ui/select/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 11,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/components/ui/sheet/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 8,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/components/ui/table/index.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 9,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "app/composables/useSidebarResize.ts",
+      "score": 9.65,
+      "max_ccn": 2,
+      "max_nesting": 1,
+      "nloc": 72,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 79.73
+    },
+    {
+      "file_path": "server/api/bd/create.post.ts",
+      "score": 9.65,
+      "max_ccn": 7,
+      "max_nesting": 1,
+      "nloc": 37,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 87.18
+    },
+    {
+      "file_path": "server/api/bd/status.get.ts",
+      "score": 9.65,
+      "max_ccn": 4,
+      "max_nesting": 1,
+      "nloc": 13,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "server/api/bd/close/[id].post.ts",
+      "score": 9.65,
+      "max_ccn": 5,
+      "max_nesting": 1,
+      "nloc": 20,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "server/api/bd/comments/[id].post.ts",
+      "score": 9.65,
+      "max_ccn": 7,
+      "max_nesting": 1,
+      "nloc": 27,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 48.15
+    },
+    {
+      "file_path": "server/api/bd/delete/[id].delete.ts",
+      "score": 9.65,
+      "max_ccn": 5,
+      "max_nesting": 1,
+      "nloc": 20,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "server/api/bd/show/[id].get.ts",
+      "score": 9.65,
+      "max_ccn": 7,
+      "max_nesting": 1,
+      "nloc": 22,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "server/api/bd/update/[id].patch.ts",
+      "score": 9.65,
+      "max_ccn": 8,
+      "max_nesting": 1,
+      "nloc": 41,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "tests/composables/useCliCompatibility.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 248,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 58.43
+    },
+    {
+      "file_path": "tests/composables/useKeyboardNavigation.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 134,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 97.04
+    },
+    {
+      "file_path": "tests/utils/attachment-encoding.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 55,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 45.45
+    },
+    {
+      "file_path": "tests/utils/favorites-helpers.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 123,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 72.46
+    },
+    {
+      "file_path": "tests/utils/issue-helpers.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 356,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 71.1
+    },
+    {
+      "file_path": "tests/utils/markdown.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 161,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 62.78
+    },
+    {
+      "file_path": "tests/utils/open-url.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 69,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 100.0
+    },
+    {
+      "file_path": "tests/utils/path.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 67,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 62.96
+    },
+    {
+      "file_path": "tests/utils/probe-adapter.test.ts",
+      "score": 9.65,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 42,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 86.05
+    },
+    {
+      "file_path": "tests/utils/bd-executor.test.ts",
+      "score": 9.7,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 86,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useColumnConfig.ts",
+      "score": 9.85,
+      "max_ccn": 6,
+      "max_nesting": 1,
+      "nloc": 63,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 16.92
+    },
+    {
+      "file_path": "app/utils/open-url.ts",
+      "score": 9.85,
+      "max_ccn": 4,
+      "max_nesting": 3,
+      "nloc": 107,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": 17.91
+    },
+    {
+      "file_path": "nuxt.config.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 50,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "vitest.config.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 14,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/app.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/DashboardContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/FolderPicker.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/KpiCard.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/OnboardingCard.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/PathSelector.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/PinnedList.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/PrerequisitesCard.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/PriorityChart.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/QuickList.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/dashboard/StatusChart.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/details/CommentSection.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/details/IssueDetailHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/details/IssueForm.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/details/IssuePreview.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/AssigneeFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/ColumnConfig.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/ExclusionFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/FilterChips.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/IssueListPanel.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/IssueTable.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/IssuesToolbar.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/LabelBadge.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/LabelFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/PriorityBadge.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/PriorityFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/StatusBadge.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/StatusFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/TypeBadge.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/issues/TypeFilterDropdown.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/AboutDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/AppHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/CliCompatibilityBanner.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/CollapsibleSection.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/DebugDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/DebugPanel.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/DialogsLayer.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/SettingsDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/UpdateDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/layout/UpdateIndicator.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/avatar/Avatar.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/avatar/AvatarFallback.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/avatar/AvatarImage.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/avatar/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 3,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/badge/Badge.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/button/Button.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/Card.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardAction.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardDescription.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardFooter.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/card/CardTitle.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/checkbox/Checkbox.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/checkbox/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/collapsible/Collapsible.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/collapsible/CollapsibleContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/collapsible/CollapsibleTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/collapsible/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 3,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/confirm-dialog/ConfirmDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/confirm-dialog/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/copyable-id/CopyableId.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/copyable-id/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/Dialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogClose.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogDescription.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogFooter.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogOverlay.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogScrollContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogTitle.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dialog/DialogTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenu.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuCheckboxItem.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuGroup.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuItem.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuLabel.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuRadioGroup.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuRadioItem.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuSeparator.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuShortcut.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuSub.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuSubContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuSubTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/dropdown-menu/DropdownMenuTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/image-preview/ImagePreviewDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/image-preview/ImageThumbnail.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/image-preview/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 2,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/input/Input.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/input/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/label/Label.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/label/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/label-multiselect/LabelMultiSelect.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/label-multiselect/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/linkified-text/LinkifiedText.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/linkified-text/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/markdown-preview/MarkdownPreviewDialog.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/markdown-preview/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/notification-toast/NotificationToast.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/notification-toast/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/scroll-area/ScrollArea.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/scroll-area/ScrollBar.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/scroll-area/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 2,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/Select.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectGroup.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectItem.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectItemText.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectLabel.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectScrollDownButton.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectScrollUpButton.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectSeparator.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/select/SelectValue.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/separator/Separator.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/separator/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/Sheet.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetClose.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetDescription.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetFooter.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetOverlay.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetTitle.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sheet/SheetTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sonner/Sonner.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/sonner/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/Table.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableBody.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableCaption.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableCell.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableEmpty.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableFooter.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableHead.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableHeader.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/TableRow.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/table/utils.ts",
+      "score": 10.0,
+      "max_ccn": 2,
+      "max_nesting": 1,
+      "nloc": 8,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/textarea/Textarea.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/textarea/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 1,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/tooltip/Tooltip.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/tooltip/TooltipContent.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/tooltip/TooltipProvider.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/tooltip/TooltipTrigger.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/components/ui/tooltip/index.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 4,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useAttachments.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 50,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useCliClient.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 17,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useCliCompatibility.ts",
+      "score": 10.0,
+      "max_ccn": 4,
+      "max_nesting": 1,
+      "nloc": 38,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useCollapsible.ts",
+      "score": 10.0,
+      "max_ccn": 4,
+      "max_nesting": 1,
+      "nloc": 56,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useNotification.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 33,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/usePinnedIssues.ts",
+      "score": 10.0,
+      "max_ccn": 8,
+      "max_nesting": 1,
+      "nloc": 48,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useProjectStorage.ts",
+      "score": 10.0,
+      "max_ccn": 5,
+      "max_nesting": 3,
+      "nloc": 106,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useSyncStatus.ts",
+      "score": 10.0,
+      "max_ccn": 5,
+      "max_nesting": 3,
+      "nloc": 47,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useTauriWindow.ts",
+      "score": 10.0,
+      "max_ccn": 3,
+      "max_nesting": 1,
+      "nloc": 23,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useTheme.ts",
+      "score": 10.0,
+      "max_ccn": 6,
+      "max_nesting": 3,
+      "nloc": 57,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/composables/useZoom.ts",
+      "score": 10.0,
+      "max_ccn": 5,
+      "max_nesting": 2,
+      "nloc": 44,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/lib/utils.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 6,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/pages/index.vue",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 0,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/plugins/console-to-log.client.ts",
+      "score": 10.0,
+      "max_ccn": 7,
+      "max_nesting": 3,
+      "nloc": 43,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/types/issue.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 119,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/attachment-encoding.ts",
+      "score": 10.0,
+      "max_ccn": 2,
+      "max_nesting": 1,
+      "nloc": 11,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/cli-compat.ts",
+      "score": 10.0,
+      "max_ccn": 6,
+      "max_nesting": 2,
+      "nloc": 65,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/favorites-helpers.ts",
+      "score": 10.0,
+      "max_ccn": 3,
+      "max_nesting": 1,
+      "nloc": 46,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/hash.ts",
+      "score": 10.0,
+      "max_ccn": 2,
+      "max_nesting": 1,
+      "nloc": 8,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/path.ts",
+      "score": 10.0,
+      "max_ccn": 2,
+      "max_nesting": 1,
+      "nloc": 16,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "app/utils/probe-adapter.ts",
+      "score": 10.0,
+      "max_ccn": 4,
+      "max_nesting": 1,
+      "nloc": 81,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "src-tauri/build.rs",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 3,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "src-tauri/src/main.rs",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 4,
+      "has_test_file": false,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    },
+    {
+      "file_path": "tests/utils/hash.test.ts",
+      "score": 10.0,
+      "max_ccn": 1,
+      "max_nesting": 0,
+      "nloc": 29,
+      "has_test_file": true,
+      "line_coverage_pct": null,
+      "branch_coverage_pct": null,
+      "duplication_pct": null
+    }
+  ],
+  "findings": [
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/badge/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 75.0,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 18,
+        "worst_clone_partner": "app/components/ui/button/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "75% of file duplicated; worst clone shares 18 lines with app/components/ui/button/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/button/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 50.0,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 18,
+        "worst_clone_partner": "app/components/ui/badge/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "50% of file duplicated; worst clone shares 18 lines with app/components/ui/badge/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/card/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/dropdown-menu/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/dropdown-menu/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/dialog/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/dropdown-menu/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/dropdown-menu/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/dropdown-menu/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/card/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/card/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/select/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/dropdown-menu/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/dropdown-menu/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/sheet/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/dropdown-menu/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/dropdown-menu/index.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/components/ui/table/index.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 16,
+        "worst_clone_partner": "app/components/ui/dropdown-menu/index.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 16 lines with app/components/ui/dropdown-menu/index.ts"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "function_name": "useAdaptivePolling",
+      "health_impact": 0.926,
+      "details": {
+        "ccn": 40,
+        "cognitive": 47,
+        "nloc": 130
+      },
+      "reason": "useAdaptivePolling has cyclomatic complexity 40"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "function_name": "useAdaptivePolling",
+      "health_impact": 0.15,
+      "details": {
+        "bumps": 3,
+        "ccn": 40,
+        "max_nesting": 3
+      },
+      "reason": "useAdaptivePolling has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "high",
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "function_name": "useAdaptivePolling",
+      "health_impact": 0.574,
+      "details": {
+        "nloc": 130,
+        "ccn": 40
+      },
+      "reason": "useAdaptivePolling is 130 lines long"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useAdaptivePolling.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "app/composables/useAppMenu.ts",
+      "function_name": "useAppMenu",
+      "health_impact": 0.875,
+      "details": {
+        "nloc": 108,
+        "ccn": 6
+      },
+      "reason": "useAppMenu is 108 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useAppMenu.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 52.94,
+        "clone_pair_count": 3,
+        "worst_clone_lines": 47,
+        "worst_clone_partner": "app/composables/useAppMenu.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "53% of file duplicated; worst clone shares 47 lines with app/composables/useAppMenu.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "app/composables/useBeadsPath.ts",
+      "function_name": "useBeadsPath",
+      "health_impact": 1.608,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 11,
+        "cognitive": 24
+      },
+      "reason": "useBeadsPath nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useBeadsPath.ts",
+      "function_name": "useBeadsPath",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 11,
+        "cognitive": 24,
+        "nloc": 70
+      },
+      "reason": "useBeadsPath has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useBeadsPath.ts",
+      "function_name": "useBeadsPath",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 70,
+        "ccn": 11
+      },
+      "reason": "useBeadsPath is 70 lines long"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": "createSSEBackend",
+      "health_impact": 0.614,
+      "details": {
+        "ccn": 9,
+        "cognitive": 15,
+        "nloc": 54
+      },
+      "reason": "createSSEBackend has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": "createWatcherBackend",
+      "health_impact": 0.614,
+      "details": {
+        "ccn": 11,
+        "cognitive": 16,
+        "nloc": 63
+      },
+      "reason": "createWatcherBackend has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": "createWatcherBackend",
+      "health_impact": 0.272,
+      "details": {
+        "nloc": 63,
+        "ccn": 11
+      },
+      "reason": "createWatcherBackend is 63 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 22.75,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 19,
+        "worst_clone_partner": "app/composables/useChangeDetection.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "23% of file duplicated; worst clone shares 19 lines with app/composables/useChangeDetection.ts"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useChangeDetection.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "app/composables/useColumnConfig.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 16.92,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 10,
+        "worst_clone_partner": "app/composables/useColumnConfig.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "17% of file duplicated; worst clone shares 10 lines with app/composables/useColumnConfig.ts"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useDashboard.ts",
+      "function_name": "useDashboard",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 9,
+        "cognitive": 14,
+        "nloc": 52
+      },
+      "reason": "useDashboard has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useExclusionFilters.ts",
+      "function_name": "useExclusionFilters",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 72,
+        "ccn": 6
+      },
+      "reason": "useExclusionFilters is 72 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useExclusionFilters.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 59.09,
+        "clone_pair_count": 4,
+        "worst_clone_lines": 52,
+        "worst_clone_partner": "app/composables/useFilters.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "59% of file duplicated; worst clone shares 52 lines with app/composables/useFilters.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "app/composables/useFavorites.ts",
+      "function_name": "initFromStorage",
+      "health_impact": 1.608,
+      "details": {
+        "max_nesting": 6,
+        "ccn": 13,
+        "cognitive": 49
+      },
+      "reason": "initFromStorage nests 6 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useFavorites.ts",
+      "function_name": "useProjects",
+      "health_impact": 0.495,
+      "details": {
+        "ccn": 9,
+        "cognitive": 8,
+        "nloc": 91
+      },
+      "reason": "useProjects has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useFavorites.ts",
+      "function_name": "initFromStorage",
+      "health_impact": 0.495,
+      "details": {
+        "ccn": 13,
+        "cognitive": 49,
+        "nloc": 51
+      },
+      "reason": "initFromStorage has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "app/composables/useFavorites.ts",
+      "function_name": "useProjects",
+      "health_impact": 0.511,
+      "details": {
+        "nloc": 91,
+        "ccn": 9
+      },
+      "reason": "useProjects is 91 lines long"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useFilters.ts",
+      "function_name": "useFilters",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 12,
+        "cognitive": 11,
+        "nloc": 84
+      },
+      "reason": "useFilters has cyclomatic complexity 12"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useFilters.ts",
+      "function_name": "useFilters",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 84,
+        "ccn": 12
+      },
+      "reason": "useFilters is 84 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useFilters.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 56.84,
+        "clone_pair_count": 5,
+        "worst_clone_lines": 52,
+        "worst_clone_partner": "app/composables/useExclusionFilters.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "57% of file duplicated; worst clone shares 52 lines with app/composables/useExclusionFilters.ts"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useImagePreview.ts",
+      "function_name": "useImagePreview",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 62,
+        "ccn": 6
+      },
+      "reason": "useImagePreview is 62 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useImagePreview.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 60.53,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 29,
+        "worst_clone_partner": "app/composables/useMarkdownPreview.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "61% of file duplicated; worst clone shares 29 lines with app/composables/useMarkdownPreview.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "function_name": "useIssueDialogs",
+      "health_impact": 1.608,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 81,
+        "cognitive": 144
+      },
+      "reason": "useIssueDialogs nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "function_name": "useIssueDialogs",
+      "health_impact": 0.738,
+      "details": {
+        "ccn": 81,
+        "cognitive": 144,
+        "nloc": 424
+      },
+      "reason": "useIssueDialogs has cyclomatic complexity 81"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "high",
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "function_name": "useIssueDialogs",
+      "health_impact": 0.6,
+      "details": {
+        "bumps": 11,
+        "ccn": 81,
+        "max_nesting": 5
+      },
+      "reason": "useIssueDialogs has 11 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "critical",
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "function_name": "useIssueDialogs",
+      "health_impact": 0.762,
+      "details": {
+        "nloc": 424,
+        "ccn": 81
+      },
+      "reason": "useIssueDialogs is 424 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useIssueDialogs.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 36.54,
+        "clone_pair_count": 6,
+        "worst_clone_lines": 87,
+        "worst_clone_partner": "app/composables/useIssues.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "37% of file duplicated; worst clone shares 87 lines with app/composables/useIssues.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": "useIssues",
+      "health_impact": 1.608,
+      "details": {
+        "max_nesting": 6,
+        "ccn": 130,
+        "cognitive": 335
+      },
+      "reason": "useIssues nests 6 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": "useIssues",
+      "health_impact": 0.629,
+      "details": {
+        "ccn": 130,
+        "cognitive": 335,
+        "nloc": 571
+      },
+      "reason": "useIssues has cyclomatic complexity 130"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": "notifyStatusTransitions",
+      "health_impact": 0.22,
+      "details": {
+        "ccn": 9,
+        "cognitive": 12,
+        "nloc": 22
+      },
+      "reason": "notifyStatusTransitions has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "high",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": "useIssues",
+      "health_impact": 0.6,
+      "details": {
+        "bumps": 16,
+        "ccn": 130,
+        "max_nesting": 6
+      },
+      "reason": "useIssues has 16 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "critical",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": "useIssues",
+      "health_impact": 0.65,
+      "details": {
+        "nloc": 571,
+        "ccn": 130
+      },
+      "reason": "useIssues is 571 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useIssues.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 52.52,
+        "clone_pair_count": 13,
+        "worst_clone_lines": 87,
+        "worst_clone_partner": "app/composables/useIssueDialogs.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "53% of file duplicated; worst clone shares 87 lines with app/composables/useIssueDialogs.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/composables/useKeyboardNavigation.ts",
+      "function_name": "useKeyboardNavigation",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 22,
+        "cognitive": 41
+      },
+      "reason": "useKeyboardNavigation nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "app/composables/useKeyboardNavigation.ts",
+      "function_name": "useKeyboardNavigation",
+      "health_impact": 1.192,
+      "details": {
+        "ccn": 22,
+        "cognitive": 41,
+        "nloc": 69
+      },
+      "reason": "useKeyboardNavigation has cyclomatic complexity 22"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useKeyboardNavigation.ts",
+      "function_name": "useKeyboardNavigation",
+      "health_impact": 0.308,
+      "details": {
+        "nloc": 69,
+        "ccn": 22
+      },
+      "reason": "useKeyboardNavigation is 69 lines long"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/composables/useLocalStorage.ts",
+      "function_name": "useLocalStorage",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 6,
+        "cognitive": 12
+      },
+      "reason": "useLocalStorage nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useMarkdownPreview.ts",
+      "function_name": "useMarkdownPreview",
+      "health_impact": 0.738,
+      "details": {
+        "ccn": 10,
+        "cognitive": 9,
+        "nloc": 110
+      },
+      "reason": "useMarkdownPreview has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "app/composables/useMarkdownPreview.ts",
+      "function_name": "useMarkdownPreview",
+      "health_impact": 0.762,
+      "details": {
+        "nloc": 110,
+        "ccn": 10
+      },
+      "reason": "useMarkdownPreview is 110 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useMarkdownPreview.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 33.59,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 29,
+        "worst_clone_partner": "app/composables/useImagePreview.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "34% of file duplicated; worst clone shares 29 lines with app/composables/useImagePreview.ts"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useMigrateRefs.ts",
+      "function_name": "useMigrateRefs",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 10,
+        "cognitive": 18,
+        "nloc": 57
+      },
+      "reason": "useMigrateRefs has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useMigrateRefs.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 76.47,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 52,
+        "worst_clone_partner": "app/composables/useMigrateToDolt.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "76% of file duplicated; worst clone shares 52 lines with app/composables/useMigrateToDolt.ts"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useMigrateRefs.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useMigrateToDolt.ts",
+      "function_name": "useMigrateToDolt",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 11,
+        "cognitive": 18,
+        "nloc": 64
+      },
+      "reason": "useMigrateToDolt has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useMigrateToDolt.ts",
+      "function_name": "useMigrateToDolt",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 64,
+        "ccn": 11
+      },
+      "reason": "useMigrateToDolt is 64 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useMigrateToDolt.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 81.58,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 52,
+        "worst_clone_partner": "app/composables/useMigrateRefs.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "82% of file duplicated; worst clone shares 52 lines with app/composables/useMigrateRefs.ts"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/composables/useMigrateToDolt.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/composables/useRepairDatabase.ts",
+      "function_name": "useRepairDatabase",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 13,
+        "cognitive": 29
+      },
+      "reason": "useRepairDatabase nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useRepairDatabase.ts",
+      "function_name": "useRepairDatabase",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 13,
+        "cognitive": 29,
+        "nloc": 84
+      },
+      "reason": "useRepairDatabase has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useRepairDatabase.ts",
+      "function_name": "useRepairDatabase",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 84,
+        "ccn": 13
+      },
+      "reason": "useRepairDatabase is 84 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "app/composables/useRepairDatabase.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 10.31,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 10,
+        "worst_clone_partner": "app/composables/useMigrateToDolt.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "10% of file duplicated; worst clone shares 10 lines with app/composables/useMigrateToDolt.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/composables/useSidebarResize.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 79.73,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 30,
+        "worst_clone_partner": "app/composables/useSidebarResize.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "80% of file duplicated; worst clone shares 30 lines with app/composables/useSidebarResize.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/composables/useUpdateChecker.ts",
+      "function_name": "useUpdateChecker",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 14,
+        "cognitive": 28
+      },
+      "reason": "useUpdateChecker nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/composables/useUpdateChecker.ts",
+      "function_name": "useUpdateChecker",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 14,
+        "cognitive": 28,
+        "nloc": 85
+      },
+      "reason": "useUpdateChecker has cyclomatic complexity 14"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "app/composables/useUpdateChecker.ts",
+      "function_name": "useUpdateChecker",
+      "health_impact": 0.375,
+      "details": {
+        "nloc": 85,
+        "ccn": 14
+      },
+      "reason": "useUpdateChecker is 85 lines long"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": "launchProbeIfNeeded",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 9,
+        "cognitive": 18
+      },
+      "reason": "launchProbeIfNeeded nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": "registerOrExposeProject",
+      "health_impact": 0.938,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 5,
+        "cognitive": 13
+      },
+      "reason": "registerOrExposeProject nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": "checkForUpdates",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 14,
+        "cognitive": 18,
+        "nloc": 41
+      },
+      "reason": "checkForUpdates has cyclomatic complexity 14"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": "bdList",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 11,
+        "cognitive": 10,
+        "nloc": 24
+      },
+      "reason": "bdList has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": "launchProbeIfNeeded",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 9,
+        "cognitive": 18,
+        "nloc": 25
+      },
+      "reason": "launchProbeIfNeeded has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 23.4,
+        "clone_pair_count": 14,
+        "worst_clone_lines": 22,
+        "worst_clone_partner": "app/utils/bd-api.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "23% of file duplicated; worst clone shares 22 lines with app/utils/bd-api.ts"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "app/utils/bd-api.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": "groupIssues",
+      "health_impact": 0.419,
+      "details": {
+        "ccn": 21,
+        "cognitive": 34,
+        "nloc": 59
+      },
+      "reason": "groupIssues has cyclomatic complexity 21"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": "filterIssues",
+      "health_impact": 0.419,
+      "details": {
+        "ccn": 17,
+        "cognitive": 16,
+        "nloc": 54
+      },
+      "reason": "filterIssues has cyclomatic complexity 17"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": "sortIssues",
+      "health_impact": 0.419,
+      "details": {
+        "ccn": 24,
+        "cognitive": 45,
+        "nloc": 54
+      },
+      "reason": "sortIssues has cyclomatic complexity 24"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": "naturalCompare",
+      "health_impact": 0.244,
+      "details": {
+        "ccn": 9,
+        "cognitive": 15,
+        "nloc": 17
+      },
+      "reason": "naturalCompare has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "high",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": "groupIssues",
+      "health_impact": 0.6,
+      "details": {
+        "bumps": 5,
+        "ccn": 21,
+        "max_nesting": 3
+      },
+      "reason": "groupIssues has 5 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/utils/issue-helpers.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 27.07,
+        "clone_pair_count": 5,
+        "worst_clone_lines": 21,
+        "worst_clone_partner": "app/utils/issue-helpers.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "27% of file duplicated; worst clone shares 21 lines with app/utils/issue-helpers.ts"
+    },
+    {
+      "biomarker_type": "primitive_obsession",
+      "severity": "low",
+      "file_path": "app/utils/markdown.ts",
+      "function_name": "<anonymous>",
+      "health_impact": 0.15,
+      "details": {
+        "param_count": 5
+      },
+      "reason": "<anonymous> takes 5 parameters"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "app/utils/markdown.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 36.5,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 28,
+        "worst_clone_partner": "app/utils/markdown.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "36% of file duplicated; worst clone shares 28 lines with app/utils/markdown.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "app/utils/open-url.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 17.91,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 12,
+        "worst_clone_partner": "app/utils/open-url.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "18% of file duplicated; worst clone shares 12 lines with app/utils/open-url.ts"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/api/bd/count.get.ts",
+      "function_name": "defineEventHandler callback",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 14,
+        "cognitive": 17,
+        "nloc": 47
+      },
+      "reason": "defineEventHandler callback has cyclomatic complexity 14"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "low",
+      "file_path": "server/api/bd/count.get.ts",
+      "function_name": null,
+      "health_impact": 0.3,
+      "details": {
+        "prior_defect_count": 1,
+        "window_days": 180
+      },
+      "reason": "1 bug-fix touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/create.post.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 87.18,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 20,
+        "worst_clone_partner": "server/api/bd/update/[id].patch.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "87% of file duplicated; worst clone shares 20 lines with server/api/bd/update/[id].patch.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 65.38,
+        "clone_pair_count": 4,
+        "worst_clone_lines": 13,
+        "worst_clone_partner": "server/api/bd/ready.get.ts",
+        "worst_clone_co_change": 2
+      },
+      "reason": "65% of file duplicated; worst clone shares 13 lines with server/api/bd/ready.get.ts (co-changed 2x)"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "medium",
+      "file_path": "server/api/bd/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.7,
+      "details": {
+        "prior_defect_count": 2,
+        "window_days": 180
+      },
+      "reason": "2 bug-fixes touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/ready.get.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 13,
+        "worst_clone_partner": "server/api/bd/list.get.ts",
+        "worst_clone_co_change": 2
+      },
+      "reason": "100% of file duplicated; worst clone shares 13 lines with server/api/bd/list.get.ts (co-changed 2x)"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "medium",
+      "file_path": "server/api/bd/ready.get.ts",
+      "function_name": null,
+      "health_impact": 0.7,
+      "details": {
+        "prior_defect_count": 2,
+        "window_days": 180
+      },
+      "reason": "2 bug-fixes touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/status.get.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 14,
+        "worst_clone_partner": "server/api/bd/ready.get.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 14 lines with server/api/bd/ready.get.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/close/[id].post.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 3,
+        "worst_clone_lines": 25,
+        "worst_clone_partner": "server/api/bd/delete/[id].delete.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 25 lines with server/api/bd/delete/[id].delete.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/comments/[id].post.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 48.15,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 13,
+        "worst_clone_partner": "server/api/bd/update/[id].patch.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "48% of file duplicated; worst clone shares 13 lines with server/api/bd/update/[id].patch.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/delete/[id].delete.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 3,
+        "worst_clone_lines": 25,
+        "worst_clone_partner": "server/api/bd/close/[id].post.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 25 lines with server/api/bd/close/[id].post.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/show/[id].get.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 4,
+        "worst_clone_lines": 23,
+        "worst_clone_partner": "server/api/bd/delete/[id].delete.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 23 lines with server/api/bd/delete/[id].delete.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/api/bd/update/[id].patch.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 4,
+        "worst_clone_lines": 20,
+        "worst_clone_partner": "server/api/bd/create.post.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 20 lines with server/api/bd/create.post.ts"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": "defineEventHandler callback",
+      "health_impact": 1.608,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 14,
+        "cognitive": 36
+      },
+      "reason": "defineEventHandler callback nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": "defineEventHandler callback",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 14,
+        "cognitive": 36,
+        "nloc": 53
+      },
+      "reason": "defineEventHandler callback has cyclomatic complexity 14"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "kind": "swallowed_catch"
+      },
+      "reason": "caught exception is swallowed without any handling"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_0ddccb5e2959fda8c710"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "serial_await_in_loop",
+      "severity": "low",
+      "file_path": "server/api/fs/list.get.ts",
+      "function_name": null,
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "dataflow_verified": true,
+        "opportunity_id": "perf2_0cbdbb666344873d7ee4"
+      },
+      "reason": "a filesystem call is awaited serially in a loop whose iterations carry no data dependence; fan out with gather / Promise.all"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/utils/bd-executor.ts",
+      "function_name": "bdUpdate",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 13,
+        "cognitive": 12,
+        "nloc": 40
+      },
+      "reason": "bdUpdate has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/utils/bd-executor.ts",
+      "function_name": "bdCreate",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 11,
+        "cognitive": 10,
+        "nloc": 34
+      },
+      "reason": "bdCreate has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/utils/bd-executor.ts",
+      "function_name": "executeBd",
+      "health_impact": 0.5,
+      "details": {
+        "ccn": 9,
+        "cognitive": 17,
+        "nloc": 38
+      },
+      "reason": "executeBd has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "server/utils/bd-executor.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 52.03,
+        "clone_pair_count": 8,
+        "worst_clone_lines": 21,
+        "worst_clone_partner": "server/utils/bd-executor.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "52% of file duplicated; worst clone shares 21 lines with server/utils/bd-executor.ts"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "low",
+      "file_path": "server/utils/bd-executor.ts",
+      "function_name": null,
+      "health_impact": 0.3,
+      "details": {
+        "prior_defect_count": 1,
+        "window_days": 180
+      },
+      "reason": "1 bug-fix touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "server/utils/bd-transformers.ts",
+      "function_name": "transformToRaw",
+      "health_impact": 0.847,
+      "details": {
+        "ccn": 13,
+        "cognitive": 12,
+        "nloc": 16
+      },
+      "reason": "transformToRaw has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "server/utils/bd-transformers.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 10.81,
+        "clone_pair_count": 1,
+        "worst_clone_lines": 11,
+        "worst_clone_partner": "server/utils/bd-transformers.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "11% of file duplicated; worst clone shares 11 lines with server/utils/bd-transformers.ts"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "low",
+      "file_path": "server/utils/bd-transformers.ts",
+      "function_name": null,
+      "health_impact": 0.3,
+      "details": {
+        "prior_defect_count": 1,
+        "window_days": 180
+      },
+      "reason": "1 bug-fix touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.142,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 20,
+        "cognitive": 39
+      },
+      "reason": "check_refs_migration nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_delete",
+      "health_impact": 0.142,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 10,
+        "cognitive": 16
+      },
+      "reason": "bd_delete nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "get_beads_mtime",
+      "health_impact": 0.243,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 18,
+        "cognitive": 50
+      },
+      "reason": "get_beads_mtime nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.405,
+      "details": {
+        "max_nesting": 12,
+        "ccn": 102,
+        "cognitive": 319
+      },
+      "reason": "bd_migrate_to_dolt nests 12 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "ensure_refs_migrated_v3",
+      "health_impact": 0.243,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 42,
+        "cognitive": 86
+      },
+      "reason": "ensure_refs_migrated_v3 nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "project_uses_dolt",
+      "health_impact": 0.405,
+      "details": {
+        "max_nesting": 8,
+        "ccn": 13,
+        "cognitive": 45
+      },
+      "reason": "project_uses_dolt nests 8 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "load_config",
+      "health_impact": 0.142,
+      "details": {
+        "max_nesting": 4,
+        "ccn": 5,
+        "cognitive": 13
+      },
+      "reason": "load_config nests 4 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "parse_issues_tolerant",
+      "health_impact": 0.243,
+      "details": {
+        "max_nesting": 5,
+        "ccn": 10,
+        "cognitive": 23
+      },
+      "reason": "parse_issues_tolerant nests 5 levels deep"
+    },
+    {
+      "biomarker_type": "nested_complexity",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "transform_issue",
+      "health_impact": 0.243,
+      "details": {
+        "max_nesting": 6,
+        "ccn": 34,
+        "cognitive": 83
+      },
+      "reason": "transform_issue nests 6 levels deep"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "delete_attachment",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 12,
+        "cognitive": 15,
+        "nloc": 50
+      },
+      "reason": "delete_attachment has cyclomatic complexity 12"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "list_attachments",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 10,
+        "cognitive": 13,
+        "nloc": 44
+      },
+      "reason": "list_attachments has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.066,
+      "details": {
+        "ccn": 20,
+        "cognitive": 39,
+        "nloc": 67
+      },
+      "reason": "check_refs_migration has cyclomatic complexity 20"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "sanitize_filename",
+      "health_impact": 0.066,
+      "details": {
+        "ccn": 23,
+        "cognitive": 59,
+        "nloc": 48
+      },
+      "reason": "sanitize_filename has cyclomatic complexity 23"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "purge_orphan_attachments",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 11,
+        "cognitive": 16,
+        "nloc": 60
+      },
+      "reason": "purge_orphan_attachments has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "fs_list",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 10,
+        "cognitive": 13,
+        "nloc": 56
+      },
+      "reason": "fs_list has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_delete",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 10,
+        "cognitive": 16,
+        "nloc": 33
+      },
+      "reason": "bd_delete has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_update",
+      "health_impact": 0.066,
+      "details": {
+        "ccn": 20,
+        "cognitive": 20,
+        "nloc": 109
+      },
+      "reason": "bd_update has cyclomatic complexity 20"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_create",
+      "health_impact": 0.066,
+      "details": {
+        "ccn": 16,
+        "cognitive": 18,
+        "nloc": 62
+      },
+      "reason": "bd_create has cyclomatic complexity 16"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_list",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 11,
+        "cognitive": 13,
+        "nloc": 47
+      },
+      "reason": "bd_list has cyclomatic complexity 11"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "get_beads_mtime",
+      "health_impact": 0.066,
+      "details": {
+        "ccn": 18,
+        "cognitive": 50,
+        "nloc": 51
+      },
+      "reason": "get_beads_mtime has cyclomatic complexity 18"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.11,
+      "details": {
+        "ccn": 102,
+        "cognitive": 319,
+        "nloc": 465
+      },
+      "reason": "bd_migrate_to_dolt has cyclomatic complexity 102"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_check_needs_migration",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 9,
+        "cognitive": 9,
+        "nloc": 60
+      },
+      "reason": "bd_check_needs_migration has cyclomatic complexity 9"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 13,
+        "cognitive": 18,
+        "nloc": 98
+      },
+      "reason": "bd_repair_database has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "ensure_refs_migrated_v3",
+      "health_impact": 0.11,
+      "details": {
+        "ccn": 42,
+        "cognitive": 86,
+        "nloc": 141
+      },
+      "reason": "ensure_refs_migrated_v3 has cyclomatic complexity 42"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "project_uses_dolt",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 13,
+        "cognitive": 45,
+        "nloc": 27
+      },
+      "reason": "project_uses_dolt has cyclomatic complexity 13"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "parse_issues_tolerant",
+      "health_impact": 0.039,
+      "details": {
+        "ccn": 10,
+        "cognitive": 23,
+        "nloc": 53
+      },
+      "reason": "parse_issues_tolerant has cyclomatic complexity 10"
+    },
+    {
+      "biomarker_type": "complex_method",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "transform_issue",
+      "health_impact": 0.11,
+      "details": {
+        "ccn": 34,
+        "cognitive": 83,
+        "nloc": 159
+      },
+      "reason": "transform_issue has cyclomatic complexity 34"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.023,
+      "details": {
+        "bumps": 3,
+        "ccn": 20,
+        "max_nesting": 4
+      },
+      "reason": "check_refs_migration has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_create",
+      "health_impact": 0.023,
+      "details": {
+        "bumps": 3,
+        "ccn": 16,
+        "max_nesting": 2
+      },
+      "reason": "bd_create has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_list",
+      "health_impact": 0.023,
+      "details": {
+        "bumps": 3,
+        "ccn": 11,
+        "max_nesting": 2
+      },
+      "reason": "bd_list has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.091,
+      "details": {
+        "bumps": 12,
+        "ccn": 102,
+        "max_nesting": 12
+      },
+      "reason": "bd_migrate_to_dolt has 12 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.023,
+      "details": {
+        "bumps": 3,
+        "ccn": 13,
+        "max_nesting": 2
+      },
+      "reason": "bd_repair_database has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "ensure_refs_migrated_v3",
+      "health_impact": 0.091,
+      "details": {
+        "bumps": 5,
+        "ccn": 42,
+        "max_nesting": 5
+      },
+      "reason": "ensure_refs_migrated_v3 has 5 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "bumpy_road",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "transform_issue",
+      "health_impact": 0.023,
+      "details": {
+        "bumps": 3,
+        "ccn": 34,
+        "max_nesting": 6
+      },
+      "reason": "transform_issue has 3 nested blocks at the same level (bumpy road)"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "run",
+      "health_impact": 0.04,
+      "details": {
+        "nloc": 118,
+        "ccn": 5
+      },
+      "reason": "run is 118 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.017,
+      "details": {
+        "nloc": 67,
+        "ccn": 20
+      },
+      "reason": "check_refs_migration is 67 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "purge_orphan_attachments",
+      "health_impact": 0.017,
+      "details": {
+        "nloc": 60,
+        "ccn": 11
+      },
+      "reason": "purge_orphan_attachments is 60 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "download_and_install_update",
+      "health_impact": 0.017,
+      "details": {
+        "nloc": 69,
+        "ccn": 3
+      },
+      "reason": "download_and_install_update is 69 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_update",
+      "health_impact": 0.04,
+      "details": {
+        "nloc": 109,
+        "ccn": 20
+      },
+      "reason": "bd_update is 109 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_create",
+      "health_impact": 0.017,
+      "details": {
+        "nloc": 62,
+        "ccn": 16
+      },
+      "reason": "bd_create is 62 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.114,
+      "details": {
+        "nloc": 465,
+        "ccn": 102
+      },
+      "reason": "bd_migrate_to_dolt is 465 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_check_needs_migration",
+      "health_impact": 0.017,
+      "details": {
+        "nloc": 60,
+        "ccn": 9
+      },
+      "reason": "bd_check_needs_migration is 60 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.04,
+      "details": {
+        "nloc": 98,
+        "ccn": 13
+      },
+      "reason": "bd_repair_database is 98 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "ensure_refs_migrated_v3",
+      "health_impact": 0.068,
+      "details": {
+        "nloc": 141,
+        "ccn": 42
+      },
+      "reason": "ensure_refs_migrated_v3 is 141 lines long"
+    },
+    {
+      "biomarker_type": "large_method",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "transform_issue",
+      "health_impact": 0.068,
+      "details": {
+        "nloc": 159,
+        "ccn": 34
+      },
+      "reason": "transform_issue is 159 lines long"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 25.44,
+        "clone_pair_count": 93,
+        "worst_clone_lines": 81,
+        "worst_clone_partner": "app/composables/useIssueDialogs.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "25% of file duplicated; worst clone shares 81 lines with app/composables/useIssueDialogs.ts"
+    },
+    {
+      "biomarker_type": "change_entropy",
+      "severity": "high",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 1.664,
+      "details": {
+        "change_entropy": 1.2166,
+        "change_entropy_pct": 94.1,
+        "commit_count_90d": 4
+      },
+      "reason": "changes are scattered across noisy commits (top 5.9% among files eligible for change-entropy ranking); a strong history-based fault predictor"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "critical",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 1.836,
+      "details": {
+        "prior_defect_count": 3,
+        "window_days": 180
+      },
+      "reason": "3 bug-fixes touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "error_handling",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": null,
+      "health_impact": 0.025,
+      "details": {
+        "kind": "unsafe_unwrap"
+      },
+      "reason": "unwrap/expect turns a recoverable error into a crash"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "ensure_refs_migrated_v3",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_8f8cd1d0f44931a88f34"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_8a06636a24935d364d16"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_56da16883304204b5367"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_8bc76ab719a956073e80"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_505ea6780d6041fe2a8f"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_29309d5297f6651a3ac7"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_25d95b8d562d2f74a230"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_f790c0d049dab5cf7d80"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "get_beads_mtime",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_04e021a21070db2fc0e0"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "get_beads_mtime",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_034056a6845a57ce2989"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "purge_orphan_attachments",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": false,
+        "opportunity_id": "perf2_b5015e91bed3cd873b5f"
+      },
+      "reason": "a filesystem call runs once per loop iteration (N+1 / IO-in-loop)"
+    },
+    {
+      "biomarker_type": "io_in_loop",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "fs_list",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "cross_function": true,
+        "path": [
+          "src-tauri/src/lib.rs::fs_list",
+          "src-tauri/src/lib.rs::project_uses_dolt"
+        ],
+        "resolution_basis": "call-site",
+        "reliable_entry_reachability": true,
+        "opportunity_id": "perf2_60fbb6e73208f1d7d873"
+      },
+      "reason": "a filesystem call is reached once per loop iteration through fs_list -> project_uses_dolt (cross-function N+1)"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::metadata",
+        "opportunity_id": "perf2_332812d17ae49ebeb294"
+      },
+      "reason": "fs::metadata blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::copy",
+        "opportunity_id": "perf2_49fabe73cb11109eee98"
+      },
+      "reason": "fs::copy blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_034f1e13ad316d1d79fb"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_dcc15ad75f6440df9256"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_repair_database",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_59104b27633565cc5c05"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_check_needs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::metadata",
+        "opportunity_id": "perf2_56b0dfaefe8fa107a62e"
+      },
+      "reason": "fs::metadata blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_cba06f8dca3920646ee8"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::metadata",
+        "opportunity_id": "perf2_ff61c49161208df06a80"
+      },
+      "reason": "fs::metadata blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_2175f75d481f101acaa7"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_41995db5d6b51142025e"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_to_string",
+        "opportunity_id": "perf2_23c305d4567136192c03"
+      },
+      "reason": "fs::read_to_string blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_b3fbb77cce74ef76215b"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_6a70a510c1dd53c826e6"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_5a0eae4a6b878fa012d5"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_7f2a2b25d8ac0bde9785"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_to_string",
+        "opportunity_id": "perf2_cd63fe982d711c52476c"
+      },
+      "reason": "fs::read_to_string blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_1c30a9dc2acae6ca6bca"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_19e18b05e039fc85fab2"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_8f072ff1cc9c40fb29b0"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_4c677ad82c938c88d2e4"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_7b36af0aae38efae8848"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_7af1c54b10d65761b115"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_39482e40b3a52accc18b"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "bd_migrate_to_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_8c0f21d29b5e954e73e9"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "fs_list",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_c99498e9438c7f961016"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "download_and_install_update",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_f9528b81c0e226ccb81e"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "clear_logs",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_6bc85748aab51549806b"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "export_logs",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::copy",
+        "opportunity_id": "perf2_11ba15b768131adf3767"
+      },
+      "reason": "fs::copy blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "read_logs",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_to_string",
+        "opportunity_id": "perf2_981c3e2b8b7857b71870"
+      },
+      "reason": "fs::read_to_string blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "read_image_file",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read",
+        "opportunity_id": "perf2_ec3116647c49dc8adbb2"
+      },
+      "reason": "fs::read blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "purge_orphan_attachments",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_643876f987c389996d57"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_3803db3e50d5264edc7c"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_b45198c7ec96fc4a087b"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_to_string",
+        "opportunity_id": "perf2_f2de5a3f13cb532769b1"
+      },
+      "reason": "fs::read_to_string blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_00b366178a0f3e6b904e"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "check_refs_migration",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_1c2ed712ab8287c2f86b"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "copy_file_to_attachments",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::create_dir_all",
+        "opportunity_id": "perf2_ff333f9ad59f9336b527"
+      },
+      "reason": "fs::create_dir_all blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "copy_file_to_attachments",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::copy",
+        "opportunity_id": "perf2_22b3df40db51b3a6aede"
+      },
+      "reason": "fs::copy blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "list_attachments",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_072484151c587fb61efb"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "delete_attachment",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_6284abf2fa34d94ba931"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "delete_attachment",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_dir",
+        "opportunity_id": "perf2_01424c43e879035611bb"
+      },
+      "reason": "fs::read_dir blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "delete_attachment",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::remove_file",
+        "opportunity_id": "perf2_2ee26b274d0885f889bc"
+      },
+      "reason": "fs::remove_file blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "read_text_file",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::read_to_string",
+        "opportunity_id": "perf2_aec7457820bc162a255c"
+      },
+      "reason": "fs::read_to_string blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "blocking_sync_in_async",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "write_text_file",
+      "health_impact": 0.0,
+      "details": {
+        "api": "fs::write",
+        "opportunity_id": "perf2_85e5ddbc76f066e8c174"
+      },
+      "reason": "fs::write blocks the event loop inside an async function"
+    },
+    {
+      "biomarker_type": "nested_loop_with_io",
+      "severity": "medium",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "get_beads_mtime",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "opportunity_id": "perf2_1a6806dc9bd17287b7ca"
+      },
+      "reason": "a filesystem call runs inside a nested loop (O(n\u00b7m) round-trips); batch the inner query or restructure the loops"
+    },
+    {
+      "biomarker_type": "hot_path_sync_io",
+      "severity": "low",
+      "file_path": "src-tauri/src/lib.rs",
+      "function_name": "project_uses_dolt",
+      "health_impact": 0.0,
+      "details": {
+        "boundary_kind": "filesystem",
+        "opportunity_id": "perf2_34b545481ea2abd065b0"
+      },
+      "reason": "a blocking filesystem call runs on a hot, request-reachable path; its latency is paid on every call through this function"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/composables/useCliClient.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 42.35,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 14,
+        "worst_clone_partner": "tests/composables/useCliCompatibility.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "42% of file duplicated; worst clone shares 14 lines with tests/composables/useCliCompatibility.test.ts"
+    },
+    {
+      "biomarker_type": "duplicated_assertion_block",
+      "severity": "medium",
+      "file_path": "tests/composables/useCliClient.test.ts",
+      "function_name": null,
+      "health_impact": 0.5,
+      "details": {
+        "assertion_lines": [
+          67,
+          68
+        ],
+        "partner_file": "tests/composables/useCliClient.test.ts"
+      },
+      "reason": "assertion block at lines 67-68 is duplicated in tests/composables/useCliClient.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/composables/useCliCompatibility.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 58.43,
+        "clone_pair_count": 9,
+        "worst_clone_lines": 20,
+        "worst_clone_partner": "tests/composables/useCliCompatibility.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "58% of file duplicated; worst clone shares 20 lines with tests/composables/useCliCompatibility.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/composables/useKeyboardNavigation.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 97.04,
+        "clone_pair_count": 7,
+        "worst_clone_lines": 42,
+        "worst_clone_partner": "tests/composables/useKeyboardNavigation.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "97% of file duplicated; worst clone shares 42 lines with tests/composables/useKeyboardNavigation.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/attachment-encoding.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 45.45,
+        "clone_pair_count": 3,
+        "worst_clone_lines": 9,
+        "worst_clone_partner": "tests/utils/open-url.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "45% of file duplicated; worst clone shares 9 lines with tests/utils/open-url.test.ts"
+    },
+    {
+      "biomarker_type": "prior_defect",
+      "severity": "low",
+      "file_path": "tests/utils/bd-executor.test.ts",
+      "function_name": null,
+      "health_impact": 0.3,
+      "details": {
+        "prior_defect_count": 1,
+        "window_days": 180
+      },
+      "reason": "1 bug-fix touched this file in the last ~6 months; recent defect history is the strongest cost-effective predictor of further defects"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "low",
+      "file_path": "tests/utils/cli-compat.test.ts",
+      "function_name": null,
+      "health_impact": 0.15,
+      "details": {
+        "duplication_pct": 22.66,
+        "clone_pair_count": 2,
+        "worst_clone_lines": 14,
+        "worst_clone_partner": "tests/composables/useCliCompatibility.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "23% of file duplicated; worst clone shares 14 lines with tests/composables/useCliCompatibility.test.ts"
+    },
+    {
+      "biomarker_type": "duplicated_assertion_block",
+      "severity": "medium",
+      "file_path": "tests/utils/cli-compat.test.ts",
+      "function_name": null,
+      "health_impact": 0.5,
+      "details": {
+        "assertion_lines": [
+          33,
+          34
+        ],
+        "partner_file": "tests/utils/cli-compat.test.ts"
+      },
+      "reason": "assertion block at lines 33-34 is duplicated in tests/utils/cli-compat.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/dashboard-stats.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 99.19,
+        "clone_pair_count": 24,
+        "worst_clone_lines": 49,
+        "worst_clone_partner": "tests/utils/dashboard-stats.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "99% of file duplicated; worst clone shares 49 lines with tests/utils/dashboard-stats.test.ts"
+    },
+    {
+      "biomarker_type": "duplicated_assertion_block",
+      "severity": "medium",
+      "file_path": "tests/utils/dashboard-stats.test.ts",
+      "function_name": null,
+      "health_impact": 0.5,
+      "details": {
+        "assertion_lines": [
+          25,
+          31
+        ],
+        "partner_file": "tests/utils/dashboard-stats.test.ts"
+      },
+      "reason": "assertion block at lines 25-31 is duplicated in tests/utils/dashboard-stats.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/favorites-helpers.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 72.46,
+        "clone_pair_count": 26,
+        "worst_clone_lines": 31,
+        "worst_clone_partner": "tests/utils/issue-helpers.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "72% of file duplicated; worst clone shares 31 lines with tests/utils/issue-helpers.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/issue-helpers.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 71.1,
+        "clone_pair_count": 34,
+        "worst_clone_lines": 31,
+        "worst_clone_partner": "tests/utils/favorites-helpers.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "71% of file duplicated; worst clone shares 31 lines with tests/utils/favorites-helpers.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/markdown.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 62.78,
+        "clone_pair_count": 5,
+        "worst_clone_lines": 79,
+        "worst_clone_partner": "tests/utils/open-url.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "63% of file duplicated; worst clone shares 79 lines with tests/utils/open-url.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/open-url.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 100.0,
+        "clone_pair_count": 9,
+        "worst_clone_lines": 79,
+        "worst_clone_partner": "tests/utils/markdown.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "100% of file duplicated; worst clone shares 79 lines with tests/utils/markdown.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/path.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 62.96,
+        "clone_pair_count": 10,
+        "worst_clone_lines": 22,
+        "worst_clone_partner": "tests/utils/open-url.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "63% of file duplicated; worst clone shares 22 lines with tests/utils/open-url.test.ts"
+    },
+    {
+      "biomarker_type": "dry_violation",
+      "severity": "medium",
+      "file_path": "tests/utils/probe-adapter.test.ts",
+      "function_name": null,
+      "health_impact": 0.35,
+      "details": {
+        "duplication_pct": 86.05,
+        "clone_pair_count": 3,
+        "worst_clone_lines": 19,
+        "worst_clone_partner": "tests/utils/probe-adapter.test.ts",
+        "worst_clone_co_change": 0
+      },
+      "reason": "86% of file duplicated; worst clone shares 19 lines with tests/utils/probe-adapter.test.ts"
+    }
+  ]
+}
