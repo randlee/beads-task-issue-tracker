@@ -1,61 +1,75 @@
-# Step 6 — Quality Gates (`plan-coordinator`, in-session)
-
-The atm-core source skill routed this step to a `quality-mgr` teammate via
-`atm send`, using the `codex-orchestration` skill's `qa-template.xml.j2` and
-handing off reviewer execution, reporting, and fix routing to that external
-QA system. btit has neither a `quality-mgr`/`qa-coordinator` teammate nor a
-`codex-orchestration` skill, so there is no equivalent QA system to hand off
-to — this port does **not** carry over that handoff. Instead,
-`plan-coordinator` runs btit's own quality gates directly against the
-hardened plan docs, in-session, as the final step.
+# Step 6 — Focused Plan QA (`quality-mgr`)
 
 ## Execute
 
-**1. Identify applicable gates**
+**1. Render the message**
 
-List the phase plan and every sprint doc in the current plan state (the
-same set used as `source_of_truth`/`references` in Steps 1–5). For each
-gate below, apply it only if the corresponding validation commands appear
-in the sprint docs' "Required Validation" sections (see
-`references/plan-construction-notes.md`):
+```bash
+sc-compose render \
+  --root .claude/skills/codex-orchestration \
+  --file qa-template.xml.j2 \
+  --var-file /tmp/plan-hardening-qa-vars.json \
+  --output /tmp/step-6-message.xml
+```
 
-- `pnpm test`
-- `npx vue-tsc --noEmit`
-- `cargo test --manifest-path src-tauri/Cargo.toml`
-- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets`
+The vars file or rendered task must include the QA assignment fields required
+by `qa-template.xml.j2`, and it must use `step-5` fenced JSON to populate the
+QA scope. Use `review_mode: "plan"`.
 
-A plan-only sprint (docs, no code changes) applies none of these — skip
-this step's command execution and instead confirm the plan docs themselves
-are internally consistent, which Steps 1–5 already established.
+Expected `/tmp/plan-hardening-qa-vars.json` shape:
 
-**2. Run the gates**
+```json
+{
+  "task_id": "phase-x-plan-qa",
+  "sprint": "phase-X",
+  "sprint_doc": "docs/plans/phase-X/plan-phase-X.md",
+  "review_mode": "plan",
+  "description": "Focused plan QA for phase-X after consistency hardening",
+  "pr_number": "",
+  "branch": "feature/branch-name",
+  "worktree_path": "/absolute/path/to/worktree",
+  "commits": "HEAD",
+  "review_targets": [
+    "docs/plans/phase-X/plan-phase-X.md",
+    "docs/plans/phase-X/sprint-X1.md",
+    "docs/plans/phase-X/sprint-X2.md"
+  ],
+  "references": [
+    "docs/project-plan.md"
+  ],
+  "changed_files": "",
+  "triage_records": ""
+}
+```
 
-Run each applicable command from the repo root (or the planning worktree
-root). Record pass/fail for each.
+Populate `sprint_doc` and `review_targets` by listing the phase plan and every
+sprint doc in the current plan state. Use `step-5` fenced JSON only to confirm
+that the expected files were modified or created. Do not invent QA scope from
+memory.
 
-**3. Route by result**
+**2. Send to `quality-mgr`**
 
-- all applicable gates pass -> the plan is hardened; report completion with
-  the final round table
-- any gate fails -> this is not a plan-content defect from Steps 1–5; it
-  means the plan's own "Required Validation" list does not match what the
-  repo can actually run. Fix the sprint doc's validation list (or, if the
-  plan is right and the repo is genuinely broken, treat that as an
-  out-of-scope finding to raise with the user) and re-run Step 6
+Use native ATM messaging to send the rendered task to the named teammate
+`quality-mgr`:
 
-**4. Report**
+```bash
+atm send quality-mgr --file /tmp/step-6-message.xml --team <team> --task-id <task_id>
+```
 
-Report the final hardened-plan state to the user: the phase plan and
-sprint docs touched, the final round table (Steps 2 and 4), and the Step 6
-gate results.
+Always use `--file` for this handoff. Do not use `--stdin`: its known input
+handling bug is tracked separately.
+
+**3. Handoff**
+
+After the QA task is sent, follow the codex-orchestration plan review flow.
+Do not route QA findings back through local `/plan-hardening` steps. From this
+point forward, the QA system owns reviewer execution, reporting, fix routing,
+and recheck loops.
 
 ## Hard stops
 
+- `/tmp/plan-hardening-qa-vars.json` is missing required QA assignment fields:
+  do not advance; correct the QA vars file immediately
 - `step-5` fenced JSON from the Step 5 response is missing or malformed: do
-  not advance; identify the missing or malformed fields explicitly and
-  request a corrected Step 5 response
-- a sprint doc's "Required Validation" section lists a gate that does not
-  exist in btit (i.e. not one of the four commands above, and not
-  independently justified in the doc): treat this as an unresolved Step 3/5
-  finding and route back accordingly rather than silently running an
-  invented command
+  not advance; send a correction request immediately and identify the missing
+  or malformed fields explicitly

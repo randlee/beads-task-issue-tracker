@@ -1,7 +1,7 @@
 ---
 name: 03-consistency-hardening-task
 version: 1.0.0
-description: plan-coordinator assignment template for cross-document consistency and ambiguity hardening after critical plan review.
+description: team-lead assignment template for cross-document consistency and ambiguity hardening after critical plan review.
 format: xml
 required_variables:
   - task_id
@@ -17,13 +17,13 @@ required_variables:
   - round_index
   - replay_nonce
 ---
-<plan-hardening-task id="{{ task_id }}" sprint="{{ phase }}" assignee="plan-coordinator" mode="plan-hardening-consistency">
+<atm-task id="{{ task_id }}" sprint="{{ phase }}" assignee="arch-ctm" mode="plan-hardening-consistency">
   <description>{{ description }}</description>
 
   <worktree>{{ worktree_path }}</worktree>
   <branch>{{ branch }}</branch>
   <pr-target>{{ pr_target }}</pr-target>
-  <round id="{{ round_id }}" index="{{ round_index }}" reviewer="plan-coordinator-quality-gates" reviewed-commit="{{ reviewed_commit | default('') }}" supersedes="{{ supersedes_task_id | default('') }}"/>
+  <round id="{{ round_id }}" index="{{ round_index }}" reviewer="quality-mgr" reviewed-commit="{{ reviewed_commit | default('') }}" supersedes="{{ supersedes_task_id | default('') }}"/>
   <replay-nonce>{{ replay_nonce }}</replay-nonce>
 
   <source-of-truth>
@@ -49,7 +49,7 @@ required_variables:
 {% endif %}
 
   <required-input>
-    The following fenced JSON handoff from `phb-critical-plan-reviewer` is
+    The following fenced JSON handoff from `critical-plan-reviewer` is
     required input. Reject the task if it is missing or malformed.
 
     Expected shape:
@@ -57,7 +57,7 @@ required_variables:
     {
       "status": "PASS | FAIL",
       "mode": "critical-plan-review",
-      "reviewer": "phb-critical-plan-reviewer",
+      "reviewer": "critical-plan-reviewer",
       "round_id": "STEP3-R1",
       "round_index": 1,
       "reviewed_commit": "abc1234",
@@ -107,7 +107,7 @@ required_variables:
     back on substantial scope changes that are at odds with that user
     discussion.
 
-    If `plan-coordinator` routing, repo drift, or source references imply a
+    If `team-lead` routing, repo drift, or source references imply a
     substantial scope change, that is a hard stop: push back, describe the
     scope conflict explicitly, and require user discussion before consistency
     hardening continues.
@@ -121,7 +121,7 @@ required_variables:
       Before normal consistency review, compare the current docs and task
       framing against the user-approved scope already in context. If you detect
       a substantial deliverable-scope rewrite, emit a `SCOPE-CONFLICT`
-      finding, push back to `plan-coordinator`, and stop. Do not "fix" the
+      finding, push back to `team-lead`, and stop. Do not "fix" the
       inconsistency by harmonizing documents around the new scope.
 
       <required-documents>
@@ -183,7 +183,7 @@ required_variables:
         <type id="UNDEF">An important type, trait, struct, enum, or protocol is referenced but not explicitly defined in any document.</type>
         <type id="CROSS-DOC">A definition or decision in one document is not reflected consistently in documents that depend on it.</type>
         <type id="ORDERING">Task dependencies are missing or incorrectly ordered such that a dev agent could begin work out of sequence.</type>
-        <type id="SCOPE-CONFLICT">The task framing, repo docs, or plan-coordinator concerns materially change the user-discussed deliverable scope; consistency hardening must stop and push back instead of normalizing the new scope.</type>
+        <type id="SCOPE-CONFLICT">The task framing, repo docs, or team-lead concerns materially change the user-discussed deliverable scope; consistency hardening must stop and push back instead of normalizing the new scope.</type>
       </finding-types>
     </audit-phase>
 
@@ -198,7 +198,7 @@ required_variables:
         5. Mark the finding as resolved in the task list.
 
       `SCOPE-CONFLICT` is not resolved by rewriting the plan around a new
-      scope. It is resolved only by stopping, pushing back to plan-coordinator, and
+      scope. It is resolved only by stopping, pushing back to team-lead, and
       requiring user discussion before scope changes proceed.
     </fix-phase>
 
@@ -207,9 +207,9 @@ required_variables:
       Continue until audit-phase produces zero findings.
     </repeat>
 
-    Return fenced JSON to `plan-coordinator` when this pass completes. `plan-coordinator`
+    Return fenced JSON to `team-lead` when this pass completes. `team-lead`
     will hand the plan off to the codex-orchestration plan-QA flow via
-    `plan-coordinator's own quality-gate pass`.
+    `quality-mgr`.
 
     <exit-criterion>
       Output fenced JSON only when audit-phase produces zero findings:
@@ -235,13 +235,13 @@ required_variables:
   </plan-hardening-consistency>
 
   <workflow>
-    <step id="a">ACK this message immediately. In the ACK, include a brief outline of the plan/work you understand to be in scope. If the required fenced JSON handoff from `phb-critical-plan-reviewer` is missing or malformed, reject the task immediately. If the task includes questions-or-concerns, address them explicitly in the same ACK before starting work. If the task appears to materially change the user-discussed deliverable scope, the ACK must push back explicitly and state that consistency hardening is blocked pending user discussion. Make reasonable assumptions and do not ask clarifying questions unless a real blocker prevents execution.</step>
+    <step id="a">ACK this message immediately. In the ACK, include a brief outline of the plan/work you understand to be in scope. If the required fenced JSON handoff from `critical-plan-reviewer` is missing or malformed, reject the task immediately. If the task includes questions-or-concerns, address them explicitly in the same ACK before starting work. If the task appears to materially change the user-discussed deliverable scope, the ACK must push back explicitly and state that consistency hardening is blocked pending user discussion. Make reasonable assumptions and do not ask clarifying questions unless a real blocker prevents execution.</step>
     <step id="b">Immediately after ACK, begin executing the task in the same work session.</step>
     <step id="c">Before editing, update the worktree from the target branch and include prior fixes already merged to that target.</step>
-    <step id="d">As soon as the hardening changes are complete and the branch is pushable, commit and push immediately. Send branch name and commit hash right away so plan-coordinator critical review can begin in parallel.</step>
+    <step id="d">As soon as the hardening changes are complete and the branch is pushable, commit and push immediately. Send branch name and commit hash right away so team-lead critical review can begin in parallel.</step>
     <step id="e">After the push report, run the required validation. Do not wait for PR creation before starting validation.</step>
     <step id="f">When validation completes, send a second report with PASS or FAIL, concrete failure details if any, and whether follow-up fixes are required.</step>
-    <step id="g">After the hardening loop converges, ensure all document updates are staged, committed, and pushed. Return fenced JSON only. The next step after this pass is codex-orchestration plan QA through `plan-coordinator's own quality-gate pass`, not another local plan-hardening review loop.</step>
+    <step id="g">After the hardening loop converges, ensure all document updates are staged, committed, and pushed. Return fenced JSON only. The next step after this pass is codex-orchestration plan QA through `quality-mgr`, not another local plan-hardening review loop.</step>
     <step id="h">After the validation report, read ATM again for follow-up work.</step>
   </workflow>
-</plan-hardening-task>
+</atm-task>
