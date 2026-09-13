@@ -21,7 +21,7 @@
 │  Three selectable backends per project (Settings UI):   │
 │  ├── built-in: SQLite-native via tracker::Engine        │
 │  ├── br: beads_rust CLI → .beads/                       │
-│  └── bd: beads Go CLI 0.49.x → .beads/                 │
+│  └── bd: beads Go CLI 1.x (primary) → .beads/          │
 └─────────────────────────────────────────────────────────┘
 ```
 

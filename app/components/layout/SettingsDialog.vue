@@ -26,6 +26,7 @@ const themeIconPaths: Record<string, string> = {
 const sunCircle = { cx: 12, cy: 12, r: 5 }
 
 const selectedClient = ref<'bd' | 'br'>('bd')
+const { status: cliStatus, refresh: refreshCliCompatibility } = useCliCompatibility()
 const isSwitching = ref(false)
 const switchResult = ref<{ success: boolean; message: string } | null>(null)
 
@@ -62,6 +63,8 @@ async function selectClient(client: 'bd' | 'br') {
     // Update shared CLI client state
     const { setBinary } = useCliClient()
     setBinary(client)
+    // Re-run compatibility check so legacy/not-found warnings track the new binary
+    await refreshCliCompatibility()
   } catch (error) {
     switchResult.value = {
       success: false,
@@ -249,6 +252,18 @@ async function testConnection() {
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
           Switching client...
+        </div>
+
+        <!-- Compatibility warnings for the active CLI -->
+        <div
+          v-if="cliStatus && cliStatus.level !== 'ok'"
+          class="p-2 rounded-md text-xs space-y-1"
+          :class="cliStatus.level === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'"
+        >
+          <div class="font-medium">{{ cliStatus.title }}</div>
+          <ul class="list-disc pl-4">
+            <li v-for="(line, i) in cliStatus.details" :key="i">{{ line }}</li>
+          </ul>
         </div>
 
         <!-- Result -->
