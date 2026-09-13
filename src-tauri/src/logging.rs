@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use sc_observability_log::{
-    ActionName, BridgeOptions, DropCause, LevelFilter, LogGuard, LoggerConfig, ServiceName, init,
+    init, ActionName, BridgeOptions, DropCause, LevelFilter, LogGuard, LoggerConfig, ServiceName,
 };
 use tauri::Manager;
 
@@ -194,32 +194,36 @@ pub(crate) async fn set_verbose_logging(enabled: bool) {
 pub(crate) async fn clear_logs() -> Result<(), String> {
     // Clone the Arc and release the lock before flushing: an exit that arrives
     // during the flush takes the guard at once and stays bounded by
-    // 1x LOG_IO_TIMEOUT.
+    // 1x LOG_IO_TIMEOUT. The clone (not the lock) is moved into the blocking
+    // closure, so LOG_GUARD is never held across the flush or the file I/O
+    // below.
     let shared = LOG_GUARD
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    if let Some(guard) = shared {
-        guard
-            .flush(LOG_IO_TIMEOUT)
-            .map_err(|e| format!("Failed to flush logs: {e}"))?;
-    } // None: logger not installed (before setup) or already taken at exit — no flush.
     let log_path = get_log_path();
-    if log_path.as_os_str().is_empty() || !log_path.exists() {
-        return Ok(());
-    }
-    fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {e}"))?;
-    remove_rotated_logs(&log_path)?;
-    log_info!("[debug] Logs cleared");
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(guard) = shared {
+            guard
+                .flush(LOG_IO_TIMEOUT)
+                .map_err(|e| format!("Failed to flush logs: {e}"))?;
+        } // None: logger not installed (before setup) or already taken at exit — no flush.
+        if log_path.as_os_str().is_empty() || !log_path.exists() {
+            return Ok(());
+        }
+        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {e}"))?;
+        remove_rotated_logs(&log_path)?;
+        log_info!("[debug] Logs cleared");
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Failed to clear logs: {e}"))?
 }
 
 /// Deletes `<active file name>.<N>` siblings, the names sc-observability rotates to.
 fn remove_rotated_logs(active: &Path) -> Result<(), String> {
-    let (Some(dir), Some(name)) = (
-        active.parent(),
-        active.file_name().and_then(|n| n.to_str()),
-    ) else {
+    let (Some(dir), Some(name)) = (active.parent(), active.file_name().and_then(|n| n.to_str()))
+    else {
         return Ok(());
     };
     let prefix = format!("{name}.");
@@ -243,47 +247,56 @@ fn remove_rotated_logs(active: &Path) -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn export_logs() -> Result<String, String> {
     let log_path = get_log_path();
-    if log_path.as_os_str().is_empty() || !log_path.exists() {
-        return Err("No logs to export".to_string());
-    }
+    tauri::async_runtime::spawn_blocking(move || {
+        if log_path.as_os_str().is_empty() || !log_path.exists() {
+            return Err("No logs to export".to_string());
+        }
 
-    // Get export folder: Downloads > Documents > Home
-    let export_dir = dirs::download_dir()
-        .or_else(dirs::document_dir)
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| "Could not find a folder to export logs".to_string())?;
+        // Get export folder: Downloads > Documents > Home
+        let export_dir = dirs::download_dir()
+            .or_else(dirs::document_dir)
+            .or_else(dirs::home_dir)
+            .ok_or_else(|| "Could not find a folder to export logs".to_string())?;
 
-    // Generate filename with timestamp
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let export_filename = format!("beads-logs-{now}.log.jsonl");
-    let export_path = export_dir.join(&export_filename);
+        // Generate filename with timestamp
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let export_filename = format!("beads-logs-{now}.log.jsonl");
+        let export_path = export_dir.join(&export_filename);
 
-    // Copy log file
-    fs::copy(&log_path, &export_path).map_err(|e| format!("Failed to export logs: {e}"))?;
+        // Copy log file
+        fs::copy(&log_path, &export_path).map_err(|e| format!("Failed to export logs: {e}"))?;
 
-    Ok(export_path.to_string_lossy().to_string())
+        Ok(export_path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Failed to export logs: {e}"))?
 }
 
 #[tauri::command]
 pub(crate) async fn read_logs(tail_lines: Option<usize>) -> Result<String, String> {
     let log_path = get_log_path();
-    if log_path.as_os_str().is_empty() || !log_path.exists() {
-        return Ok(String::new());
-    }
+    tauri::async_runtime::spawn_blocking(move || {
+        if log_path.as_os_str().is_empty() || !log_path.exists() {
+            return Ok(String::new());
+        }
 
-    let content = fs::read_to_string(&log_path).map_err(|e| format!("Failed to read logs: {e}"))?;
+        let content =
+            fs::read_to_string(&log_path).map_err(|e| format!("Failed to read logs: {e}"))?;
 
-    // If tail_lines is specified, return only the last N lines
-    if let Some(n) = tail_lines {
-        let lines: Vec<&str> = content.lines().collect();
-        let start = lines.len().saturating_sub(n);
-        Ok(lines.get(start..).unwrap_or_default().join("\n"))
-    } else {
-        Ok(content)
-    }
+        // If tail_lines is specified, return only the last N lines
+        if let Some(n) = tail_lines {
+            let lines: Vec<&str> = content.lines().collect();
+            let start = lines.len().saturating_sub(n);
+            Ok(lines.get(start..).unwrap_or_default().join("\n"))
+        } else {
+            Ok(content)
+        }
+    })
+    .await
+    .map_err(|e| format!("Failed to read logs: {e}"))?
 }
 
 /// `LogGuard::active_log_path` captured at `install_logging`; empty before setup.
@@ -321,9 +334,21 @@ mod tests {
     #[derive(Debug)]
     struct TestError(String);
 
-    impl<E: std::fmt::Display> From<E> for TestError {
-        fn from(e: E) -> Self {
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "test setup/teardown failed: {}", self.0)
+        }
+    }
+
+    impl From<std::io::Error> for TestError {
+        fn from(e: std::io::Error) -> Self {
             Self(e.to_string())
+        }
+    }
+
+    impl From<String> for TestError {
+        fn from(e: String) -> Self {
+            Self(e)
         }
     }
 
@@ -383,15 +408,13 @@ mod tests {
         let scratch = ScratchDir::new("rotated")?;
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
         fs::write(&active, "active")?;
-        let rotated_one = scratch
-            .path()
-            .join("beads-task-issue-tracker.log.jsonl.1");
+        let rotated_one = scratch.path().join("beads-task-issue-tracker.log.jsonl.1");
         fs::write(&rotated_one, "rotated")?;
-        let rotated_two = scratch
-            .path()
-            .join("beads-task-issue-tracker.log.jsonl.2");
+        let rotated_two = scratch.path().join("beads-task-issue-tracker.log.jsonl.2");
         fs::write(&rotated_two, "rotated")?;
-        let unrelated = scratch.path().join("beads-task-issue-tracker.log.jsonl.bak");
+        let unrelated = scratch
+            .path()
+            .join("beads-task-issue-tracker.log.jsonl.bak");
         fs::write(&unrelated, "kept")?;
 
         remove_rotated_logs(&active)?;
@@ -407,8 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_rotated_logs_is_a_noop_when_the_directory_has_no_siblings() -> Result<(), TestError>
-    {
+    fn remove_rotated_logs_is_a_noop_when_the_directory_has_no_siblings() -> Result<(), TestError> {
         let scratch = ScratchDir::new("no-siblings")?;
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
         fs::write(&active, "active")?;

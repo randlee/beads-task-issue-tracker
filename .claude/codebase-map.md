@@ -213,7 +213,7 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 |------|---------|
 | `src/main.rs` | Binary entry point — calls `app_lib::run()` |
 | `src/lib.rs` (155) | Tauri entry point: `mod` declarations, `run()` with plugin setup, startup CLI probe, `generate_handler!` for all 65 commands |
-| `src/logging.rs` (172) | `LOGGING_ENABLED`/`VERBOSE_LOGGING`, `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros (declared first with `#[macro_use]`), log file commands |
+| `src/logging.rs` (442) | sc-observability-log bridge: `install_logging`/`on_run_event`, `LOGGING_ENABLED`/`VERBOSE_LOGGING`, `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros (declared first with `#[macro_use]`), async log commands (`clear_logs`/`export_logs`/`read_logs` run their blocking bodies via `tauri::async_runtime::spawn_blocking`), `#[cfg(test)] mod tests` |
 | `src/types.rs` (283) | `BdRawIssue`, `Issue`, `Comment`, `Relation`, parent/child structs, create/update payloads, per-command option structs, `CliClient` |
 | `src/issues.rs` (665) | Normalizers (`priority_to_*`, `normalize_issue_*`), `transform_issue` (deps → blockedBy/blocks/parent/children/relations), `normalize_metadata`, `parse_issues_tolerant` |
 | `src/cli.rs` (1368) | `get_extended_path`, `new_command`, auto-detect (`select_default_binary`, `probe_cli_binary`, `MIN_SUPPORTED_BD_MAJOR`), client/version detection + cache, version gates (`supports_*`/`uses_*` with pure `_for` cores), `project_uses_dolt(_for)`, `BD_PROJECT_LOCKS` + `execute_bd`, `check_bd_compatibility` |
