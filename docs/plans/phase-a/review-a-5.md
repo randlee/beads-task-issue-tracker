@@ -15,21 +15,86 @@ reviewer: Codex
 
 This review covers the a-4 adoption merged by PR #48: replacement of
 `tauri-plugin-log` with `sc-observability-log`, JSONL command handling, debug
-panel rendering, and application shutdown behavior. The underlying bridge
-crates are reviewed here only where their lifecycle contract is exercised by
-the btit integration.
+panel rendering, and application shutdown behavior. It also covers the
+`sc-observability-log` bridge contract exercised by that adoption: lifecycle,
+non-panicking/non-reentrant emission, error reporting, and consumer-operable
+health data. The review is therefore a release gate for both BTIT a-5 and a
+future migration of the bridge into `sc-observability`.
 
 ## Verdict
 
-**Not ready for a-5 closure or a-6 handoff.** One Blocking and one Important
-finding remain open. The primary defect is the `clear_logs` / application-exit
-race: the implementation cannot provide its documented one-time, bounded
-shutdown guarantee when the guard is shared.
+**Not ready for a-5 closure or a-6 handoff.** Two Blocking and two Important
+findings remain open. The primary integration defect is the `clear_logs` /
+application-exit race: the implementation cannot provide its documented
+one-time, bounded shutdown guarantee when the guard is shared. Independently,
+the bridge's enabled `log` path can panic before its advertised containment and
+reentrancy protection starts.
 
 | id | reported by | severity | file:line (at `f6f69dc`) | finding | disposition |
 | --- | --- | --- | --- | --- | --- |
 | R-A4-001 | Codex | Blocking | `src-tauri/src/logging.rs:140-159` | If `clear_logs` has cloned `Arc<LogGuard>`, `on_run_event` takes the static owner, fails `Arc::try_unwrap`, and calls only `flush`. Once the command's clone is dropped, `LogGuard::Drop` invokes the bridge's separate flush-and-shutdown sequence. Exit therefore has a second lifecycle operation, its result is discarded, and it is not bounded by the handler's claimed single `LOG_IO_TIMEOUT`. This violates a-4 AC7 and can leave shutdown timing/error handling dependent on the concurrently executing command. | open — replace the shared-`Arc` handoff with coordinated exclusive shutdown ownership (or change the bridge lifecycle API), then add a deterministic clear-during-exit test proving one shutdown attempt, bounded completion, and a stopped logger. |
 | R-A4-002 | Codex | Important | `src-tauri/src/logging.rs:230-243` | `remove_rotated_logs` uses `entries.flatten()`, silently discarding `ReadDir` errors. `clear_logs` can consequently return `Ok(())` even though it failed to inspect one or more directory entries and left rotated JSONL data behind. That breaks the command's stated clear semantics and hides an I/O failure from the frontend. | open — iterate over `ReadDir` results explicitly and map each entry error into the command's existing `Err(String)` path; add a fault-injection or injectable-directory-reader test for the error case. |
+| R-A4-003 | Codex | Blocking | `crates/sc-observability-log/src/bridge.rs:26-43`, `crates/sc-observability-log/src/mapping.rs:197-234`, `crates/sc-observability-log/src/lib.rs:396-425` | `Bridge::log` obtains `BridgeOptions` and calls `record_to_parts` *before* `__private::emit` enters `handle::submit_guarded`. Formatting `record.args()` (`to_string`) and a non-primitive key-value (`value.to_string`) can call user `Display` code and panic. Such a panic unwinds out through `log!`, violating the documented guarantee that the emit path never panics. A formatter that itself logs also runs before `EmitScope` is active, so its nested record is not classified as `ReentrantEmit`. | open — refactor to one internal guarded bridge operation that covers record lookup, mapping/formatting, event assembly, and `try_log`. Do **not** merely nest the current `__private::emit` inside an outer `submit_guarded`: its own guard would classify every bridge record as reentrant. Keep one private unguarded submit core and invoke it from exactly one guard per record. |
+| R-A4-004 | Codex | Important design gap | `crates/sc-observability-log/src/lib.rs:220-228`, `crates/sc-observability-log/src/handle.rs:64-68` | `LogGuard` exposes cumulative dropped-event counts but no read-only health/diagnostic snapshot from the underlying logger. A consumer can see `WriterDegraded` or a timeout count but cannot inspect writer state, last writer error, queue pressure, active file path, or sink health to determine remediation. This weakens the observability bridge precisely when it is degraded and complicates a common frontend/backend status interface. | open — expose a stable, read-only bridge-health snapshot (or an explicitly curated projection of `sc_observability::Logger::health()`) from `LogGuard`; document thread-safety and post-shutdown behavior, avoid exposing mutable logger ownership, and version the projection for generated bindings. |
+
+## Required changes and acceptance tests
+
+### R-A4-001 — serialize lifecycle ownership
+
+The application must nominate one lifecycle owner for the non-cloneable
+`LogGuard`. A clear operation may request a bounded flush, but it must not
+retain an `Arc<LogGuard>` that can outlive or race the exit owner. The selected
+design must serialize `clear_logs`, exit, and final shutdown, reject or
+no-op clearly once shutdown begins, and surface a final-shutdown error where a
+caller can record it. `Drop` remains a fallback, not an unobserved second
+lifecycle path.
+
+Required evidence:
+
+1. A deterministic test starts `clear_logs`, delivers `RunEvent::Exit` while
+   the clear-side flush is held, and proves exactly one final shutdown is
+   requested.
+2. The exit handler returns within `LOG_IO_TIMEOUT` (including contention),
+   the bridge has stopped accepting records, and the final outcome is observed
+   rather than discarded.
+3. A follow-up record is absent from the JSONL output after shutdown.
+
+### R-A4-002 — preserve clear failure semantics
+
+Replace `ReadDir::flatten` with explicit handling of every entry result. A
+directory enumeration failure must produce the existing command error instead
+of a success response. Test the entry-error path with an injectable reader or
+an equivalent deterministic fault-injection seam, and verify that the frontend
+receives a failed clear rather than falsely reporting success.
+
+### R-A4-003 — guard all user-controlled formatting
+
+The guard must become the outermost boundary for bridge emission. It must
+cover target/action validation, `fmt::Arguments` rendering, key-value
+conversion, event construction, redaction, and `Logger::try_log`. It must map
+a caught panic to exactly one `DropCause::LoggerPanicked`; a nested `log!`
+issued by a formatter must map to exactly one `DropCause::ReentrantEmit` while
+allowing the outer record to complete when its formatter returns normally.
+
+Required tests, with an enabled log level:
+
+1. `log::info!` with a custom `Display` implementation that panics: a caller's
+   `catch_unwind` sees no panic and `LoggerPanicked` increases by one.
+2. A `log` key-value value whose formatting panics: the same no-unwind and
+   exactly-one-counter behavior holds.
+3. A custom `Display` implementation that invokes `log!`: the nested record is
+   not written and `ReentrantEmit` increases by one; the outer record is
+   written once.
+
+### R-A4-004 — make degradation actionable
+
+Add a `LogGuard` read-only health method returning a stable bridge-owned
+snapshot rather than the mutable underlying `Logger`. At minimum, include
+writer state, queue depth/high-water mark where available, last writer error
+with stable diagnostic code/remediation, file-sink availability and active
+path, and the existing dropped-event counters. Define the result after
+shutdown, and ensure it can be represented without lossy string parsing by
+future TypeScript and Python bindings.
 
 ## Reviewed evidence
 
@@ -41,6 +106,6 @@ shutdown guarantee when the guard is shared.
 
 ## Required re-review evidence
 
-1. A focused test drives `clear_logs` and `RunEvent::Exit` concurrently against an installed bridge, asserts the logger is shut down exactly once, and proves the exit path returns within its documented bound.
-2. A focused test proves a per-entry directory enumeration error causes `clear_logs` to return `Err`, rather than silently retaining a rotated log.
-3. Re-run the a-4 Rust, frontend, type-check, and manual quit validations after both fixes. Record the app-log path and final JSONL records in the fix PR.
+1. Close R-A4-001 through R-A4-004 and attach the focused tests specified above.
+2. Re-run the a-4 Rust, frontend, type-check, and manual quit validations after the fixes. Record the app-log path, final JSONL records, health snapshot, and shutdown result in the fix PR.
+3. Obtain an independent `sc-observability` design review before the bridge is migrated or exposed through generated language bindings.
