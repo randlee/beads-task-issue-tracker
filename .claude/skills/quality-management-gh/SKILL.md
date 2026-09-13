@@ -1,0 +1,168 @@
+---
+name: quality-management-gh
+version: 1.0.0
+description: Reusable QA orchestration skill for GitHub PRs. Use for multi-pass QA, CI monitoring, and template-driven findings and final quality reports.
+---
+
+# Quality Management (GitHub)
+
+This skill defines a reusable quality-management workflow for teams that run QA
+across one or more passes before merge.
+
+## Scope
+
+Use this skill when you need to:
+- run QA in multiple passes (`IN-FLIGHT`, `FAIL`, `PASS`)
+- monitor CI progression for a PR
+- publish structured findings to PR plus ATM
+- publish a final QA closeout report on PASS
+
+This skill is intentionally generic. Team-specific teammate names, branch
+policy, and background-agent ownership stay in the repo’s `quality-mgr` agent
+prompt.
+
+## Template Installation and Vars
+
+Before composing or sending a QA report, install daemon-readable copies with:
+
+```bash
+mkdir -p ~/.atm/templates/quality-management-gh && cp .claude/skills/quality-management-gh/*.j2 ~/.atm/templates/quality-management-gh/
+```
+
+Build the `--vars` JSON for this run from the selected template's frontmatter
+`required_variables`; both templates list them. Every value comes from the
+run: `task_id` from the QA assignment, `commit` from `git rev-parse`, and
+counts from the reviewer outputs. Keep numeric fields as JSON numbers and
+`blocking_ids_json` as a JSON string because the templates embed it as JSON.
+Write the vars file outside the repository working tree (in the session
+scratchpad or a temp directory); never commit or stage it, and delete it or
+let it expire after the send.
+A vars file must never be copied from a previous report or a sample; a report
+whose `sprint_id`, `task_id`, or `commit` do not match the assignment is a
+false report.
+
+## Required QA Status Contract
+
+Every QA update, both ATM and PR, must include:
+- sprint or task identifier
+- branch, commit, PR number
+- verdict (`PASS | FAIL | IN-FLIGHT`)
+- deliverable completion (`complete`, `total`, `percent`)
+- finding counts by severity (`blocking`, `important`, `minor`)
+- blocking ids with concise summaries
+- next required action plus owner
+- merge readiness (`ready | not ready`) plus reason
+
+Use fenced JSON for machine-readable status payloads:
+
+```json
+{
+  "sprint": "M.1",
+  "task": "mailbox-locking",
+  "branch": "feature/pM-s1-mailbox-locking",
+  "commit": "abc1234",
+  "pr": 123,
+  "verdict": "FAIL",
+  "deliverables": {
+    "complete": 9,
+    "total": 11,
+    "percent": 82
+  },
+  "findings": {
+    "blocking": 1,
+    "important": 2,
+    "minor": 0
+  },
+  "blocking_ids": ["QA-001"],
+  "next_action": "Fix lock acquisition rollback semantics",
+  "owner": "arch-ctm",
+  "merge_readiness": "not ready",
+  "merge_reason": "Blocking findings remain"
+}
+```
+
+## QA Lifecycle (Multi-Pass)
+
+1. Initial pass: usually `FAIL` with findings.
+   - If Rust best-practices review is in scope, run it in QA-1 only.
+2. Fix passes: `IN-FLIGHT` or `FAIL` while fixes are in progress.
+   - QA-2 and later rounds must not re-run Rust best-practices review on the
+     same sprint branch.
+   - Unresolved QA-1 RBP findings that are not fixed in the first fix round
+     carry to the next phase backlog instead of being re-raised in later rounds.
+3. Final pass: `PASS` with final quality report and merge recommendation.
+
+Do not treat QA as single-shot.
+
+## CI Monitoring
+
+Preferred repo-specific flow:
+- use `atm gh monitor status` to verify monitor health when available
+- use `atm gh monitor pr <PR> --start-timeout 120` to start or attach a PR monitor when available
+- use `atm gh pr report <PR> --json` for one-shot structured status when available
+
+Fallback when repo-specific `atm gh` tooling is unavailable or not yet wired:
+- `gh pr checks <PR> --watch`
+- `gh pr view <PR> --json mergeStateStatus,reviewDecision`
+
+If monitoring cannot start, include the failure in QA status and proceed with
+one-shot PR report data.
+
+## Findings Report to PR (Blocking)
+
+Template:
+- `~/.atm/templates/quality-management-gh/findings-report.md.j2`
+
+Recommended flow:
+1. Gather findings from QA agents.
+2. Render the installed template with required variables.
+3. When rechecking prior findings, include a resolved-findings section for
+   items closed since the previous pass.
+4. Post to the PR as a blocking review or status comment.
+
+Suggested commands:
+- blocking review:
+  `atm compose --template ~/.atm/templates/quality-management-gh/findings-report.md.j2 --vars <scratch>/qa-<pr>-vars.json | gh pr review <PR> --request-changes --body-file -`
+- in-flight update:
+  `atm compose --template ~/.atm/templates/quality-management-gh/findings-report.md.j2 --vars <scratch>/qa-<pr>-vars.json | gh pr comment <PR> --body-file -`
+- ATM verdict:
+  `atm send team-lead --template ~/.atm/templates/quality-management-gh/findings-report.md.j2 --vars <scratch>/qa-<pr>-vars.json`
+
+## Final Quality Report to PR (Closeout)
+
+Template:
+- `~/.atm/templates/quality-management-gh/quality-report.md.j2`
+
+Recommended flow:
+1. Confirm final QA pass and summarize validation scope.
+2. Render the installed template with required variables.
+3. Post as final closeout review or comment.
+
+Suggested command:
+- PR closeout:
+  `atm compose --template ~/.atm/templates/quality-management-gh/quality-report.md.j2 --vars <scratch>/qa-<pr>-vars.json | gh pr review <PR> --approve --body-file -`
+- ATM verdict:
+  `atm send team-lead --template ~/.atm/templates/quality-management-gh/quality-report.md.j2 --vars <scratch>/qa-<pr>-vars.json`
+
+Use the final template only for `PASS` closeout.
+
+## PR Update Conventions
+
+- First QA pass posts detailed findings with `FAIL` and should use
+  `--request-changes`.
+- Fix-pass updates revise status and open findings.
+- Final pass posts `PASS` closeout with residual risk and readiness and should
+  use `--approve`.
+- Do not keep QA results ATM-only when a PR exists; append every completed QA
+  update to the PR.
+- Rendered reports must include a fenced JSON block for machine parsing.
+
+## ATM Coordination Protocol
+
+For each task:
+1. immediate acknowledgement
+2. execute QA work
+3. send completion or status summary
+4. receiver acknowledgement
+
+No silent processing.
