@@ -128,7 +128,7 @@ Stacking a-4 on the a-1 branch would give a-1 two children, which a stack cannot
 
 ## gh-stack and worktree workflow
 
-Every sequential run of sprints, here `phase-a-core` (a-1 → a-2 → a-3 → a-5 → a-6), is one GitHub stack. Each layer is developed in its own `/sc-git-worktree` worktree under `../beads-task-issue-tracker-worktrees/<branch>`, recorded in `worktree-tracking.md`.
+Every sequential run of sprints, here `phase-a-core` (a-1 → a-2 → a-3 → a-5 → a-6), is one GitHub stack. Each layer is developed in its own `/sc-git-worktree` worktree under `../beads-task-issue-tracker-worktrees/<branch>`. The worktree's row in `../beads-task-issue-tracker-worktrees/worktree-tracking.md` (outside the repo, maintained by `/sc-git-worktree`) is added by the sprint that creates the worktree and marked cleaned by that sprint after its PR merges. It is a local operational record, not a QA gate; the QA-visible record is each sprint doc's `worktree:` frontmatter field.
 
 **Verified constraint:** gh-stack's local tracking commands do not work with a worktree per layer. Tested locally with gh-stack v0.1.0 on 2026-09-13:
 - `gh stack rebase` fails with `fatal: 's2' is already used by worktree at …`.
