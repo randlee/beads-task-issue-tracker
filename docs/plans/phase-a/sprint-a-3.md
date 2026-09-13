@@ -3,16 +3,31 @@ id: a-3
 title: "#[instrument] — tracing-compatible attribute"
 status: planned
 branch: feature/sprint-a-3-instrument
+worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-3-instrument
 target: develop
 recommended_model: higher-effort (sync/async codegen, trace context propagation)
 dependency_relations:
   - prerequisite: a-2
     dependent: a-3
     relation: must_follow
-    rationale: "#[instrument] reuses crates/sc-observability-log-macros/src/fields.rs (the EventSpec parser) and the __private emit path, and events emitted inside an instrumented fn must inherit its trace context through the a-2 macro expansion. Merge a-2 forward before every dev/fix round; a-2 PR merges first."
+    rationale: "reuses crates/sc-observability-log-macros/src/fields.rs (EventSpec) and the a-2 expansion for trace-context inheritance; stack parent"
+  - prerequisite: a-3
+    dependent: a-5
+    relation: must_follow
+    rationale: "the review covers the complete crate API"
+  - prerequisite: none
+    parallel_pair: [a-3, a-4]
+    relation: parallel_safe
+    rationale: "non-intersecting: a-3 touches only crates/ sources, tests, docs and the tokio dev-dependency; a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; runtime dependency graph frozen by a-1"
 ---
 
 # Sprint a-3 — #[instrument]: tracing-compatible attribute
+
+## Recommended Agent / Model
+
+Recommended model: higher-effort (sync/async codegen, trace context propagation).
+Recommended agent: not set — the btit developer pool is pending the `arch-ctm` decision on PR #38.
+Planning advice; team-lead assigns from the active pool.
 
 ## Goal
 
@@ -24,10 +39,23 @@ dependency_relations:
 
 - a-2 merged: `EventSpec` field parsing, `__private::build_event`, the `Level` type, and the event macros.
 
+## Dependency Relations
+
+`must_follow` merge-forward trigger: parent development is pushed, not QA;
+merge parent → child before every dev/fix round. PR-completion trigger: parent
+PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+
+- a-2 → a-3 — `must_follow` (a-3 follows a-2): reuses crates/sc-observability-log-macros/src/fields.rs (EventSpec) and the a-2 expansion for trace-context inheritance; stack parent
+- a-3 → a-5 — `must_follow` (a-5 follows a-3): the review covers the complete crate API
+- a-3 ↔ a-4 — `parallel_safe`: non-intersecting: a-3 touches only crates/ sources, tests, docs and the tokio dev-dependency; a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; runtime dependency graph frozen by a-1
+
+Stack: `phase-a-core · layer 3`.
+
 ## Exact Targets
 
 - `crates/sc-observability-log-macros/src/instrument.rs` (new)
 - `crates/sc-observability-log-macros/src/lib.rs` (export `instrument`)
+- `crates/Cargo.toml` and `crates/sc-observability-log/Cargo.toml` (dev-dependency `tokio` only)
 - `crates/sc-observability-log/src/context.rs` (new; span context, id generation, `Instrumented` future)
 - `crates/sc-observability-log/src/lib.rs` (re-export `instrument`; `__private` span helpers)
 - `crates/sc-observability-log/src/mapping.rs` and `src/bridge.rs` (attach the current trace context to bridge records)
@@ -135,6 +163,7 @@ pub mod __private {
 6. Generated ids always pass `TraceId::new`/`SpanId::new` validation (property test over at least 10k generations).
 7. Every unsupported argument has a trybuild case whose checked-in stderr names it.
 8. Both crates pass fmt, clippy `-D warnings` and the MSRV check; the `crates` CI job passes on all three OSes.
+9. The runtime dependency graph is frozen by a-1: `cargo tree --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --prefix none` output is unchanged from `crates/runtime-deps.txt`, and no `[dependencies]` table in `crates/` changes (`tokio` is a dev-dependency only; keeps `parallel_safe` with a-4).
 
 ## Required Validation
 

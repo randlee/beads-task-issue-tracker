@@ -3,16 +3,31 @@ id: a-2
 title: sc-observability-log-macros — tracing-compatible event macros
 status: planned
 branch: feature/sprint-a-2-event-macros
+worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros
 target: develop
 recommended_model: higher-effort (proc-macro parsing of the tracing field grammar)
 dependency_relations:
   - prerequisite: a-1
     dependent: a-2
     relation: must_follow
-    rationale: Macros expand to sc_observability_log::__private::{enabled, emit} and re-export through crates/sc-observability-log/src/lib.rs, both created by a-1. Merge a-1 forward before every dev/fix round; a-1 PR merges first.
+    rationale: "macros expand to a-1 __private::{enabled, emit} and are re-exported from a-1 crates/sc-observability-log/src/lib.rs; stack parent"
+  - prerequisite: a-2
+    dependent: a-3
+    relation: must_follow
+    rationale: "a-3 reuses the a-2 fields.rs EventSpec parser"
+  - prerequisite: none
+    parallel_pair: [a-2, a-4]
+    relation: parallel_safe
+    rationale: "non-intersecting: a-2 touches only crates/ sources, tests, docs and dev-dependencies; a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; runtime dependency graph frozen by a-1"
 ---
 
 # Sprint a-2 — sc-observability-log-macros: tracing-compatible event macros
+
+## Recommended Agent / Model
+
+Recommended model: higher-effort (proc-macro parsing of the tracing field grammar).
+Recommended agent: not set — the btit developer pool is pending the `arch-ctm` decision on PR #38.
+Planning advice; team-lead assigns from the active pool.
 
 ## Goal
 
@@ -24,15 +39,26 @@ dependency_relations:
 
 - a-1 merged: `__private::{enabled, emit}`, the `crates/` workspace and the `crates` CI job.
 
+## Dependency Relations
+
+`must_follow` merge-forward trigger: parent development is pushed, not QA;
+merge parent → child before every dev/fix round. PR-completion trigger: parent
+PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+
+- a-1 → a-2 — `must_follow` (a-2 follows a-1): macros expand to a-1 __private::{enabled, emit} and are re-exported from a-1 crates/sc-observability-log/src/lib.rs; stack parent
+- a-2 → a-3 — `must_follow` (a-3 follows a-2): a-3 reuses the a-2 fields.rs EventSpec parser
+- a-2 ↔ a-4 — `parallel_safe`: non-intersecting: a-2 touches only crates/ sources, tests, docs and dev-dependencies; a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; runtime dependency graph frozen by a-1
+
+Stack: `phase-a-core · layer 2`.
+
 ## Exact Targets
 
-- `crates/Cargo.toml` (add member `sc-observability-log-macros`; add `syn = { version = "2", features = ["full"] }`, `quote = "1"`, `proc-macro2 = "1"`, `trybuild = "1"`, `tracing = "0.1"` to `[workspace.dependencies]`)
+- `crates/Cargo.toml` (add dev-only `trybuild = "1"`, `tracing = "0.1"` to `[workspace.dependencies]`; no runtime dependency changes)
 - `crates/Cargo.lock`
-- `crates/sc-observability-log-macros/Cargo.toml` (new; `proc-macro = true`)
-- `crates/sc-observability-log-macros/src/lib.rs` (new)
+- `crates/sc-observability-log-macros/src/lib.rs` (export the event macros; created empty by a-1)
 - `crates/sc-observability-log-macros/src/fields.rs` (new; shared with a-3)
 - `crates/sc-observability-log-macros/src/event.rs` (new)
-- `crates/sc-observability-log/Cargo.toml` (add a runtime dependency on `sc-observability-log-macros`)
+- `crates/sc-observability-log/Cargo.toml` (dev-dependencies `trybuild`, `tracing` only)
 - `crates/sc-observability-log/src/lib.rs` (re-exports and `__private` helpers)
 - `crates/sc-observability-log/tests/macros_jsonl.rs` (new)
 - `crates/sc-observability-log/tests/compat/events.rs` (new; shared fixture)
@@ -44,10 +70,9 @@ dependency_relations:
 
 Every deliverable must land at a production-ready level for the scope this sprint claims. If that cannot be done cleanly in one sprint, split the sprint before implementation begins. No deliverable may be silently dropped or partially deferred.
 
-1. **The macros crate.** `sc-observability-log-macros` (edition 2024, rust-version 1.94.1, `publish = false`).
-   - Runtime dependencies: exactly `syn`, `quote`, `proc-macro2`.
-   - It exports the function-like proc-macros `trace`, `debug`, `info`, `warn`, `error` and `event`.
-2. **Re-exports.** `sc-observability-log` re-exports those six macros at its crate root. Its runtime dependency set becomes the a-1 set plus `sc-observability-log-macros` and `serde` (for the `Serialize` field path; add `serde = "1"` to `[workspace.dependencies]`). Dev dependencies: `tempfile`, `trybuild`, `tracing`.
+1. **The macros crate.** `sc-observability-log-macros` (created by a-1 with its final runtime dependencies)
+   exports the function-like proc-macros `trace`, `debug`, `info`, `warn`, `error` and `event`.
+2. **Re-exports.** `sc-observability-log` re-exports those six macros at its crate root. Its runtime dependency set is unchanged from a-1 (which already includes `sc-observability-log-macros` and `serde`). Dev dependencies: `tempfile`, `trybuild`, `tracing`.
 3. **Grammar.** Every accepted form in the grammar table below expands to `__private::enabled` / `__private::emit` with a fully built `LogEvent`, and never allocates when the level is disabled.
 4. **Rejected forms.** Each form listed below fails to compile with a message that names the form and says it is unsupported.
 5. **Shared compatibility fixture.** `tests/compat/events.rs` is one source file that uses every accepted form. It is included by `tests/compat_events.rs` twice: once with `use tracing::{trace, debug, info, warn, error, event, Level};` (compile-only, proving the syntax is genuine tracing syntax) and once with `use sc_observability_log::{...}` (executed and asserted against the JSONL output).
@@ -136,6 +161,7 @@ pub mod __private {
 4. With the max level below the call's level, arguments are not evaluated, formatted or allocated. A test uses an argument whose `Debug`/`Serialize` implementation panics.
 5. Expanded code compiles in a consumer that depends only on `sc-observability-log`. The trybuild pass cases do not declare `sc-observability` as a dependency.
 6. Both crates meet the fmt/clippy `-D warnings`/MSRV gates, and the `crates` CI job passes on all three OSes.
+7. The runtime dependency graph is frozen by a-1: `cargo tree --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --prefix none` output is unchanged from `crates/runtime-deps.txt`, and no `[dependencies]` table in `crates/` changes (keeps `parallel_safe` with a-4).
 
 ## Required Validation
 

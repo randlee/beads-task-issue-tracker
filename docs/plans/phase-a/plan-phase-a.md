@@ -77,7 +77,8 @@ These rules apply to both crates from the first sprint onward:
 | `a-event-macros` | In scope | a-2: tracing-compatible event macros (proc-macro) emitting `LogEvent` directly. |
 | `a-instrument` | In scope | a-3: tracing-compatible `#[instrument]` attribute, sync and async. |
 | `a-btit-adoption` | In scope | a-4: btit switches from `tauri-plugin-log` to the bridge; log commands and the debug panel read JSONL. |
-| `a-sc-handoff` | In scope | a-5: sc-observability team critical review; crates copied into `../sc-observability` with every CI gate green there. |
+| `a-sc-review` | In scope | a-5: sc-observability team critical review; findings fixed in btit; type-placement decision recorded. |
+| `a-sc-handoff` | In scope | a-6: crates copied into `../sc-observability` with every CI gate green there; merged-PR evidence recorded in btit. |
 | `b-crate-split` | Out of phase | Moving the btit backend to root `crates/` and splitting it into multiple crates is phase-b. It depends on phase-a landing first (user direction, 2026-09-13). |
 | `REFACTOR-REVIEW-B1..B13` | Out of phase | Behavior issues pinned by tests, recorded in `docs/crate-split-refactor-issues.md`. phase-a does not change btit issue/CLI behavior. |
 | `REFACTOR-REVIEW-A1` | Closed by a-4 | The `app_lib::module` log-target churn stops mattering. The target becomes a `LogEvent.target` field rendered by the debug panel. |
@@ -85,51 +86,125 @@ These rules apply to both crates from the first sprint onward:
 ## Prerequisites (outside this phase)
 
 - **Toolchain:** PR #36 (`chore/toolchain-and-version-ssot`) must be merged to `develop`. It pins Rust 1.98.1 (≥ 1.94.1, as the sc-observability crates require) and makes `src-tauri/Cargo.toml` a workspace with `[workspace.package]`.
-- **Planning skill:** PR #35 (`chore/plan-hardening-skill`) must be merged, so this plan can be hardened with `/plan-hardening`.
+- **Planning skill:** PR #38 (exact atm-core copy of `plan-hardening` and the QA agents) must be merged, so this plan can be hardened with `/plan-hardening`.
 
 ## Sprint sequence
 
-| Sprint | Status | Branch | Authoritative plan | Production closure |
-| --- | --- | --- | --- | --- |
-| `a-1` | `planned` | `feature/sprint-a-1-log-bridge` | [`sprint-a-1.md`](./sprint-a-1.md) | `crates/` workspace plus `sc-observability-log` bridge, CI on 3 OSes |
-| `a-2` | `planned` | `feature/sprint-a-2-event-macros` | [`sprint-a-2.md`](./sprint-a-2.md) | tracing-compatible event macros with a compatibility fixture |
-| `a-3` | `planned` | `feature/sprint-a-3-instrument` | [`sprint-a-3.md`](./sprint-a-3.md) | tracing-compatible `#[instrument]` (sync and async) with a compatibility fixture |
-| `a-4` | `planned` | `feature/sprint-a-4-btit-adoption` | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel |
-| `a-5` | `planned` | `feature/sprint-a-5-sc-observability-handoff` | [`sprint-a-5.md`](./sprint-a-5.md) | sc-observability team review resolved; crates in `../sc-observability` with CI green, ready for its release workflow |
-
-The phase runs strictly in sequence.
-
-- **a-2 and a-3 build on a-1:** both extend a-1's public crate surface and the shared emit path.
-- **a-4 needs a final API:** it consumes the final crate API and the `src-tauri/Cargo.lock` entries.
-- **a-5 needs everything:** it reviews and copies the complete, adopted crates.
+| Sprint | Branch | Stack · layer | Depends on (`must_follow`) | Parallel with (`parallel_safe`) | Authoritative plan | Production closure |
+| --- | --- | --- | --- | --- | --- | --- |
+| `a-1` | `feature/sprint-a-1-log-bridge` | `phase-a-core` · 1 | PR #36 | none | [`sprint-a-1.md`](./sprint-a-1.md) | `crates/` workspace, both crate manifests with final runtime dependencies, `sc-observability-log` bridge, `crates` CI job on 3 OSes |
+| `a-2` | `feature/sprint-a-2-event-macros` | `phase-a-core` · 2 | a-1 | a-4 | [`sprint-a-2.md`](./sprint-a-2.md) | tracing-compatible event macros plus a compatibility fixture |
+| `a-3` | `feature/sprint-a-3-instrument` | `phase-a-core` · 3 | a-2 | a-4 | [`sprint-a-3.md`](./sprint-a-3.md) | tracing-compatible `#[instrument]` (sync and async) plus a compatibility fixture |
+| `a-4` | `feature/sprint-a-4-btit-adoption` | `phase-a-adoption` · 1 | a-1 (PR merged) | a-2, a-3 | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel |
+| `a-5` | `feature/sprint-a-5-sc-review` | `phase-a-core` · 4 | a-3, a-4 (PR merged) | none | [`sprint-a-5.md`](./sprint-a-5.md) | sc-observability team critical review; every Blocking/Important finding fixed in btit `crates/`; type-placement decision recorded |
+| `a-6` | `feature/sprint-a-6-sc-handoff` | `phase-a-core` · 5 | a-5 | none | [`sprint-a-6.md`](./sprint-a-6.md) | crates copied into `../sc-observability` with every CI gate green; PR merged; handoff record in btit |
 
 No deliverable is repeated across sprint checklists.
 
+### Execution lanes
+
+```mermaid
+flowchart LR
+  P36["PR #36 toolchain"] --> A1
+  subgraph core["stack phase-a-core (trunk develop)"]
+    A1["a-1 bridge"] --> A2["a-2 event macros"] --> A3["a-3 #[instrument]"] --> A5["a-5 sc review"] --> A6["a-6 sc handoff"]
+  end
+  subgraph adoption["stack phase-a-adoption (trunk develop)"]
+    A4["a-4 btit adoption"]
+  end
+  A1 -. "a-1 PR merged to develop" .-> A4
+  A4 -. "a-4 PR merged; gh stack sync" .-> A5
+```
+
+- **Lane 1, `phase-a-core`:** a-1 → a-2 → a-3 → a-5 → a-6. These are sequential and share one gh-stack.
+- **Lane 2, `phase-a-adoption`:** a-4. It starts once the a-1 PR is merged to `develop`, and runs in parallel with a-2 and a-3.
+- **Join:** a-5 development starts only after the a-4 PR is merged to `develop` and `gh stack sync` has rebased `phase-a-core` onto that `develop`.
+
+### Why a-4 starts at the a-1 merge rather than the a-1 push
+
+gh-stack refuses to run non-interactively when a branch belongs to more than one stack. This was verified locally with gh-stack v0.1.0: `gh stack init --base s-a1 s-a4` succeeds, but `gh stack view` on `s-a1` then fails with `branch "s-a1" belongs to multiple stacks; use an interactive terminal to select one`.
+
+Stacking a-4 on the a-1 branch would put a-1 in two stacks. So a-4 gets its own stack rooted on `develop`, and is created from `develop` after the a-1 PR merges.
+
+## gh-stack and worktree workflow
+
+Every sequential run of sprints lives in one gh-stack. Each layer has its own `/sc-git-worktree` worktree under `../beads-task-issue-tracker-worktrees/<branch>`, recorded in `worktree-tracking.md`.
+
+```bash
+# Lane 1 — create a-1 on develop (after PR #36 merges), then add layers as each parent is pushed
+gh stack init --base develop feature/sprint-a-1-log-bridge
+gh stack add feature/sprint-a-2-event-macros      # when a-1 development is pushed
+gh stack add feature/sprint-a-3-instrument        # when a-2 development is pushed
+gh stack add feature/sprint-a-5-sc-review         # when a-3 is pushed AND a-4 PR is merged (run gh stack sync first)
+gh stack add feature/sprint-a-6-sc-handoff        # when a-5 development is pushed
+gh stack submit                                   # open or refresh the stacked PRs
+
+# Lane 2 — after the a-1 PR is merged to develop
+gh stack init --base develop feature/sprint-a-4-btit-adoption
+
+# Before every dev/fix round on any layer: pull parent changes forward
+gh stack sync                                     # fetch, rebase the stack onto develop, push
+```
+
+**Merge rules:**
+- Stacked PRs are merged with `gh stack merge <PR> --yes` (bottom-up up to that PR), never `gh pr merge`.
+- The user completes merges unless they delegate one.
+- In lane 1, the a-1 PR is merged as soon as it passes (`gh stack merge <a-1 PR> --yes`), which unblocks lane 2.
+
 ## Dependency relations
 
-- **`a-1 must_follow` the toolchain PR:** PR #36 (`chore/toolchain-and-version-ssot`) must merge first. Rust ≥ 1.94.1 and the toolchain pin are required to build `sc-observability` 1.2.0.
-- **`a-2 must_follow a-1`:** a-1 development must be pushed before a-2 begins. Merge a-1 into a-2 before every dev/fix round. The a-1 PR merges first.
-- **`a-3 must_follow a-2`:** the same rules apply. a-3 reuses a-2's field-parsing module (`crates/sc-observability-log-macros/src/fields.rs`).
-- **`a-4 must_follow a-3`:** the same rules apply. a-4 pins the complete crate API and path dependencies in `src-tauri/Cargo.lock`.
-- **`a-5 must_follow a-4`:** the same rules apply. The review covers the crates as actually adopted by a consumer.
+The `must_follow` rules (from the sprint planning guidelines):
+- **Merge-forward trigger:** parent development is pushed, not QA-approved. The parent is merged into the child before every dev/fix round; in a stack, this is `gh stack sync` / `gh stack rebase`.
+- **PR-completion trigger:** the parent PR merges first.
 
-None of these relations is `parallel_safe`. a-1–a-3 intersect on `crates/sc-observability-log/src/lib.rs` (the public re-exports) and `crates/Cargo.lock`, and a-4 intersects on `src-tauri/Cargo.lock`.
+`parallel_safe` requires modules, crates, public contracts, artifacts and ownership that do not intersect.
+
+| Relation | Rationale |
+| --- | --- |
+| `a-1 must_follow PR #36` | `sc-observability` 1.2.0 needs Rust ≥ 1.94.1; PR #36 pins 1.98.1 in `rust-toolchain.toml` and CI. |
+| `a-2 must_follow a-1` | a-2's macros expand to a-1's `__private::{enabled, emit}` and are re-exported from a-1's `crates/sc-observability-log/src/lib.rs`. |
+| `a-3 must_follow a-2` | a-3 reuses a-2's `crates/sc-observability-log-macros/src/fields.rs` (`EventSpec`). Events inside an instrumented fn inherit trace context through the a-2 expansion. |
+| `a-4 must_follow a-1` | a-4 consumes a-1's `init` / `BridgeOptions` / `LogGuard` / `LevelFilter` API and the runtime dependency graph a-1 freezes. PR-completion trigger: a-1 PR merged before the a-4 branch is created (see "Why a-4 starts at the a-1 merge"). |
+| `a-5 must_follow a-3` | The review covers the complete crate API (bridge, event macros, `#[instrument]`). |
+| `a-5 must_follow a-4` | The review covers the crates as adopted by a real consumer. The a-4 PR merges and `gh stack sync` runs before a-5 development starts. |
+| `a-6 must_follow a-5` | a-6 copies the crates after every Blocking/Important review finding is fixed, and implements the recorded type-placement decision in `../sc-observability`. |
+| `a-2 parallel_safe a-4` | Non-intersecting ownership: see the ownership table below. |
+| `a-3 parallel_safe a-4` | Non-intersecting ownership: see the ownership table below. |
+
+No other pair is related. a-1 precedes everything; a-5 and a-6 follow everything.
+
+### Ownership table (non-intersection proof for the `parallel_safe` pairs)
+
+| Artifact | a-1 | a-2 | a-3 | a-4 | a-5 | a-6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `crates/Cargo.toml` `[workspace.dependencies]` (runtime) and both crates' `[dependencies]` | **owns (frozen)** | — | — | — | fixes only | — |
+| `crates/Cargo.toml` dev-dependencies, `crates/Cargo.lock` | creates | adds `trybuild`, `tracing` | adds `tokio` | — | fixes only | — |
+| `crates/sc-observability-log/src/**`, `crates/sc-observability-log-macros/src/**`, `crates/*/tests/**`, `crates/*/docs/**` | creates | extends | extends | — | fixes only | — |
+| `.github/workflows/ci.yml` | **owns** (`crates` job) | — | — | — | — | — |
+| `src-tauri/**` (incl. `Cargo.toml`, `Cargo.lock`), `app/**`, `tests/**` | — | — | — | **owns** | — | — |
+| `CLAUDE.md`, `.claude/codebase-map.md`, `CHANGELOG.md` | — | — | — | **owns** | — | — |
+| `docs/plans/phase-a/review-a-5.md` | — | — | — | — | **owns** | — |
+| `docs/plans/phase-a/handoff-a-6.md`; everything in `../sc-observability` | — | — | — | — | — | **owns** |
+| This plan's status rows | own row | own row | own row | own row | own row | own row |
+
+**Frozen runtime graph.** a-2 and a-3 must not change any runtime dependency, which is checked by their acceptance criteria. Because of that, the runtime dependency graph btit resolves through `crates/sc-observability-log` is final after a-1, and a-4's `src-tauri/Cargo.lock` does not need regenerating when a-2 or a-3 merge.
 
 ## Cross-sprint document ownership
 
 - **a-1** creates `crates/sc-observability-log/README.md` (bridge section) and `crates/sc-observability-log/docs/mapping.md` (the record → `LogEvent` mapping).
-- **a-2 and a-3** extend `crates/sc-observability-log/docs/compatibility.md` (the tracing/log API compatibility table and the list of rejected arguments).
-- **a-4** updates btit `CLAUDE.md` → `### Logging` (file location and format) and `.claude/codebase-map.md` (logging section).
-- **a-5** owns every document added to `../sc-observability`.
-- **Each sprint** updates only its own row status in this plan.
+- **a-2 and a-3** extend `crates/sc-observability-log/docs/compatibility.md` (tracing/log API compatibility table, rejected arguments).
+- **a-4** updates btit `CLAUDE.md` → `### Logging` (file location and format), `.claude/codebase-map.md` (logging section) and `CHANGELOG.md`.
+- **a-5** owns `docs/plans/phase-a/review-a-5.md`.
+- **a-6** owns `docs/plans/phase-a/handoff-a-6.md` and every document added to `../sc-observability`.
+- **Every sprint** updates only its own status row in this plan.
 
 ## Phase closure
 
 phase-a closes when all of the following hold:
 
-- a-1–a-5 are merged.
+- a-1–a-6 are merged.
 - btit `develop` runs on the bridge.
-- A PR in `../sc-observability` adding both crates is merged, with all sc-observability CI gates green and review findings resolved.
+- `docs/plans/phase-a/handoff-a-6.md` records the merged `../sc-observability` PR (URL, merge commit, green CI run URL) that adds both crates.
 
 **Not part of phase-a:**
 

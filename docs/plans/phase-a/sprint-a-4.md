@@ -3,16 +3,35 @@ id: a-4
 title: btit adopts the sc-observability-log bridge
 status: planned
 branch: feature/sprint-a-4-btit-adoption
+worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption
 target: develop
 recommended_model: standard (bounded integration; UI renderer is pure logic)
 dependency_relations:
-  - prerequisite: a-3
+  - prerequisite: a-1
     dependent: a-4
     relation: must_follow
-    rationale: a-4 adds path dependencies on the complete crate pair to src-tauri/Cargo.toml and pins them in src-tauri/Cargo.lock; the crate API must be final. Merge a-3 forward before every dev/fix round; a-3 PR merges first.
+    rationale: "consumes the a-1 init/BridgeOptions/LogGuard/LevelFilter API and frozen runtime graph; PR-completion trigger: a-1 PR merged before the a-4 branch is created"
+  - prerequisite: none
+    parallel_pair: [a-4, a-2]
+    relation: parallel_safe
+    rationale: "non-intersecting: a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; a-2 owns crates/ sources only; runtime graph frozen by a-1"
+  - prerequisite: none
+    parallel_pair: [a-4, a-3]
+    relation: parallel_safe
+    rationale: "non-intersecting: same ownership split as a-2"
+  - prerequisite: a-4
+    dependent: a-5
+    relation: must_follow
+    rationale: "the review covers the crates as adopted by btit; a-4 PR merges before a-5 development starts"
 ---
 
 # Sprint a-4 — btit adopts the sc-observability-log bridge
+
+## Recommended Agent / Model
+
+Recommended model: standard (bounded integration; UI renderer is pure logic).
+Recommended agent: not set — the btit developer pool is pending the `arch-ctm` decision on PR #38.
+Planning advice; team-lead assigns from the active pool.
 
 ## Goal
 
@@ -22,7 +41,21 @@ dependency_relations:
 
 ## Hard Dependencies
 
-- a-3 merged: complete `sc-observability-log` API, including the a-1 `init`, `BridgeOptions`, `LogGuard` and the `LevelFilter` re-export.
+- a-1 PR merged to `develop`: `init`, `BridgeOptions`, `LogGuard`, the `LevelFilter` re-export, and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as its own gh-stack (`phase-a-adoption`), because a branch in two stacks breaks non-interactive gh-stack commands.
+- a-2 and a-3 are **not** prerequisites (`parallel_safe`).
+
+## Dependency Relations
+
+`must_follow` merge-forward trigger: parent development is pushed, not QA;
+merge parent → child before every dev/fix round. PR-completion trigger: parent
+PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+
+- a-1 → a-4 — `must_follow` (a-4 follows a-1): consumes the a-1 init/BridgeOptions/LogGuard/LevelFilter API and frozen runtime graph; PR-completion trigger: a-1 PR merged before the a-4 branch is created
+- a-4 ↔ a-2 — `parallel_safe`: non-intersecting: a-4 owns src-tauri/, app/, tests/, CLAUDE.md, codebase-map, CHANGELOG; a-2 owns crates/ sources only; runtime graph frozen by a-1
+- a-4 ↔ a-3 — `parallel_safe`: non-intersecting: same ownership split as a-2
+- a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit; a-4 PR merges before a-5 development starts
+
+Stack: `phase-a-adoption · layer 1 (trunk develop; created after the a-1 PR merges)`.
 
 ## Exact Targets
 
@@ -144,6 +177,8 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 6. The per-OS `get_log_path` `cfg` blocks are gone, and `logging.rs` has no platform-gated imports (closes refactor-review item A2 for `logging.rs`).
 7. The `LogGuard` is flushed on `RunEvent::Exit`. The last record logged before quit is present in the file.
 8. All btit gates pass, including the Windows cross-check.
+9. Refactor-review item A1 is closed by design: JSONL records carry the Rust `log` target as `LogEvent.target` (for example `app_lib.cli`, taken from `module_path!()` via `log::Record::target()`), and the debug panel renders that field. No log line depends on the literal `[app_lib]` prefix. Evidence is in the PR description.
+10. The a-4 diff touches no file under `crates/`.
 
 ## Required Validation
 
