@@ -1,0 +1,27 @@
+{
+  "task_id": "phase-a-plan-qa",
+  "sprint": "phase-A",
+  "sprint_doc": "docs/plans/phase-A/plan-phase-A.md",
+  "review_mode": "plan",
+  "description": "Focused plan QA for phase-A after consistency hardening",
+  "pr_number": "",
+  "branch": "plan/phase-a",
+  "worktree_path": "/absolute/path/to/beads-task-issue-tracker-worktrees/plan-phase-a",
+  "commits": "HEAD",
+  "review_targets": [
+    "docs/plans/phase-A/plan-phase-A.md",
+    "docs/plans/phase-A/sprint-A1.md",
+    "docs/plans/phase-A/sprint-A2.md"
+  ],
+  "references": [
+    "docs/philosophy.md"
+  ],
+  "changed_files": "",
+  "triage_records": "",
+  "quality_gates": [
+    "pnpm test",
+    "npx vue-tsc --noEmit",
+    "cargo test --manifest-path src-tauri/Cargo.toml",
+    "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets"
+  ]
+}

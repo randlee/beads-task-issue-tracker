@@ -1,0 +1,21 @@
+{
+  "task_id": "phase-a-plan-hardening-step-1",
+  "phase": "phase-A",
+  "description": "Plan hardening for phase-A current plan state",
+  "worktree_path": "/absolute/path/to/beads-task-issue-tracker-worktrees/plan-phase-a",
+  "branch": "plan/phase-a",
+  "pr_target": "develop",
+  "round_id": "STEP1-R1",
+  "round_index": 1,
+  "reviewer": "phb-plan-scope-reviewer",
+  "reviewed_commit": "",
+  "previous_reviewed_commit": "",
+  "findings_hash": "",
+  "supersedes_task_id": "",
+  "replay_nonce": "2026-09-13T00:00:00Z",
+  "source_of_truth": "- docs/plans/phase-A/plan-phase-A.md",
+  "references": "- docs/philosophy.md\n- docs/plans/phase-A/sprint-A1.md\n- docs/plans/phase-A/sprint-A2.md",
+  "questions_or_concerns": "",
+  "previous_step_json": "",
+  "reviewer_findings_json": ""
+}
