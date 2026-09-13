@@ -133,18 +133,17 @@ Non-finite floats are not failures: they record `null`. See
 ### Field value size
 
 Field values are inserted into events as produced by `serde_json::to_value`
-(when the field implements `Serialize`) or the `Debug` or `Display` string
-representation. There is no size cap or depth limit on individual field values,
-nor on the final formatted message. The a-1 queue bounds the event count per
-logger initialization (not the total bytes), so callers must not log unbounded
-collections or untrusted large payloads as field values without prior
-truncation or filtering.
+(bare and `{ key } =` fields), or as the `Debug` (`?v`) or `Display` (`%v`)
+string. There is no size or depth cap on individual field values or on the
+formatted message. The a-1 writer queue is bounded by event count
+(`queue_capacity`), not by bytes, so callers must not log unbounded collections
+or untrusted large payloads as field values without truncating them first.
 
 ### Evaluation cost
 
-When the event's level is enabled (above `LoggerConfig.level`), field values are
-serialized or formatted synchronously on the calling thread inside the macro
-expansion, the same as with `tracing`. When the level is disabled, field value
-expressions are not evaluated at all. In async code, keep field `Serialize` and
-`Debug` implementations cheap because the evaluation work runs on the executor
-thread and can block the reactor.
+When the event's level passes the `LoggerConfig.level` threshold, field values
+and the message are serialized or formatted synchronously on the calling thread
+inside the macro expansion, as with `tracing`. When the level is disabled, the
+field and message expressions are not evaluated. In async code, keep field
+`Serialize`, `Debug` and `Display` implementations cheap: the work runs on the
+executor thread that called the macro.
