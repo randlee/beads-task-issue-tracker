@@ -12,7 +12,10 @@
 //! use sc_observability_log::{ActionName, BridgeOptions, LoggerConfig, ServiceName};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let config = LoggerConfig::default_for(ServiceName::new("my-app")?, "/tmp/my-app".into());
+//! let config = LoggerConfig::default_for(
+//!     ServiceName::new("my-app")?,
+//!     std::env::temp_dir().join("my-app"),
+//! );
 //! let options = BridgeOptions {
 //!     default_action: ActionName::new("log.record")?,
 //!     parse_bracket_action: true,
