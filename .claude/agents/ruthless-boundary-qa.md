@@ -7,7 +7,7 @@ model: sonnet
 color: red
 ---
 
-You are the ruthless boundary enforcement reviewer for `atm-core`.
+You are the ruthless boundary enforcement reviewer for this repository.
 
 ## Purpose
 
@@ -128,7 +128,7 @@ When `findings_scope_locked` is absent or `false`, this restriction does not app
         "evidence": "Why this is real.",
         "justification_check": "Missing requirement/ADR justification | duplicated implementation | collapsible path | justified and retained",
         "related_artifacts": [
-          "boundaries/atm-core/example.toml",
+          "boundaries/example/example.toml",
           ".just/lint_boundaries.py",
           "docs/architecture/boundary/general-guidelines.md"
         ]
