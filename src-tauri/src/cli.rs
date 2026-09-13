@@ -471,7 +471,19 @@ pub(crate) fn uses_dolt_backend() -> bool {
 /// - bd < 0.50.0: NEVER (CLI doesn't support Dolt)
 /// - bd >= 0.50.0: checks if `.dolt/` directory exists inside the beads dir
 pub(crate) fn project_uses_dolt(beads_dir: &std::path::Path) -> bool {
-    match get_cli_client_info() {
+    project_uses_dolt_for(get_cli_client_info(), beads_dir)
+}
+
+/// Pure core of `project_uses_dolt`: decides from the (possibly unknown) CLI client
+/// info and the on-disk layout of `beads_dir`. Testable without spawning `bd`.
+/// - br never uses Dolt; bd < 0.50 never uses Dolt
+/// - otherwise: `.beads/.dolt` (legacy layout), or `metadata.json` declaring
+///   `"backend":"dolt"` AND a `dolt/<name>/.dolt` directory (bd 0.52+ layout)
+pub(crate) fn project_uses_dolt_for(
+    info: Option<(CliClient, u32, u32, u32)>,
+    beads_dir: &std::path::Path,
+) -> bool {
+    match info {
         Some((CliClient::Br, _, _, _)) => false,
         Some((CliClient::Bd, major, minor, _)) if major == 0 && minor < 50 => false,
         _ => {
@@ -1235,17 +1247,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    #[test]
-    fn project_uses_dolt_true_with_legacy_dolt_dir() {
-        let temp_dir = std::env::temp_dir().join(format!("beads_test_legacy_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
-        let beads_dir = temp_dir.join(".beads");
-        let dolt_dir = beads_dir.join(".dolt");
-        let _ = std::fs::create_dir_all(&dolt_dir);
+    fn dolt_tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "beads_dolt_{}_{}",
+            name,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
 
-        // Note: project_uses_dolt checks CLI version first; this may return false
-        // depending on whether bd 0.49 is available. Test just the dir structure.
-        let _ = std::fs::remove_dir_all(&temp_dir);
+    const BD_1: Option<(CliClient, u32, u32, u32)> = Some((CliClient::Bd, 1, 0, 4));
+
+    #[test]
+    fn project_uses_dolt_for_legacy_dolt_dir() {
+        let beads = dolt_tmp("legacy");
+        std::fs::create_dir_all(beads.join(".dolt")).unwrap();
+        assert!(project_uses_dolt_for(BD_1, &beads));
+        // Unknown client info falls through to the layout check
+        assert!(project_uses_dolt_for(None, &beads));
+        let _ = std::fs::remove_dir_all(&beads);
+    }
+
+    #[test]
+    fn project_uses_dolt_for_nested_layout_needs_metadata_and_dolt_dir() {
+        let beads = dolt_tmp("nested");
+        std::fs::write(beads.join("metadata.json"), r#"{"backend": "dolt"}"#).unwrap();
+        // metadata says dolt but no dolt/ directory yet
+        assert!(!project_uses_dolt_for(BD_1, &beads));
+        std::fs::create_dir_all(beads.join("dolt").join("proj").join(".dolt")).unwrap();
+        assert!(project_uses_dolt_for(BD_1, &beads));
+        let _ = std::fs::remove_dir_all(&beads);
+    }
+
+    #[test]
+    fn project_uses_dolt_for_sqlite_metadata_or_empty_dir_is_false() {
+        let beads = dolt_tmp("sqlite");
+        assert!(!project_uses_dolt_for(BD_1, &beads));
+        std::fs::write(beads.join("metadata.json"), r#"{"backend":"sqlite"}"#).unwrap();
+        assert!(!project_uses_dolt_for(BD_1, &beads));
+        std::fs::write(beads.join("metadata.json"), "not json").unwrap();
+        assert!(!project_uses_dolt_for(BD_1, &beads));
+        let _ = std::fs::remove_dir_all(&beads);
+    }
+
+    #[test]
+    fn project_uses_dolt_for_br_and_legacy_bd_never_true() {
+        let beads = dolt_tmp("never");
+        std::fs::create_dir_all(beads.join(".dolt")).unwrap();
+        assert!(!project_uses_dolt_for(Some((CliClient::Br, 0, 1, 33)), &beads));
+        assert!(!project_uses_dolt_for(Some((CliClient::Bd, 0, 49, 6)), &beads));
+        assert!(project_uses_dolt_for(Some((CliClient::Bd, 0, 50, 0)), &beads));
+        let _ = std::fs::remove_dir_all(&beads);
     }
 
     // ---- Version-gate helpers (#7) -----------------------------------------------

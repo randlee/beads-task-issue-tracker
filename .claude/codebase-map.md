@@ -13,15 +13,14 @@
 │  └── Right sidebar: issue detail/preview/edit           │
 ├─────────────────────────────────────────────────────────┤
 │  Tauri 2 Desktop Shell                                  │
-│  ├── Rust backend (src-tauri/src/lib.rs) — 75 commands  │
-│  ├── Built-in tracker engine (src-tauri/src/tracker/)   │
-│  ├── bd/br CLI bridge (legacy backend)                  │
+│  ├── Rust backend (src-tauri/src/, 15 modules, 65 cmds) │
+│  ├── bd/br CLI bridge (cli.rs: execute_bd + per-project │
+│  │   lock, version gates, auto-detect)                   │
 │  └── File watcher, logging, update checker              │
 ├─────────────────────────────────────────────────────────┤
-│  Three selectable backends per project (Settings UI):   │
-│  ├── built-in: SQLite-native via tracker::Engine        │
-│  ├── br: beads_rust CLI → .beads/                       │
-│  └── bd: beads Go CLI 1.x (primary) → .beads/          │
+│  Two CLI backends, selectable in Settings:              │
+│  ├── bd: beads Go CLI 1.x (primary) → .beads/          │
+│  └── br: beads_rust CLI (secondary) → .beads/          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -57,10 +56,8 @@
 #### Backend & Sync
 | File | Exports | Purpose |
 |------|---------|---------|
-| `useBackendMode.ts` | `useBackendMode()` | Backend mode switching (`br`/`bd`/`built-in`). `syncFromStorage()` syncs to Rust on mount. `ensureTrackerInit()` auto-inits `.tracker/` if needed |
 | `useCliClient.ts` | `useCliClient()` | Detects `br` vs `bd` CLI binary in use via `getCliBinaryPath` |
 | `useSyncStatus.ts` | `useSyncStatus()` | Git sync status, force sync, error dialog |
-| `useConflicts.ts` | `useConflicts()` | Module-singleton for sync conflicts; wraps `trackerGetConflicts/resolveConflict/dismissConflict`; computes `diffFields`, `parsedLocal`, `parsedRemote` for diff UI |
 
 #### UI State
 | File | Exports | Purpose |
@@ -79,7 +76,7 @@
 | File | Exports | Purpose |
 |------|---------|---------|
 | `useAdaptivePolling.ts` | `useAdaptivePolling()` | Smart polling: 5s active, 30s blurred, 60s idle, paused when hidden. Cheap mtime check (1s) + expensive data fetch |
-| `useChangeDetection.ts` | `useChangeDetection()` | Change detection via native file watcher (Tauri events). Watches `.beads/` or `.tracker/` based on backend mode. SSE backend kept as dead code. 300ms debounce + 3s cooldown |
+| `useChangeDetection.ts` | `useChangeDetection()` | Change detection via native file watcher (Tauri events). Watches `.beads/`. SSE backend kept as dead code. 300ms debounce + 3s cooldown |
 
 #### Page Orchestration
 | File | Exports | Purpose |
@@ -169,7 +166,7 @@
 
 | File | Key Exports | Purpose |
 |------|-------------|---------|
-| `bd-api.ts` (~995 lines) | `bdList()`, `bdCreate()`, `bdUpdate()`, `bdShow()`, `bdClose()`, `bdDelete()`, `bdPollData()`, `bdCheckChanged()`, `bdSync()`, `bdMigrateToDolt()`, `bdCheckNeedsMigration()`, `trackerSync()`, `trackerDetect()`, `trackerInit()`, `trackerGetConflicts()`, `trackerResolveConflict()`, `trackerDismissConflict()`, `trackerCheckBeadsSource()`, `trackerMigrateFromBeads()`, `getBackendMode()`, `setBackendMode()`, etc. | Tauri invoke bridge — all 75 commands. Tracker types: `TrackerSyncResult`, `ConflictRecord`, `BeadsSourceInfo`, `TrackerMigrationResult`. Falls back to web API in browser mode |
+| `bd-api.ts` (~1000 lines) | `bdList()`, `bdCreate()`, `bdUpdate()`, `bdShow()`, `bdClose()`, `bdDelete()`, `bdPollData()`, `bdCheckChanged()`, `bdSync()`, `bdMigrateToDolt()`, `bdCheckNeedsMigration()`, `checkBdCompatibility()`, `getCliBinaryPath()`/`setCliBinaryPath()`, attachment + log + update calls, `logFrontend()` | Tauri invoke bridge for the 65 commands. Falls back to web API (`server/api/`) in browser mode |
 | `probe-adapter.ts` | `probeMetricsToIssues()`, `probeMetricsToPollData()`, `matchProbeProject()` | Probe response → app types adapter. `matchProbeProject()`: pure path matching with `.beads` suffix normalization |
 | `issue-helpers.ts` | `deduplicateIssues()`, `naturalCompare()`, `sortIssues()`, `filterIssues()`, `groupIssues()`, `computeStatsFromIssues()` | Pure functions extracted from useIssues + useDashboard for testability. Sorting, filtering, epic grouping, dashboard KPIs |
 | `favorites-helpers.ts` | `normalizePath()`, `deduplicateFavorites()`, `sortFavorites()`, `isFavorite()`, `createFavoriteEntry()` | Pure functions extracted from useFavorites for testability |
@@ -214,34 +211,28 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 
 | File | Purpose |
 |------|---------|
-| `src/lib.rs` (5274 lines) | All Tauri commands, data structures, helpers. Single-file backend |
-| `src/main.rs` | Entry point — calls `lib::run()` |
-| `src/tracker/` (5114 lines, 12 modules) | Built-in SQLite-native issue tracker engine |
+| `src/main.rs` | Binary entry point — calls `app_lib::run()` |
+| `src/lib.rs` (155) | Tauri entry point: `mod` declarations, `run()` with plugin setup, startup CLI probe, `generate_handler!` for all 65 commands |
+| `src/logging.rs` (172) | `LOGGING_ENABLED`/`VERBOSE_LOGGING`, `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros (declared first with `#[macro_use]`), log file commands |
+| `src/types.rs` (283) | `BdRawIssue`, `Issue`, `Comment`, `Relation`, parent/child structs, create/update payloads, per-command option structs, `CliClient` |
+| `src/issues.rs` (665) | Normalizers (`priority_to_*`, `normalize_issue_*`), `transform_issue` (deps → blockedBy/blocks/parent/children/relations), `normalize_metadata`, `parse_issues_tolerant` |
+| `src/cli.rs` (1368) | `get_extended_path`, `new_command`, auto-detect (`select_default_binary`, `probe_cli_binary`, `MIN_SUPPORTED_BD_MAJOR`), client/version detection + cache, version gates (`supports_*`/`uses_*` with pure `_for` cores), `project_uses_dolt(_for)`, `BD_PROJECT_LOCKS` + `execute_bd`, `check_bd_compatibility` |
+| `src/config.rs` (178) | `AppConfig` (settings.json), `CLI_BINARY`, get/set/validate CLI binary commands, `get_bd_version` |
+| `src/issue_commands.rs` (582) | `bd_list/count/ready/status/show/create/update/close/search/delete`, labels, comments, dependencies, relation types |
+| `src/polling.rs` (238) | `LAST_KNOWN_MTIME`, `bd_poll_data` (batched), `get_beads_mtime`, `bd_check_changed`, `bd_reset_mtime` |
+| `src/migration.rs` (1177) | `LAST_SYNC_TIME` + `sync_bd_database`, `bd_sync`, `bd_repair_database`, Dolt migration (`bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_cleanup_stale_locks`), refs migration v3 helpers |
+| `src/attachments.rs` (805) | Attachment helpers (`sanitize_filename`, `issue_short_id`, `classify_attachment`, `resolve_duplicate_filename`), image read/open, `base64_encode`, filesystem attachment commands, `purge_orphan_attachments` |
+| `src/attachment_refs.rs` (184) | `is_real_external_ref`, `check_refs_migration`, `migrate_attachment_refs` |
+| `src/updates.rs` (493) | GitHub release check for the app and the bd CLI, `compare_versions`, `find_platform_asset`, `download_and_install_update` |
+| `src/watcher.rs` (136) | notify-based `.beads/` watcher: `start_watching`/`stop_watching`/`get_watcher_status`, emits `beads-changed` |
+| `src/probe.rs` (174) | `PROBE_CHILD`, external data proxy commands, `launch_probe` |
+| `src/fs_commands.rs` (85) | `fs_exists`, `fs_list` (with `.beads`/Dolt detection) |
+| `src/test_support.rs` (22) | `#[cfg(test)]` shared fixtures (`minimal_issue_json`, `issue_json_with_metadata`) |
 | `tauri.conf.json` | Window config (1400x900, overlay title bar), bundle, CSP (connect-src includes `http://localhost:*` for probe SSE), dev port 3133 |
 | `Cargo.toml` | Deps: tauri 2.9.5, serde, reqwest, notify 7, dirs 6, rusqlite (bundled) |
 | `capabilities/default.json` | Tauri capability permissions |
 
-### Built-in Tracker Engine (`src/tracker/`)
-
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `mod.rs` | 313 | `Engine` struct — facade for all operations. `open`/`init`, delegates to sub-modules |
-| `config.rs` | 46 | `ProjectConfig` loader (`.tracker/config.toml`) |
-| `db.rs` | 229 | SQLite schema (v4), migrations v1→v4 (core tables, FTS5, synced_at, conflicts) |
-| `ids.rs` | 103 | ID generation — base36, 4-char suffix, collision-retry |
-| `issues.rs` | 1317 | CRUD for issues, comments, labels, deps. FTS5 insert/delete |
-| `export.rs` | 628 | JSONL export (atomic write via .tmp+rename) |
-| `import.rs` | 1033 | JSONL import with last-write-wins merge, conflict detection via synced_at |
-| `sync.rs` | 183 | Git sync cycle: export → commit → pull --rebase → import → push |
-| `conflicts.rs` | 171 | Sync conflict storage/resolution ("local" keep / "remote" apply) |
-| `migrate.rs` | 511 | `.beads/` → `.tracker/` migration (non-destructive: import JSONL, copy attachments) |
-| `search.rs` | 218 | FTS5 full-text search with prefix matching, BM25 rank, snippets |
-| `convert.rs` | 362 | Type conversion: `TrackerIssue` ↔ frontend `Issue`, payload mapping |
-| `agents_template.md` | — | AGENTS.md template embedded via `include_str!` |
-
-**SQLite schema (v4):** `issues`, `comments`, `labels`, `dependencies`, `issues_fts` (FTS5), `conflicts`, `schema_version`
-
-### Tauri Commands (75 total)
+### Tauri Commands (65 total)
 
 #### Issue Operations
 | Command | bd CLI | Special Logic |
@@ -254,7 +245,9 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 | `bd_create` | `bd create "title" [--flags]` | Maps all payload fields to CLI flags |
 | `bd_update` | `bd update <id> [--flags]` | **External ref sentinel:** empty string → `cleared:{id}` for UNIQUE constraint |
 | `bd_close` | `bd close <id>` | Raw JSON response |
-| `bd_delete` | `bd delete <id> --force --hard` | Cleans up attachment folder after delete |
+| `bd_delete` | `bd delete <id> --force [--hard]` | Cleans up attachment folder after delete; `--hard` only where the CLI supports it |
+| `bd_search` | `bd search <query>` | Query passed as a CLI argument (no shell) |
+| `bd_label_add` / `bd_label_remove` | `bd label add/remove <id> <label>` | |
 
 #### Comments & Dependencies
 | Command | bd CLI |
@@ -269,28 +262,10 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 #### Polling & Sync
 | Command | Purpose |
 |---------|---------|
-| `bd_check_changed` | Cheap mtime check — `.beads/` files (bd/br) or `.tracker/tracker.db` (built-in). No CLI call |
+| `bd_check_changed` | Cheap mtime check on `.beads/` files (beads.db + WAL, or nested Dolt layout). No CLI call |
 | `bd_reset_mtime` | Clear mtime cache (on project switch) |
 | `bd_poll_data` | Batched: 1 sync + 3 fetches (open + closed + ready) |
 | `bd_sync` | Manual `bd sync` trigger; 10s cooldown |
-
-#### Built-in Tracker Commands (8)
-| Command | Purpose |
-|---------|---------|
-| `tracker_init` | Initialize `.tracker/` dir + DB + .gitignore + AGENTS.md |
-| `tracker_detect` | Check if `.tracker/tracker.db` exists |
-| `tracker_sync` | Full git sync cycle (export → commit → pull → import → push) with cooldown |
-| `tracker_get_conflicts` | List unresolved sync conflicts |
-| `tracker_resolve_conflict` | Apply "local" or "remote" resolution |
-| `tracker_dismiss_conflict` | Dismiss conflict without changing issue |
-| `tracker_check_beads_source` | Check `.beads/issues.jsonl` availability + count for migration |
-| `tracker_migrate_from_beads` | Full `.beads/` → `.tracker/` migration (JSONL import + attachment copy) |
-
-#### Backend Mode
-| Command | Purpose |
-|---------|---------|
-| `get_backend_mode` | Get current backend mode (`bd`/`br`/`built-in`) |
-| `set_backend_mode` | Set backend mode (updates `BACKEND_MODE` global) |
 
 #### Filesystem
 | Command | Purpose |
@@ -303,9 +278,9 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 |---------|---------|
 | `read_image_file` | Load image as base64 (validates extension + path) |
 | `open_image_file` | Open image with native app |
-| `delete_attachment_file` | Delete attachment file |
+| `list_attachments` | List files under `.beads/attachments/{issue-id}/`, classified by extension |
+| `delete_attachment` | Delete one attachment file (filename validated) |
 | `copy_file_to_attachments` | Copy file to `.beads/attachments/{issue-id}/` (dedup names) |
-| `cleanup_empty_attachment_folder` | Remove empty attachment folder |
 | `purge_orphan_attachments` | Delete folders for non-existent issues |
 | `read_text_file` | Read .md files from attachments |
 | `write_text_file` | Write .md files in attachments |
@@ -340,7 +315,7 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 #### File Watching
 | Command | Purpose |
 |---------|---------|
-| `start_watching` | Watch `.beads/` (bd/br) or `.tracker/` (built-in) — emits `beads-changed` event (1s debounce) |
+| `start_watching` | Watch `.beads/` — emits `beads-changed` event (1s debounce) |
 | `stop_watching` | Stop watcher |
 | `get_watcher_status` | Return active + watched path |
 
@@ -350,34 +325,41 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 | `bd_repair_database` | Backup db → delete → rebuild. Handles bd < 0.50 (JSONL) vs >= 0.50 (Dolt) |
 | `bd_migrate_to_dolt` | 7-step SQLite→Dolt migration: export JSONL, init Dolt, import, restore labels/deps/comments/attachments. Handles empty projects |
 | `bd_check_needs_migration` | Detect if project needs Dolt migration (SQLite project + bd >= 0.50) |
+| `bd_cleanup_stale_locks` | Remove stale Dolt lock files before migration/repair |
+| `check_refs_migration` / `migrate_attachment_refs` | Attachment refs migration v3: detect legacy `external_ref` attachment pointers and move them to the filesystem layout |
+
+#### External Data & Probe (dev tooling)
+| Command | Purpose |
+|---------|---------|
+| `fetch/post/patch/delete_external_data` | HTTP calls from the backend to the configured probe/data-source URL |
+| `check_external_health` | Health check of the data-source URL |
+| `launch_probe` | Spawn the `BEADS_PROBE_BIN` process; handle kept in `PROBE_CHILD` |
 
 ### Key Backend Patterns
 
-1. **Backend Mode** — `BACKEND_MODE` global (`bd`/`br`/`built-in`). `is_builtin_backend()` gates behavior in `bd_check_changed`, `bd_poll_data`, `start_watching`. Per-project setting synced from frontend on mount
-2. **Tracker Engine Pool** — `TRACKER_ENGINES: HashMap<String, tracker::Engine>` keyed by project path. `with_engine()` helper opens or reuses engine per project
-3. **CLI Client Detection** — Detects `bd` (Go) vs `br` (Rust) client from `--version` output. Cached globally. Affects: daemon flag, JSONL support, relation types. Runs `bd --version` from temp dir to avoid triggering auto-migration
-4. **Per-Project Mutex** — `BD_PROJECT_LOCKS` serializes all `bd` CLI calls per project to prevent concurrent Dolt embedded access (SIGSEGV crash in dolthub/driver)
-5. **Sync Cooldown** — 10s cooldown between `bd sync` calls via `LAST_SYNC_TIME` mutex. Dolt projects skip sync entirely (Dolt handles sync via git)
-6. **Mtime Change Detection** — Tracks `.beads/beads.db` + WAL mtime (bd/br) or `.tracker/tracker.db` (built-in) per-project. Scans nested Dolt layout for bd 0.52+. Cheap polling without CLI calls
-7. **External Ref Sentinel** — Empty string → `cleared:{id}` to satisfy SQLite UNIQUE constraint
-8. **Issue Transform** — `BdRawIssue` → `Issue`: priority int→string, extracts parent/children/relations/blockers from dependency arrays. `TrackerIssue` → `Issue` via `convert.rs`
-9. **Tolerant Parsing** — `parse_issues_tolerant()`: tries strict JSON first, falls back to line-by-line
-10. **Path Security** — All attachment operations canonicalize paths + verify inside `.beads/attachments/`
-11. **Dolt Migration** — 7-step process: export JSONL from SQLite, backup, init Dolt, import JSONL, restore labels/deps/comments, convert attachment paths to absolute. Handles empty projects via init-only path
-12. **Dot Notation Parent-Child** — bd >= 0.50 uses structural parent-child via ID (e.g., `abc.1` is child of `abc`). Frontend derives relationships from loaded issues list instead of relying on JSON fields
+1. **CLI Client Detection** — Detects `bd` (Go) vs `br` (Rust) client from `--version` output. Cached globally. Affects: daemon flag, JSONL support, relation types. Runs `bd --version` from temp dir to avoid triggering auto-migration
+2. **Per-Project Mutex** — `BD_PROJECT_LOCKS` serializes all `bd` CLI calls per project to prevent concurrent Dolt embedded access (SIGSEGV crash in dolthub/driver)
+3. **Sync Cooldown** — 10s cooldown between `bd sync` calls via `LAST_SYNC_TIME` mutex. Dolt projects skip sync entirely (Dolt handles sync via git)
+4. **Mtime Change Detection** — Tracks `.beads/beads.db` + WAL mtime per-project. Scans nested Dolt layout for bd 0.52+. Cheap polling without CLI calls
+5. **External Ref Sentinel** — Legacy `cleared:{id}` values are treated as "no external ref" (`is_real_external_ref` in `attachment_refs.rs`)
+6. **Issue Transform** — `BdRawIssue` → `Issue`: priority int→string, extracts parent/children/relations/blockers from dependency arrays.
+7. **Tolerant Parsing** — `parse_issues_tolerant()`: tries strict JSON first, falls back to line-by-line
+8. **Path Security** — All attachment operations canonicalize paths + verify inside `.beads/attachments/`
+9. **Dolt Migration** — 7-step process: export JSONL from SQLite, backup, init Dolt, import JSONL, restore labels/deps/comments, convert attachment paths to absolute. Handles empty projects via init-only path
+10. **Dot Notation Parent-Child** — bd >= 0.50 uses structural parent-child via ID (e.g., `abc.1` is child of `abc`). Frontend derives relationships from loaded issues list instead of relying on JSON fields
 
 ### Global State (Rust)
 
 ```
-LOGGING_ENABLED: AtomicBool (false)
-VERBOSE_LOGGING: AtomicBool (false)
-LAST_SYNC_TIME: Mutex<Option<Instant>>       — sync cooldown
-LAST_KNOWN_MTIME: HashMap<String, SystemTime> — per-project mtime cache
-BD_PROJECT_LOCKS: HashMap<String, Arc<Mutex<()>>> — per-project mutex (prevents concurrent Dolt SIGSEGV)
-CLI_BINARY: Mutex<String> ("bd")             — configurable CLI binary
-CLI_CLIENT_INFO: Mutex<Option<(CliClient, u32, u32, u32)>> — cached version
-BACKEND_MODE: Mutex<String> ("bd")           — active backend (bd/br/built-in)
-TRACKER_ENGINES: HashMap<String, tracker::Engine> — per-project engine pool
+LOGGING_ENABLED: AtomicBool (false)          (logging.rs)
+VERBOSE_LOGGING: AtomicBool (false)          (logging.rs)
+LAST_SYNC_TIME: Mutex<Option<Instant>>       — sync cooldown (migration.rs)
+LAST_KNOWN_MTIME: HashMap<String, SystemTime> — per-project mtime cache (polling.rs)
+BD_PROJECT_LOCKS: HashMap<String, Arc<Mutex<()>>> — per-project mutex, prevents concurrent Dolt SIGSEGV (cli.rs)
+CLI_BINARY: Mutex<String> ("bd")             — configurable CLI binary (config.rs)
+CLI_CLIENT_INFO: Mutex<Option<(CliClient, u32, u32, u32)>> — cached version (cli.rs)
+PROBE_CHILD: Mutex<Option<Child>>            — launched probe process (probe.rs)
+Watcher state (watcher.rs)                   — active notify debouncer + watched path
 ```
 
 ---
@@ -386,24 +368,16 @@ TRACKER_ENGINES: HashMap<String, tracker::Engine> — per-project engine pool
 
 ```
 User Action → Vue Component → Composable → bd-api.ts → Tauri invoke()
-  → Rust Command → bd CLI or tracker::Engine → .beads/ or .tracker/ SQLite
+  → Rust Command (module) → execute_bd → bd/br CLI subprocess → .beads/
   → JSON response → Rust transform → Frontend state → Reactive UI update
 
-Backend routing (bd_poll_data, bd_check_changed, etc.):
-  is_builtin_backend() → with_engine() → tracker::Engine (direct rusqlite)
-  else → bd/br CLI subprocess → parse JSON output
-
 Change Detection (useChangeDetection — native file watcher):
-  .beads/ or .tracker/ change → notify crate → Tauri event → watcher backend
+  .beads/ change → notify crate (watcher.rs) → Tauri event → watcher backend
     → pollForChanges() → bdPollData() → refresh all data
 
 Polling: useAdaptivePolling → bdCheckChanged() (mtime) → if changed → bdPollData()
   → useIssues + useDashboard update
   (30s safety-net when change detection active, 5s/1s fallback otherwise)
-
-Git Sync (built-in backend):
-  trackerSync() → export JSONL → git add/commit → pull --rebase
-    → import JSONL (last-write-wins) → detect conflicts → push
 ```
 
 ---
