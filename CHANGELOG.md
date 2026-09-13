@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.24.5] - 2026-09-13
 
 > Targets **bd 1.x**. bd < 1.0 is legacy and should trigger a warning. **br** remains supported as a secondary CLI.
 
@@ -11,11 +11,17 @@
 - **Legacy bd warning** (#6): `check_bd_compatibility` now reports `found`, `legacy`, `minSupportedMajor`, and `searchedPaths`; a dismissible banner under the header (and the Settings dialog) warns when bd < 1.0 or br is in use. Dismissal is remembered per binary + version and reappears after an upgrade or switch
 - **"CLI not found" notice** (#10): when neither `bd` nor `br` resolves, a non-dismissible banner explains what was searched and links to Settings instead of silently showing empty lists. Startup logs the searched directories
 - **Frontend default CLI aligned to `bd`** (#10) to match the backend fallback
+- **Issue history navigation** (#2, #24): back/forward buttons and an MRU history list in issue details
+- **Custom fields panel** (#3, #26): issue metadata keys shown as typed custom fields, including a view of bd `ado.*` fields
 
 ### Internal
+- **CI on Ubuntu, Windows, and macOS** (#22): frontend and backend gates run on all three
+- **Azure DevOps scheduling mapping** (#28): `docs/azure-devops-mapping.md`
+- **Refactor review findings** (#32): `docs/crate-split-refactor-issues.md` records the review of the module split
 - **Rust backend split into modules.** `src-tauri/src/lib.rs` (6.5k lines) is now a 155-line Tauri entry point plus 15 modules (`cli`, `config`, `types`, `issues`, `issue_commands`, `polling`, `migration`, `attachments`, `attachment_refs`, `updates`, `watcher`, `probe`, `logging`, `fs_commands`, `test_support`). Pure code motion: same 65 commands, same behaviour. Unit tests grew from 63 to 136 ahead of the move, covering the normalizers, `transform_issue` dependency branches, attachment helpers, update-checker logic, and the version gates via pure `_for` cores
 
 ### Fixes
+- **Issues no longer vanish when bd returns JSON-object metadata** (#7, #23)
 - **`bd --version` probes always run from the temp dir** so a version check can never trigger bd auto-migration in the app's working directory
 - **CLI not detected on GUI launch**: the `--version` probe now runs with the extended PATH, so opening the app from Finder/Dock finds Homebrew-installed CLIs instead of failing with "not found or not executable"
 
