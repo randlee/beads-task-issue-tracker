@@ -12,6 +12,9 @@
 - **"CLI not found" notice** (#10): when neither `bd` nor `br` resolves, a non-dismissible banner explains what was searched and links to Settings instead of silently showing empty lists. Startup logs the searched directories
 - **Frontend default CLI aligned to `bd`** (#10) to match the backend fallback
 
+### Internal
+- **Rust backend split into modules.** `src-tauri/src/lib.rs` (6.5k lines) is now a 155-line Tauri entry point plus 15 modules (`cli`, `config`, `types`, `issues`, `issue_commands`, `polling`, `migration`, `attachments`, `attachment_refs`, `updates`, `watcher`, `probe`, `logging`, `fs_commands`, `test_support`). Pure code motion: same 65 commands, same behaviour. Unit tests grew from 63 to 136 ahead of the move, covering the normalizers, `transform_issue` dependency branches, attachment helpers, update-checker logic, and the version gates via pure `_for` cores
+
 ### Fixes
 - **`bd --version` probes always run from the temp dir** so a version check can never trigger bd auto-migration in the app's working directory
 - **CLI not detected on GUI launch**: the `--version` probe now runs with the extended PATH, so opening the app from Finder/Dock finds Homebrew-installed CLIs instead of failing with "not found or not executable"
