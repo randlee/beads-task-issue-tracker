@@ -1144,11 +1144,17 @@ fn get_cli_client_info() -> Option<(CliClient, u32, u32, u32)> {
 /// - bd < 0.50.0: YES
 /// - bd >= 0.50.0: NO (daemon removed)
 /// - unknown: NO (safe default)
+fn supports_daemon_flag_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
+    match client {
+        CliClient::Br => false, // br has no daemon
+        CliClient::Bd => major == 0 && minor < 50,
+        CliClient::Unknown => false,
+    }
+}
+
 fn supports_daemon_flag() -> bool {
     match get_cli_client_info() {
-        Some((CliClient::Br, _, _, _)) => false, // br has no daemon
-        Some((CliClient::Bd, major, minor, _)) => major == 0 && minor < 50,
-        Some((CliClient::Unknown, _, _, _)) => false,
+        Some((client, major, minor, patch)) => supports_daemon_flag_for(client, major, minor, patch),
         None => false,
     }
 }
@@ -1158,11 +1164,17 @@ fn supports_daemon_flag() -> bool {
 /// - bd < 0.50.0: YES
 /// - bd >= 0.50.0: NO (Dolt only)
 /// - unknown: NO (safe default)
+fn uses_jsonl_files_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
+    match client {
+        CliClient::Br => true, // br always uses JSONL
+        CliClient::Bd => major == 0 && minor < 50,
+        CliClient::Unknown => false,
+    }
+}
+
 fn uses_jsonl_files() -> bool {
     match get_cli_client_info() {
-        Some((CliClient::Br, _, _, _)) => true, // br always uses JSONL
-        Some((CliClient::Bd, major, minor, _)) => major == 0 && minor < 50,
-        Some((CliClient::Unknown, _, _, _)) => false,
+        Some((client, major, minor, patch)) => uses_jsonl_files_for(client, major, minor, patch),
         None => false,
     }
 }
@@ -1173,11 +1185,18 @@ fn uses_jsonl_files() -> bool {
 /// - bd >= 0.55.0: YES
 /// - bd < 0.55.0: NO (use 2 separate calls instead)
 /// - unknown: NO (safe default)
+fn supports_list_all_flag_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
+    match client {
+        CliClient::Bd => major > 0 || minor >= 55,
+        CliClient::Br => true, // br always supports --all
+        CliClient::Unknown => false,
+    }
+}
+
 fn supports_list_all_flag() -> bool {
     match get_cli_client_info() {
-        Some((CliClient::Bd, major, minor, _)) => major > 0 || minor >= 55,
-        Some((CliClient::Br, _, _, _)) => true, // br always supports --all
-        _ => false,
+        Some((client, major, minor, patch)) => supports_list_all_flag_for(client, major, minor, patch),
+        None => false,
     }
 }
 
@@ -1187,10 +1206,17 @@ fn supports_list_all_flag() -> bool {
 /// - bd < 0.50.0: YES
 /// - bd >= 0.50.0: NO (only --force needed)
 /// - unknown: NO (safe default)
+fn supports_delete_hard_flag_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
+    match client {
+        CliClient::Bd => major == 0 && minor < 50,
+        _ => false,
+    }
+}
+
 fn supports_delete_hard_flag() -> bool {
     match get_cli_client_info() {
-        Some((CliClient::Bd, major, minor, _)) => major == 0 && minor < 50,
-        _ => false,
+        Some((client, major, minor, patch)) => supports_delete_hard_flag_for(client, major, minor, patch),
+        None => false,
     }
 }
 
@@ -1199,11 +1225,17 @@ fn supports_delete_hard_flag() -> bool {
 /// - bd >= 0.50.0: YES (Dolt only)
 /// - bd < 0.50.0: NO (SQLite+JSONL)
 /// - unknown: NO (safe default)
+fn uses_dolt_backend_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
+    match client {
+        CliClient::Br => false, // br never uses Dolt
+        CliClient::Bd => major > 0 || minor >= 50,
+        CliClient::Unknown => false,
+    }
+}
+
 fn uses_dolt_backend() -> bool {
     match get_cli_client_info() {
-        Some((CliClient::Br, _, _, _)) => false, // br never uses Dolt
-        Some((CliClient::Bd, major, minor, _)) => major > 0 || minor >= 50,
-        Some((CliClient::Unknown, _, _, _)) => false,
+        Some((client, major, minor, patch)) => uses_dolt_backend_for(client, major, minor, patch),
         None => false,
     }
 }
@@ -6411,5 +6443,122 @@ mod tests {
         assert!(components.len() >= 2);
         assert_eq!(components[components.len() - 1], "settings.json");
         assert_eq!(components[components.len() - 2], "com.beads.manager");
+    }
+
+    // ---- Version-gate helpers (#7) -----------------------------------------------
+
+    #[test]
+    fn supports_daemon_flag_table_driven() {
+        // (client, major, minor, patch, expected)
+        let cases = vec![
+            (CliClient::Bd, 0, 49, 6, true),   // bd 0.49.6: 0 < 50
+            (CliClient::Bd, 0, 50, 0, false),  // bd 0.50.0: 0 !< 50
+            (CliClient::Bd, 0, 52, 0, false),  // bd 0.52.0
+            (CliClient::Bd, 0, 55, 0, false),  // bd 0.55.0
+            (CliClient::Bd, 0, 56, 0, false),  // bd 0.56.0
+            (CliClient::Bd, 1, 0, 4, false),   // bd 1.0.4: major != 0
+            (CliClient::Bd, 1, 2, 1, false),   // bd 1.2.1
+            (CliClient::Br, 0, 1, 33, false),  // br 0.1.33: always false
+            (CliClient::Unknown, 0, 0, 0, false), // Unknown: always false
+        ];
+
+        for (client, major, minor, patch, expected) in cases {
+            let result = supports_daemon_flag_for(client, major, minor, patch);
+            assert_eq!(result, expected,
+                "supports_daemon_flag_for({:?}, {}.{}.{}) should be {}",
+                client, major, minor, patch, expected);
+        }
+    }
+
+    #[test]
+    fn uses_jsonl_files_table_driven() {
+        // (client, major, minor, patch, expected)
+        let cases = vec![
+            (CliClient::Bd, 0, 49, 6, true),   // bd 0.49.6: major==0 && minor < 50
+            (CliClient::Bd, 0, 50, 0, false),  // bd 0.50.0: minor !< 50
+            (CliClient::Bd, 0, 52, 0, false),  // bd 0.52.0
+            (CliClient::Bd, 0, 55, 0, false),  // bd 0.55.0
+            (CliClient::Bd, 0, 56, 0, false),  // bd 0.56.0
+            (CliClient::Bd, 1, 0, 4, false),   // bd 1.0.4: major != 0
+            (CliClient::Bd, 1, 2, 1, false),   // bd 1.2.1
+            (CliClient::Br, 0, 1, 33, true),   // br 0.1.33: always true
+            (CliClient::Unknown, 0, 0, 0, false), // Unknown: always false
+        ];
+
+        for (client, major, minor, patch, expected) in cases {
+            let result = uses_jsonl_files_for(client, major, minor, patch);
+            assert_eq!(result, expected,
+                "uses_jsonl_files_for({:?}, {}.{}.{}) should be {}",
+                client, major, minor, patch, expected);
+        }
+    }
+
+    #[test]
+    fn supports_list_all_flag_table_driven() {
+        // (client, major, minor, patch, expected)
+        let cases = vec![
+            (CliClient::Bd, 0, 49, 6, false),  // bd 0.49.6: major !> 0 && minor !>= 55
+            (CliClient::Bd, 0, 50, 0, false),  // bd 0.50.0
+            (CliClient::Bd, 0, 52, 0, false),  // bd 0.52.0
+            (CliClient::Bd, 0, 55, 0, true),   // bd 0.55.0: minor >= 55
+            (CliClient::Bd, 0, 56, 0, true),   // bd 0.56.0: minor >= 55
+            (CliClient::Bd, 1, 0, 4, true),    // bd 1.0.4: major > 0
+            (CliClient::Bd, 1, 2, 1, true),    // bd 1.2.1: major > 0
+            (CliClient::Br, 0, 1, 33, true),   // br 0.1.33: always true
+            (CliClient::Unknown, 0, 0, 0, false), // Unknown: always false
+        ];
+
+        for (client, major, minor, patch, expected) in cases {
+            let result = supports_list_all_flag_for(client, major, minor, patch);
+            assert_eq!(result, expected,
+                "supports_list_all_flag_for({:?}, {}.{}.{}) should be {}",
+                client, major, minor, patch, expected);
+        }
+    }
+
+    #[test]
+    fn supports_delete_hard_flag_table_driven() {
+        // (client, major, minor, patch, expected)
+        let cases = vec![
+            (CliClient::Bd, 0, 49, 6, true),   // bd 0.49.6: major==0 && minor < 50
+            (CliClient::Bd, 0, 50, 0, false),  // bd 0.50.0: minor !< 50
+            (CliClient::Bd, 0, 52, 0, false),  // bd 0.52.0
+            (CliClient::Bd, 0, 55, 0, false),  // bd 0.55.0
+            (CliClient::Bd, 0, 56, 0, false),  // bd 0.56.0
+            (CliClient::Bd, 1, 0, 4, false),   // bd 1.0.4: major != 0
+            (CliClient::Bd, 1, 2, 1, false),   // bd 1.2.1
+            (CliClient::Br, 0, 1, 33, false),  // br 0.1.33: always false
+            (CliClient::Unknown, 0, 0, 0, false), // Unknown: always false
+        ];
+
+        for (client, major, minor, patch, expected) in cases {
+            let result = supports_delete_hard_flag_for(client, major, minor, patch);
+            assert_eq!(result, expected,
+                "supports_delete_hard_flag_for({:?}, {}.{}.{}) should be {}",
+                client, major, minor, patch, expected);
+        }
+    }
+
+    #[test]
+    fn uses_dolt_backend_table_driven() {
+        // (client, major, minor, patch, expected)
+        let cases = vec![
+            (CliClient::Bd, 0, 49, 6, false),  // bd 0.49.6: major !> 0 && minor !>= 50
+            (CliClient::Bd, 0, 50, 0, true),   // bd 0.50.0: minor >= 50
+            (CliClient::Bd, 0, 52, 0, true),   // bd 0.52.0: minor >= 50
+            (CliClient::Bd, 0, 55, 0, true),   // bd 0.55.0: minor >= 50
+            (CliClient::Bd, 0, 56, 0, true),   // bd 0.56.0: minor >= 50
+            (CliClient::Bd, 1, 0, 4, true),    // bd 1.0.4: major > 0
+            (CliClient::Bd, 1, 2, 1, true),    // bd 1.2.1: major > 0
+            (CliClient::Br, 0, 1, 33, false),  // br 0.1.33: always false
+            (CliClient::Unknown, 0, 0, 0, false), // Unknown: always false
+        ];
+
+        for (client, major, minor, patch, expected) in cases {
+            let result = uses_dolt_backend_for(client, major, minor, patch);
+            assert_eq!(result, expected,
+                "uses_dolt_backend_for({:?}, {}.{}.{}) should be {}",
+                client, major, minor, patch, expected);
+        }
     }
 }
