@@ -208,11 +208,7 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
                 .flush(LOG_IO_TIMEOUT)
                 .map_err(|e| format!("Failed to flush logs: {e}"))?;
         } // None: logger not installed (before setup) or already taken at exit — no flush.
-        if log_path.as_os_str().is_empty() || !log_path.exists() {
-            return Ok(());
-        }
-        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {e}"))?;
-        remove_rotated_logs(&log_path)?;
+        clear_log_files(&log_path, read_log_dir).map_err(|e| e.to_string())?;
         log_info!("[debug] Logs cleared");
         Ok(())
     })
@@ -220,25 +216,111 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
     .map_err(|e| format!("Failed to clear logs: {e}"))?
 }
 
+/// Why clearing the log files failed; rendered into `clear_logs`'s `Err(String)`.
+#[derive(Debug)]
+pub(crate) enum ClearError {
+    /// Truncating the active JSONL file failed.
+    Truncate { source: std::io::Error },
+    /// The log directory could not be opened for listing.
+    ListDir { source: std::io::Error },
+    /// One directory entry could not be read while listing.
+    ReadDirEntry { source: std::io::Error },
+    /// A rotated `<active>.<N>` file could not be removed.
+    RemoveRotated {
+        file_name: String,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for ClearError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Truncate { source } => write!(f, "Failed to clear logs: {source}"),
+            Self::ListDir { source } => write!(f, "Failed to list log dir: {source}"),
+            Self::ReadDirEntry { source } => write!(f, "Failed to read log dir entry: {source}"),
+            Self::RemoveRotated { file_name, source } => {
+                write!(f, "Failed to remove rotated log {file_name}: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ClearError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Truncate { source }
+            | Self::ListDir { source }
+            | Self::ReadDirEntry { source }
+            | Self::RemoveRotated { source, .. } => Some(source),
+        }
+    }
+}
+
+/// One directory entry, as `remove_rotated_logs` needs it.
+#[derive(Debug)]
+struct LogDirEntry {
+    file_name: std::ffi::OsString,
+    path: PathBuf,
+}
+
+/// Lists `dir` with `fs::read_dir`; the production reader for [`clear_log_files`].
+fn read_log_dir(dir: &Path) -> std::io::Result<impl Iterator<Item = std::io::Result<LogDirEntry>>> {
+    Ok(fs::read_dir(dir)?.map(|entry| {
+        entry.map(|entry| LogDirEntry {
+            file_name: entry.file_name(),
+            path: entry.path(),
+        })
+    }))
+}
+
+/// Truncates the active file and deletes its rotated siblings.
+///
+/// A missing or empty `log_path` is a no-op. `list_dir` is the directory reader
+/// (`read_log_dir` in production; tests inject entry errors).
+fn clear_log_files<I>(
+    log_path: &Path,
+    list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<(), ClearError>
+where
+    I: IntoIterator<Item = std::io::Result<LogDirEntry>>,
+{
+    if log_path.as_os_str().is_empty() || !log_path.exists() {
+        return Ok(());
+    }
+    fs::write(log_path, "").map_err(|source| ClearError::Truncate { source })?;
+    remove_rotated_logs(log_path, list_dir)
+}
+
 /// Deletes `<active file name>.<N>` siblings, the names sc-observability rotates to.
-fn remove_rotated_logs(active: &Path) -> Result<(), String> {
+///
+/// Every entry result is checked: an entry that cannot be read fails the clear
+/// with [`ClearError::ReadDirEntry`] instead of being skipped.
+fn remove_rotated_logs<I>(
+    active: &Path,
+    list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<(), ClearError>
+where
+    I: IntoIterator<Item = std::io::Result<LogDirEntry>>,
+{
     let (Some(dir), Some(name)) = (active.parent(), active.file_name().and_then(|n| n.to_str()))
     else {
         return Ok(());
     };
     let prefix = format!("{name}.");
-    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to list log dir: {e}"))?;
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(candidate) = file_name.to_str() else {
-            continue;
+    let entries = list_dir(dir).map_err(|source| ClearError::ListDir { source })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| ClearError::ReadDirEntry { source })?;
+        let Some(candidate) = entry.file_name.to_str() else {
+            continue; // rotated names are always UTF-8 (`<active>.<N>`)
         };
         let is_rotated = candidate
             .strip_prefix(prefix.as_str())
             .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()));
         if is_rotated {
-            fs::remove_file(entry.path())
-                .map_err(|e| format!("Failed to remove rotated log {candidate}: {e}"))?;
+            fs::remove_file(&entry.path).map_err(|source| ClearError::RemoveRotated {
+                file_name: candidate.to_owned(),
+                source,
+            })?;
         }
     }
     Ok(())
@@ -420,7 +502,7 @@ mod tests {
             .join("beads-task-issue-tracker.log.jsonl.bak");
         fs::write(&unrelated, "kept")?;
 
-        remove_rotated_logs(&active)?;
+        remove_rotated_logs(&active, read_log_dir).map_err(|e| e.to_string())?;
 
         assert!(active.exists(), "the active file must not be removed");
         assert!(!rotated_one.exists(), "rotated.1 must be removed");
@@ -438,8 +520,64 @@ mod tests {
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
         fs::write(&active, "active")?;
 
-        assert_eq!(remove_rotated_logs(&active), Ok(()));
+        remove_rotated_logs(&active, read_log_dir).map_err(|e| e.to_string())?;
         assert!(active.exists());
+        Ok(())
+    }
+
+    /// R-A4-002: an unreadable directory entry fails the clear instead of being skipped.
+    #[test]
+    fn clear_log_files_reports_a_directory_entry_error() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("entry-error")?;
+        let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
+        fs::write(&active, "active")?;
+        let rotated = scratch.path().join("beads-task-issue-tracker.log.jsonl.1");
+        fs::write(&rotated, "rotated")?;
+        let left_behind = scratch.path().join("beads-task-issue-tracker.log.jsonl.2");
+        fs::write(&left_behind, "rotated")?;
+        let rotated_entry = LogDirEntry {
+            file_name: "beads-task-issue-tracker.log.jsonl.1".into(),
+            path: rotated.clone(),
+        };
+        let failing_reader = move |_: &Path| -> std::io::Result<Vec<std::io::Result<LogDirEntry>>> {
+            Ok(vec![
+                Ok(rotated_entry),
+                Err(std::io::Error::other("injected entry failure")),
+            ])
+        };
+
+        let result = clear_log_files(&active, failing_reader);
+
+        let Err(ClearError::ReadDirEntry { source }) = result else {
+            return Err(TestError(format!("expected ReadDirEntry, got {result:?}")));
+        };
+        assert_eq!(source.to_string(), "injected entry failure");
+        // The command's Err(String) carries the failure to the frontend.
+        let rendered = ClearError::ReadDirEntry { source }.to_string();
+        assert_eq!(
+            rendered,
+            "Failed to read log dir entry: injected entry failure"
+        );
+        assert!(
+            !rotated.exists(),
+            "entries before the failure are processed"
+        );
+        assert!(
+            left_behind.exists(),
+            "the clear stopped at the failing entry"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clear_log_files_reports_a_listing_error() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("list-error")?;
+        let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
+        fs::write(&active, "active")?;
+        let result = clear_log_files(&active, |_: &Path| {
+            Err::<Vec<std::io::Result<LogDirEntry>>, _>(std::io::Error::other("no listing"))
+        });
+        assert!(matches!(result, Err(ClearError::ListDir { .. })));
         Ok(())
     }
 }
