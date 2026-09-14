@@ -16,7 +16,7 @@ use sc_observability::TryLogError;
 use sc_observability_types::LevelFilter;
 
 use crate::__private::EventParts;
-use crate::{DropCause, DroppedEvents, FlushError, ShutdownError};
+use crate::{BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, health};
 
 /// Everything the emit path needs, shared behind one `Arc`.
 pub(crate) struct Installed {
@@ -32,6 +32,31 @@ pub(crate) static INSTALLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static THRESHOLD: AtomicU8 = AtomicU8::new(THRESHOLD_OFF);
 
 pub(crate) const THRESHOLD_OFF: u8 = 0;
+
+/// Encoded [`BridgeLifecycle`]; `Stopped` until `init` succeeds (no guard exists before).
+static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_STOPPED);
+const LIFECYCLE_RUNNING: u8 = 0;
+const LIFECYCLE_SHUTTING_DOWN: u8 = 1;
+const LIFECYCLE_STOPPED: u8 = 2;
+
+/// Publishes a lifecycle transition; read lock-free by health snapshots.
+pub(crate) fn set_lifecycle(lifecycle: BridgeLifecycle) {
+    let encoded = match lifecycle {
+        BridgeLifecycle::Running => LIFECYCLE_RUNNING,
+        BridgeLifecycle::ShuttingDown => LIFECYCLE_SHUTTING_DOWN,
+        BridgeLifecycle::Stopped => LIFECYCLE_STOPPED,
+    };
+    LIFECYCLE.store(encoded, Ordering::SeqCst);
+}
+
+/// Current lifecycle phase.
+pub(crate) fn lifecycle() -> BridgeLifecycle {
+    match LIFECYCLE.load(Ordering::SeqCst) {
+        LIFECYCLE_RUNNING => BridgeLifecycle::Running,
+        LIFECYCLE_SHUTTING_DOWN => BridgeLifecycle::ShuttingDown,
+        _ => BridgeLifecycle::Stopped,
+    }
+}
 
 static QUEUE_FULL: AtomicU64 = AtomicU64::new(0);
 static INVALID_EVENT: AtomicU64 = AtomicU64::new(0);
@@ -268,7 +293,11 @@ pub(crate) fn shutdown_installed(
             return Err(ShutdownStep::StillShared);
         };
         let flushed = sole.logger.flush();
-        let _stopped = sole.logger.shutdown();
+        let stopped = sole.logger.shutdown();
+        // Final health for post-shutdown snapshots (writer state `Stopped`).
+        if let Some(report) = health::read_report(&stopped) {
+            health::store_final_report(report);
+        }
         flushed.map_err(|source| ShutdownStep::FinalFlush { source })
     });
     match outcome {
@@ -283,14 +312,20 @@ pub(crate) fn shutdown_installed(
 }
 
 /// `LogGuard::shutdown` and `Drop for LogGuard` both call this once.
+///
+/// The lifecycle is `ShuttingDown` from the first statement and `Stopped` once
+/// this returns, whatever the result.
 pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> {
+    set_lifecycle(BridgeLifecycle::ShuttingDown);
     THRESHOLD.store(THRESHOLD_OFF, Ordering::SeqCst);
     log::set_max_level(log::LevelFilter::Off);
     let taken = SLOT.write().unwrap_or_else(PoisonError::into_inner).take();
-    match taken {
+    let result = match taken {
         Some(installed) => shutdown_installed(installed, timeout),
         None => Ok(()),
-    }
+    };
+    set_lifecycle(BridgeLifecycle::Stopped);
+    result
 }
 
 /// Clones the installed `Arc` out of the slot; the read lock is held only for the clone.

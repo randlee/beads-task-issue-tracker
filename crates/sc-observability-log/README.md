@@ -68,6 +68,27 @@ therefore silent. Call `LogGuard::shutdown(timeout)` explicitly, and act on
 its `Result`, whenever the outcome matters (for example at a controlled
 process exit).
 
+## Health
+
+`LogGuard::health()` returns a read-only `BridgeHealth` snapshot: bridge
+lifecycle (`running` / `shutting_down` / `stopped`), aggregate state, writer
+state, queue depth, capacity and high-water mark, the last writer error and
+last error (each with its stable `ErrorCode` and a `Remediation`), file-sink
+status with the active JSONL path, console-sink status, and the dropped-event
+counters. It never blocks on I/O and never panics, and it can be called from
+any thread.
+
+`LogGuard::handle()` returns a `LogHandle`: `Copy`, non-owning, and unable to
+shut the logger down. `LogHandle::health()` keeps working after shutdown and
+then reports `lifecycle: stopped`, `state: unavailable` and the final health of
+the stopped logger. The `LogGuard` stays the single lifecycle owner.
+
+Every health type is `serde`-serializable. States are `snake_case` string
+enums and the shape is versioned by `BRIDGE_HEALTH_SCHEMA_VERSION` (carried as
+`schema_version`), so generated bindings never parse free-form text. Field
+semantics and the code-to-remediation table are in
+[`docs/mapping.md`](docs/mapping.md#health).
+
 ## Lockstep and `__private` policy
 
 `sc-observability-log` depends on `sc-observability-log-macros` through an exact

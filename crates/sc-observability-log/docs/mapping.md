@@ -67,6 +67,47 @@ Implementation notes:
 - **Why `AssertUnwindSafe`:** it is required because `Logger` holds `dyn LogSink`, `dyn Redactor` and `dyn ProcessIdentityResolver`, which are not `RefUnwindSafe`. Without the wrapper the closure fails with E0277 (compiled on 1.94.1). The assertion is sound: after a caught panic the bridge reads no logger state except by calling `try_log` again, and sc-observability reports its own poisoned mutexes by panicking again, which is caught and counted the same way.
 - **Reentrancy:** `submit_guarded` first enters an `EmitScope`, a guard over `thread_local! { static IN_EMIT: Cell<bool> = const { Cell::new(false) } }`. The flag is read and written only with `LocalKey::try_with`, never `with`, and it is cleared in `Drop`, so it is also cleared while a panic unwinds. A call to `emit` while the flag is set on the same thread returns at once and is counted as `ReentrantEmit`. Examples are a panic hook that logs while `try_log` panics, or a sink or redactor that logs through `log`. A `try_with` `AccessError` is also treated as reentrant. It cannot occur for a `const` `Cell<bool>`, which has no destructor, but it is handled without panicking.
 
+## Health
+
+Implemented in `src/health.rs`; returned by `LogGuard::health()` and
+`LogHandle::health()` (R-A4-004). `BridgeHealth` is a bridge-owned projection:
+it never exposes `sc_observability::Logger`.
+
+| `BridgeHealth` field | Source |
+|---|---|
+| `schema_version` | `BRIDGE_HEALTH_SCHEMA_VERSION` (1) |
+| `lifecycle` | bridge lifecycle: `Running` after `init`; `ShuttingDown` from the first step of `shutdown`/`Drop`; `Stopped` once that sequence returns, whatever its result |
+| `state` | `LoggingHealthReport.state` (`Healthy` → `Healthy`, `DegradedDropping` → `Degraded`, `Unavailable` → `Unavailable`) while `Running`; `Unavailable` otherwise, or when no report could be read |
+| `logger` | `None` when `Logger::health()` panicked (sc-observability 1.2.0 `expect`s on its mutexes; the panic is caught) or when shutdown did not reach `Logger::shutdown`; otherwise `writer_state` (`WriterState`), `queue` (`queue_depth`, `queue_capacity`, `queue_high_water_mark`, `queue_full_drops_total`), `last_writer_error`, `last_error`, `dropped_events_total`, `flush_errors_total` |
+| `file_sink` | `status`: `Disabled` when `enable_file_sink` is false, else the `jsonl-file` sink state while `Running` and `Unavailable` afterwards; `active_log_path` as captured at `init` (`None` when disabled); the sink's `last_error` |
+| `console_sink` | the same for the `console` sink, without a path |
+| `dropped_events` | the bridge's `DroppedEvents` counters (as `LogGuard::dropped_events()`) |
+
+- **Reading:** a snapshot clones the installed `Arc` under the slot read lock
+  and calls `Logger::health()` inside `catch_unwind`. After the slot has been
+  emptied by shutdown it returns the report read from the stopped logger right
+  after `Logger::shutdown`, stored once by the shutdown helper.
+- **Serialization:** every type derives `Serialize` and `Deserialize`. Enums
+  are unit variants serialized as `snake_case` strings; `ErrorCode` is its
+  stable string; `Remediation` keeps sc-observability's own representation, an object
+  internally tagged by `"kind"` (`"recoverable"` with its ordered `steps`, or
+  `"not_recoverable"` with a `justification`); `Timestamp` is
+  RFC 3339 UTC; `active_log_path` is a string (a non-UTF-8 path fails to
+  serialize instead of being altered). Structs are `#[non_exhaustive]`.
+- **Remediation:** `DiagnosticSummary` carries no remediation, so
+  `HealthDiagnostic.remediation` is chosen by code:
+
+| code | remediation |
+|---|---|
+| `SC_OBSERVABILITY_LOGGER_QUEUE_FULL` | recoverable: reduce logging pressure or increase `LoggerConfig.queue_capacity`; inspect `queue.depth` and `high_water_mark` |
+| `SC_OBSERVABILITY_LOGGER_WRITER_DEGRADED` | recoverable: restart the process (the bridge cannot reinstall the logger in-process); inspect `logger.last_writer_error` |
+| `SC_OBSERVABILITY_LOGGER_FLUSH_FAILED` | recoverable: inspect the writer-thread flush failure; retry the flush after the writer recovers |
+| `SC_OBSERVABILITY_LOGGER_SINK_WRITE_FAILED` | recoverable: check that the log directory exists, is writable and has free space |
+| `SC_OBSERVABILITY_LOGGER_SHUTDOWN_TIMED_OUT` | not recoverable: still-queued events may be lost |
+| `SC_OBSERVABILITY_LOGGER_SHUTDOWN` | not recoverable: the logger has shut down |
+| `SC_OBSERVABILITY_LOGGER_MAINTENANCE_FAILED`, `..._MAINTENANCE_JOIN_TIMEOUT`, `..._MAINTENANCE_WORKER_FAILED` | not recoverable: handled by the logger runtime |
+| no code, or any other code | not recoverable: report the diagnostic upstream |
+
 ## Error inventory
 
 Codes live in `src/error_codes.rs` with an `ALL` slice.

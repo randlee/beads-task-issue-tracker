@@ -43,6 +43,7 @@ mod callsite;
 mod context;
 mod error;
 mod handle;
+mod health;
 mod mapping;
 
 use std::path::{Path, PathBuf};
@@ -53,12 +54,17 @@ use std::time::Duration;
 #[doc(inline)]
 pub use error::{DropCause, FlushError, InitError, ShutdownError};
 #[doc(inline)]
+pub use health::{
+    BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealth, BridgeHealthState, BridgeLifecycle, FileSinkHealth,
+    HealthDiagnostic, LoggerHealth, QueueHealth, SinkHealthSnapshot, SinkStatus, WriterStatus,
+};
+#[doc(inline)]
 pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
 #[doc(inline)]
 pub use sc_observability_types::{
     ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
-    TargetCategory,
+    TargetCategory, Timestamp,
 };
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
@@ -122,8 +128,9 @@ pub struct BridgeOptions {
 
 /// Snapshot of dropped-event counters, keyed by [`DropCause`].
 ///
-/// The derives are pinned by `tests/api_freeze.rs`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The derives are pinned by `tests/api_freeze.rs`. It serializes as an object
+/// with one `u64` per cause, keyed by the `snake_case` cause name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DroppedEvents {
     queue_full: u64,
     invalid_event: u64,
@@ -227,6 +234,43 @@ impl LogGuard {
     pub fn active_log_path(&self) -> Option<&Path> {
         self.active_log_path.as_deref()
     }
+
+    /// Read-only health snapshot of the bridge and its logger.
+    ///
+    /// Never blocks on I/O or the writer queue and never panics. See
+    /// [`BridgeHealth`] for the fields, thread safety and post-shutdown contract.
+    #[must_use]
+    pub fn health(&self) -> BridgeHealth {
+        health::snapshot()
+    }
+
+    /// A cloneable, non-owning [`LogHandle`] for this bridge.
+    ///
+    /// The handle does not keep the logger alive and cannot shut it down, so it may
+    /// outlive the guard; use it where the guard's single owner must not be shared.
+    #[must_use]
+    pub fn handle(&self) -> LogHandle {
+        LogHandle { _private: () }
+    }
+}
+
+/// Cloneable, non-owning access to the installed bridge; it cannot shut it down.
+///
+/// Obtained with [`LogGuard::handle`]. The `LogGuard` remains the only lifecycle
+/// owner: a handle holds no reference to the logger, so dropping or keeping one
+/// never delays or triggers shutdown, and every method keeps its defined result
+/// after the guard has shut down.
+#[derive(Debug, Clone, Copy)]
+pub struct LogHandle {
+    _private: (),
+}
+
+impl LogHandle {
+    /// Read-only health snapshot; identical to [`LogGuard::health`], also after shutdown.
+    #[must_use]
+    pub fn health(&self) -> BridgeHealth {
+        health::snapshot()
+    }
 }
 
 impl Drop for LogGuard {
@@ -272,10 +316,11 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             return Err(InitError::IdentityResolution { source });
         }
     };
-    let (level, service, enable_file_sink) = (
+    let (level, service, enable_file_sink, enable_console_sink) = (
         config.level,
         config.service_name.clone(),
         config.enable_file_sink,
+        config.enable_console_sink,
     );
     let logger = match sc_observability::Logger::new(config) {
         Ok(logger) => logger,
@@ -300,7 +345,13 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
     }
     // Install order: slot, then threshold, then the facade level. Records arriving
     // before the last step are filtered by the facade's initial `Off` level.
+    health::set_sink_config(health::SinkConfig {
+        file_enabled: enable_file_sink,
+        console_enabled: enable_console_sink,
+        active_log_path: active_log_path.clone(),
+    });
     *SLOT.write().unwrap_or_else(PoisonError::into_inner) = Some(installed);
+    handle::set_lifecycle(BridgeLifecycle::Running);
     THRESHOLD.store(handle::encode_threshold(level), Ordering::SeqCst);
     log::set_max_level(handle::to_log_level_filter(level));
     Ok(LogGuard {
