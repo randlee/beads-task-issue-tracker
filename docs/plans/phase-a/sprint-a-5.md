@@ -87,7 +87,7 @@ silently dropped or partially deferred.
    - errors are discriminated-union enums with per-variant `code()`/`remediation()`, differing from sc-observability's `error_wrapper!` convention
    - the no-panic lint set (`unwrap_used`, `expect_used`, `panic`, `unreachable`, `todo`, `unimplemented`, `indexing_slicing` = `deny`) and the per-crate `clippy.toml` test allowances, which sc-observability's own crates do not use
    - `catch_unwind` around `Logger::try_log` and helper-thread containment of `flush`/`shutdown`, which exist because sc-observability 1.2.0 has `expect` on internal mutexes and unbounded flush/join
-   - `ProcessIdentityPolicy::Auto` resolving `hostname = None` (std has no hostname API)
+   - `ProcessIdentityPolicy::Auto` resolving `hostname = None` (std has no hostname API) (superseded by R-A5-008: `Auto` now resolves a non-empty OS hostname plus the PID)
    - the exact `=` version pin between the two crates and the `__private` semver exemption
    - the tracing compatibility policy: migration from tracing 0.1 is an import rename for every supported form, and the rejected-forms table lists the tracing-valid forms that fail loudly at compile time (`parent:`, `follows_from`, deferred fields via `tracing::field::Empty` or `fields(x)` without a value, the `"" = v` empty key, reserved-prefix keys `sc_observability_log.*` in string and dotted forms, and span macros), plus `Level` ordering
 7. **Re-review confirmation.** `cobs` confirms to btit `team-lead` over ATM that no Blocking or Important finding remains open, and the ATM message reference is recorded in `review-a-5.md`.
