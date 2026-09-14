@@ -75,7 +75,7 @@ The `external_ref` field is reserved for **real external references only**:
 
 | File | Role |
 |------|------|
-| `src-tauri/src/lib.rs` | Rust backend: `list_attachments`, `delete_attachment`, `copy_file_to_attachments`, migration v3 |
+| `crates/btit-app/src/lib.rs` | Rust backend: `list_attachments`, `delete_attachment`, `copy_file_to_attachments`, migration v3 |
 | `app/composables/useAttachments.ts` | Frontend: filesystem-based attachment listing with cache |
 | `app/composables/useIssueDialogs.ts` | Attach/detach handlers |
 | `app/components/details/IssuePreview.vue` | Attachment display (thumbnails, file list) |

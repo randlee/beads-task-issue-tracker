@@ -13,7 +13,7 @@
 │  └── Right sidebar: issue detail/preview/edit           │
 ├─────────────────────────────────────────────────────────┤
 │  Tauri 2 Desktop Shell                                  │
-│  ├── Rust backend (src-tauri/src/, 15 modules, 65 cmds) │
+│  ├── Rust backend (crates/btit-app/src/, 15 modules, 65 cmds) │
 │  ├── bd/br CLI bridge (cli.rs: execute_bd + per-project │
 │  │   lock, version gates, auto-detect)                   │
 │  └── File watcher, logging, update checker              │
@@ -205,7 +205,7 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 
 ---
 
-## Backend Structure (`src-tauri/`)
+## Backend Structure (`crates/btit-app/`)
 
 ### Files
 
@@ -418,4 +418,4 @@ Polling: useAdaptivePolling → bdCheckChanged() (mtime) → if changed → bdPo
 
 **Total: 214 tests** (10 files) | **Strategy**: Extract pure functions from composables into `app/utils/` for unit testing. Composables remain thin reactive wrappers.
 
-**Rust tests**: Tracker modules contain `#[cfg(test)]` blocks — run via `cargo test` in `src-tauri/`.
+**Rust tests**: Tracker modules contain `#[cfg(test)]` blocks — run via `cargo test --workspace` from the repo root.

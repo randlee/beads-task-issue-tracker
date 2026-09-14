@@ -5,11 +5,11 @@ repo:
 modules:
   - app          # Nuxt 3 frontend (pages, composables, utils)
   - server       # Nuxt server API handlers (bd proxy, fs bridge, attachments)
-  - src-tauri    # Tauri 1 desktop shell (Rust) — bd CLI bridge
+  - crates       # Rust workspace: crates/btit-app (Tauri desktop shell, bd CLI bridge) + in-tree sc-observability-log crates
   - tests        # Vitest suites (kept in scope, report uses --scope production by default)
 
 annotated:
-  - path: src-tauri
+  - path: crates/btit-app
     label: "Tauri crate — entry via tauri! macro, not import graph; reachable/unreachable findings here are false signals (see zombie_package caveat)"
   - path: app/utils/bd-api.ts
     label: "Nuxt composables resolved via #imports/auto-import — in-degree=0 findings are often false positives"
@@ -18,7 +18,7 @@ annotated:
 
 diagrams:
   - type: layer-dependency
-    description: "app (Nuxt UI) -> server (Nuxt API) -> src-tauri (Rust bridge to bd CLI / Dolt)"
+    description: "app (Nuxt UI) -> server (Nuxt API) -> crates/btit-app (Rust bridge to bd CLI / Dolt)"
 
 # ── Standard repowise artifact layout (randlee repos) ───────────────────
 #   .sc/repowise/repowise.yaml          — this config (scope + annotations)
