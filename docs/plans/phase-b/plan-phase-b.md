@@ -505,6 +505,7 @@ phase-b closes when all of the following hold:
 - The "sc-lint" section, pending maintainer input.
 - Subprocess timeouts: every spawn stays `Command::output()` with no timeout, exactly as today (`cli.rs:190,338,560`; the `migration.rs` raw calls at `:232,287,338,408,628,670,776,884,949,1008`) — b-4 moves `cli.rs:533-591` behaviour-preservingly. Later fix location: `btit_cli::run` (`run_json`, `run_raw`, `probe_version_output`), tracked in issue #55 (RSH-001).
 - `spawn_blocking` at the `btit-app` command boundary for the synchronous backend calls (RSH-002; issue #55).
+- `ProjectLocks` eviction: the per-working-dir lock map (`cli.rs:14-15`, `btit_cli::locks` from b-4) stays unbounded as today; eviction is tracked in issue #55 (RSH-005).
 - Size limits on frontend strings that become argv (`create`, `update`, `comment_add`, `label_add`; b-4 argv table): issue #55, related #49 (`log_frontend` size) (RSH-003).
 
 ## Open questions for the maintainer
