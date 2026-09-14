@@ -129,6 +129,7 @@ pub(crate) fn expand_field(
         }
         FieldKey::Dynamic(key) => {
             let key_static = syn::Ident::new(&format!("__SC_KEY_{index}"), Span::mixed_site());
+            let key = key.as_ref();
             quote! {
                 {
                     static #key_static: #private::DynamicKey = #private::DynamicKey::new(#key);
