@@ -70,7 +70,27 @@ impl OwnedGuard for LogGuard {
         LogGuard::control(self)
     }
 
-    /// Logs one `warn` with per-cause drop counts (when any) and one `info` with the health snapshot.
+    /// Writes the at-exit diagnostics: the last records before the final shutdown.
+    ///
+    /// Always on (plain `log::` macros, not gated by `LOGGING_ENABLED`), because
+    /// after shutdown there is no other place the bridge's final state is kept.
+    /// Emitted by every exit that owns the guard, except the degraded
+    /// `ShutDownWhileClearWriting` case.
+    ///
+    /// 1. When any event was dropped, one `Warn` record: message
+    ///    `dropped events: <Cause>=<n>, ...` (only causes with `n > 0`, `DropCause`
+    ///    `Debug` names), action `logging`.
+    /// 2. One `Info` record: message `health at exit`, action `logging`, target
+    ///    `app_lib.logging.lifecycle`, and `fields.health` holding the
+    ///    `BridgeHealthReport` serialized as a JSON **string**
+    ///    (`schema_version` 1; parse it a second time to read it). The snapshot is
+    ///    taken while the bridge is still running, so it shows `lifecycle:
+    ///    "running"` with the final queue high-water mark, writer and sink errors
+    ///    and drop counters. If serialization fails, a `Warn` record
+    ///    `health at exit could not be serialized: <error>` is written instead.
+    ///
+    /// Purpose: post-mortem evidence in the JSONL file (and the debug panel) of
+    /// whether the session lost records or ran degraded.
     fn report_before_shutdown(&self) {
         let health = self.health();
         let dropped = health.dropped_events;
@@ -497,11 +517,41 @@ mod tests {
             contents.contains("record before exit"),
             "the rejected clear must not truncate the final records"
         );
-        assert!(contents.contains("health at exit"));
+        assert_health_at_exit_record(&contents)?;
         assert!(
             !contents.contains("record after shutdown"),
             "the logger accepted a record after shutdown"
         );
+        Ok(())
+    }
+
+    /// ATM-QA-002: pins the documented shape of the `[logging] health at exit` record.
+    fn assert_health_at_exit_record(contents: &str) -> Result<(), TestError> {
+        use serde_json::Value;
+        let text =
+            |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+        let record = contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|event| text(event, "message").as_deref() == Some("health at exit"))
+            .ok_or_else(|| TestError("no health-at-exit record".to_owned()))?;
+        assert_eq!(text(&record, "level").as_deref(), Some("Info"));
+        assert_eq!(
+            text(&record, "target").as_deref(),
+            Some("app_lib.logging.lifecycle")
+        );
+        assert_eq!(text(&record, "action").as_deref(), Some("logging"));
+        let health = record
+            .get("fields")
+            .and_then(|fields| text(fields, "health"))
+            .ok_or_else(|| TestError("health field is not a JSON string".to_owned()))?;
+        let health: Value = serde_json::from_str(&health).map_err(|e| TestError(e.to_string()))?;
+        assert_eq!(
+            health.get("schema_version").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(text(&health, "lifecycle").as_deref(), Some("running"));
+        assert!(health.get("dropped_events").is_some_and(Value::is_object));
         Ok(())
     }
 
