@@ -26,7 +26,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use sc_observability_log::{
-    init, ActionName, BridgeOptions, FlushError, LevelFilter, LogGuard, LoggerConfig, ServiceName,
+    init, ActionName, BridgeOptions, ErrorCode, FlushError, LevelFilter, LogGuard, LoggerConfig,
+    Remediation, ServiceName,
 };
 use tauri::Manager;
 
@@ -211,15 +212,66 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
                 |control| control.flush(LOG_IO_TIMEOUT),
                 read_log_dir,
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| report_clear_error(&e))?;
         log_info!("[debug] Logs cleared");
         Ok(())
     })
     .await
-    .map_err(|e| format!("Failed to clear logs: {e}"))?
+    .map_err(|e| {
+        report_clear_error(&ClearError::TaskFailed {
+            reason: e.to_string(),
+        })
+    })?
 }
 
-/// Why `clear_logs` failed; rendered into the command's `Err(String)`.
+/// Logs a failed clear with its code and remediation, and returns the command's error string.
+///
+/// After `ShutdownStarted` the record is filtered by the stopping logger, which is fine:
+/// the frontend still receives the coded string.
+fn report_clear_error(error: &ClearError) -> String {
+    let code = error.code();
+    let remediation = serde_json::to_string(&error.remediation()).unwrap_or_default();
+    log_warn!(
+        code = code.as_str(), remediation = remediation.as_str();
+        "[debug] Logs not cleared: {error}"
+    );
+    error.command_message()
+}
+
+/// Stable `ClearError` codes; the `clear_logs` command's `Err(String)` starts with one.
+pub(crate) mod clear_error_codes {
+    use sc_observability_log::ErrorCode;
+
+    /// `ClearError::ShutdownStarted`.
+    pub(crate) const SHUTDOWN_STARTED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_SHUTDOWN_STARTED");
+    /// `ClearError::WriteSlotTimedOut`.
+    pub(crate) const WRITE_SLOT_TIMED_OUT: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_WRITE_SLOT_TIMED_OUT");
+    /// `ClearError::Flush`.
+    pub(crate) const FLUSH_FAILED: ErrorCode = ErrorCode::new_static("BTIT_LOG_CLEAR_FLUSH_FAILED");
+    /// `ClearError::Truncate`.
+    pub(crate) const TRUNCATE_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_TRUNCATE_FAILED");
+    /// `ClearError::ListDir`.
+    pub(crate) const LIST_DIR_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_LIST_DIR_FAILED");
+    /// `ClearError::ReadDirEntry`.
+    pub(crate) const READ_DIR_ENTRY_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_READ_DIR_ENTRY_FAILED");
+    /// `ClearError::RemoveRotated`.
+    pub(crate) const REMOVE_ROTATED_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_REMOVE_ROTATED_FAILED");
+    /// `ClearError::TaskFailed`.
+    pub(crate) const TASK_FAILED: ErrorCode = ErrorCode::new_static("BTIT_LOG_CLEAR_TASK_FAILED");
+}
+
+/// Why `clear_logs` failed.
+///
+/// Each variant has a stable [`ClearError::code`] and a [`ClearError::remediation`],
+/// mirroring the `sc-observability-log` error enums. The command returns
+/// [`ClearError::command_message`], `"<CODE>: <message>"`, so the frontend can
+/// match on the code prefix without parsing the message.
 #[derive(Debug)]
 pub(crate) enum ClearError {
     /// Exit has begun: nothing was flushed or removed, so the final records survive.
@@ -239,6 +291,65 @@ pub(crate) enum ClearError {
         file_name: String,
         source: std::io::Error,
     },
+    /// The blocking clear task could not run to completion (it panicked or was cancelled).
+    TaskFailed { reason: String },
+}
+
+impl ClearError {
+    /// Stable code per variant (`BTIT_LOG_CLEAR_*`).
+    pub(crate) fn code(&self) -> ErrorCode {
+        match self {
+            Self::ShutdownStarted => clear_error_codes::SHUTDOWN_STARTED,
+            Self::WriteSlotTimedOut { .. } => clear_error_codes::WRITE_SLOT_TIMED_OUT,
+            Self::Flush { .. } => clear_error_codes::FLUSH_FAILED,
+            Self::Truncate { .. } => clear_error_codes::TRUNCATE_FAILED,
+            Self::ListDir { .. } => clear_error_codes::LIST_DIR_FAILED,
+            Self::ReadDirEntry { .. } => clear_error_codes::READ_DIR_ENTRY_FAILED,
+            Self::RemoveRotated { .. } => clear_error_codes::REMOVE_ROTATED_FAILED,
+            Self::TaskFailed { .. } => clear_error_codes::TASK_FAILED,
+        }
+    }
+
+    /// Mandatory remediation per variant.
+    pub(crate) fn remediation(&self) -> Remediation {
+        match self {
+            Self::ShutdownStarted => Remediation::not_recoverable(
+                "the app is quitting; the logs are kept so the final records survive",
+            ),
+            Self::WriteSlotTimedOut { .. } => Remediation::recoverable(
+                "wait for the other clear to finish, then clear again",
+                ["check that the log directory's disk is responsive"],
+            ),
+            Self::Flush { source } => Remediation::recoverable(
+                "retry the clear; no file was touched",
+                [format!(
+                    "inspect the logger health: flush failed with {}",
+                    source.code()
+                )],
+            ),
+            Self::Truncate { .. } => Remediation::recoverable(
+                "check that the active log file is writable and not locked by another process",
+                ["retry the clear"],
+            ),
+            Self::ListDir { .. } | Self::ReadDirEntry { .. } => Remediation::recoverable(
+                "check the permissions of the log directory",
+                ["retry the clear; rotated log files may remain until it succeeds"],
+            ),
+            Self::RemoveRotated { .. } => Remediation::recoverable(
+                "check that the rotated log file is not locked and its directory is writable",
+                ["retry the clear"],
+            ),
+            Self::TaskFailed { .. } => Remediation::recoverable(
+                "retry the clear",
+                ["report the failure with the app log if it repeats"],
+            ),
+        }
+    }
+
+    /// The command's error string: `"<CODE>: <message>"`.
+    pub(crate) fn command_message(&self) -> String {
+        format!("{}: {self}", self.code())
+    }
 }
 
 impl std::fmt::Display for ClearError {
@@ -249,13 +360,16 @@ impl std::fmt::Display for ClearError {
                 f,
                 "Logs were not cleared: another clear was still writing after {timeout:?}"
             ),
-            Self::Flush { source } => write!(f, "Failed to flush logs: {source}"),
+            Self::Flush { source } => {
+                write!(f, "Failed to flush logs [{}]: {source}", source.code())
+            }
             Self::Truncate { source } => write!(f, "Failed to clear logs: {source}"),
             Self::ListDir { source } => write!(f, "Failed to list log dir: {source}"),
             Self::ReadDirEntry { source } => write!(f, "Failed to read log dir entry: {source}"),
             Self::RemoveRotated { file_name, source } => {
                 write!(f, "Failed to remove rotated log {file_name}: {source}")
             }
+            Self::TaskFailed { reason } => write!(f, "Failed to clear logs: {reason}"),
         }
     }
 }
@@ -263,7 +377,9 @@ impl std::fmt::Display for ClearError {
 impl std::error::Error for ClearError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ShutdownStarted | Self::WriteSlotTimedOut { .. } => None,
+            Self::ShutdownStarted | Self::WriteSlotTimedOut { .. } | Self::TaskFailed { .. } => {
+                None
+            }
             Self::Flush { source } => Some(source),
             Self::Truncate { source }
             | Self::ListDir { source }
@@ -505,6 +621,65 @@ mod tests {
         assert!(export_logs().await.is_err());
     }
 
+    fn every_clear_error() -> Vec<ClearError> {
+        vec![
+            ClearError::ShutdownStarted,
+            ClearError::WriteSlotTimedOut {
+                timeout: LOG_IO_TIMEOUT,
+            },
+            ClearError::Flush {
+                source: FlushError::ShutDown,
+            },
+            ClearError::Truncate {
+                source: std::io::Error::other("truncate"),
+            },
+            ClearError::ListDir {
+                source: std::io::Error::other("list"),
+            },
+            ClearError::ReadDirEntry {
+                source: std::io::Error::other("entry"),
+            },
+            ClearError::RemoveRotated {
+                file_name: "app.log.jsonl.1".to_owned(),
+                source: std::io::Error::other("remove"),
+            },
+            ClearError::TaskFailed {
+                reason: "cancelled".to_owned(),
+            },
+        ]
+    }
+
+    /// RBP-F001: every variant has a unique stable code and a non-empty remediation.
+    #[test]
+    fn clear_error_codes_are_stable_and_remediations_non_empty() {
+        let errors = every_clear_error();
+        let mut codes = std::collections::HashSet::new();
+        for error in &errors {
+            let code = error.code();
+            assert!(code.as_str().starts_with("BTIT_LOG_CLEAR_"), "{code}");
+            assert!(codes.insert(code.as_str().to_owned()), "duplicate {code}");
+            match error.remediation() {
+                Remediation::Recoverable { steps } => {
+                    assert!(!steps.steps().is_empty());
+                    assert!(steps.steps().iter().all(|step| !step.is_empty()));
+                }
+                Remediation::NotRecoverable { justification } => {
+                    assert!(!justification.is_empty());
+                }
+            }
+            let message = error.command_message();
+            assert!(
+                message.starts_with(&format!("{code}: ")),
+                "the command string leads with the code: {message}"
+            );
+        }
+        assert_eq!(codes.len(), errors.len());
+        assert_eq!(
+            ClearError::ShutdownStarted.command_message(),
+            "BTIT_LOG_CLEAR_SHUTDOWN_STARTED: Logs were not cleared: logging is shutting down"
+        );
+    }
+
     /// RSH-001: the degraded exit is reported with its stable code.
     #[test]
     fn exit_report_names_the_degraded_clear_case() -> Result<(), TestError> {
@@ -591,11 +766,11 @@ mod tests {
             return Err(TestError(format!("expected ReadDirEntry, got {result:?}")));
         };
         assert_eq!(source.to_string(), "injected entry failure");
-        // The command's Err(String) carries the failure to the frontend.
-        let rendered = ClearError::ReadDirEntry { source }.to_string();
+        // The command's Err(String) carries the stable code and the failure to the frontend.
+        let rendered = ClearError::ReadDirEntry { source }.command_message();
         assert_eq!(
             rendered,
-            "Failed to read log dir entry: injected entry failure"
+            "BTIT_LOG_CLEAR_READ_DIR_ENTRY_FAILED: Failed to read log dir entry: injected entry failure"
         );
         assert!(
             !rotated.exists(),
