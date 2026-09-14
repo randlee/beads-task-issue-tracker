@@ -1,7 +1,7 @@
 ---
 id: a-5
 title: sc-observability team critical review (btit-side closure)
-status: planned
+status: in_progress
 branch: feature/sprint-a-5-sc-review
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-5-sc-review
 target: integrate/phase-a

@@ -1,7 +1,7 @@
 ---
 id: a-5
 title: Phase A critical review — a-4 btit adoption
-status: findings_open
+status: fixes_complete_pending_rereview
 reviewed_branch: integrate/phase-a
 reviewed_commit: f6f69dc
 reviewed_range: d4967c9..f6f69dc
@@ -24,7 +24,8 @@ future migration of the bridge into `sc-observability`.
 ## Verdict
 
 **Not ready for a-5 closure or a-6 handoff.** Three Blocking and two Important
-findings remain open. The primary integration defect is the `clear_logs` /
+findings were raised. R-A4-001..004 have fix commits and await re-review (see
+the dispositions below and "Fix summary"); R-A4-005 is open. The primary integration defect is the `clear_logs` /
 application-exit race: the implementation cannot provide its documented
 one-time, bounded shutdown guarantee when the guard is shared. Independently,
 the bridge's enabled `log` path can panic before its advertised containment and
@@ -32,10 +33,10 @@ reentrancy protection starts.
 
 | id | reported by | severity | file:line (at `f6f69dc`) | finding | disposition |
 | --- | --- | --- | --- | --- | --- |
-| R-A4-001 | Codex | Blocking | `src-tauri/src/logging.rs:140-159` | If `clear_logs` has cloned `Arc<LogGuard>`, `on_run_event` takes the static owner, fails `Arc::try_unwrap`, and calls only `flush`. Once the command's clone is dropped, `LogGuard::Drop` invokes the bridge's separate flush-and-shutdown sequence. Exit therefore has a second lifecycle operation, its result is discarded, and it is not bounded by the handler's claimed single `LOG_IO_TIMEOUT`. This violates a-4 AC7 and can leave shutdown timing/error handling dependent on the concurrently executing command. | open — replace the shared-`Arc` handoff with coordinated exclusive shutdown ownership (or change the bridge lifecycle API), then add a deterministic clear-during-exit test proving one shutdown attempt, bounded completion, and a stopped logger. |
-| R-A4-002 | Codex | Important | `src-tauri/src/logging.rs:230-243` | `remove_rotated_logs` uses `entries.flatten()`, silently discarding `ReadDir` errors. `clear_logs` can consequently return `Ok(())` even though it failed to inspect one or more directory entries and left rotated JSONL data behind. That breaks the command's stated clear semantics and hides an I/O failure from the frontend. | open — iterate over `ReadDir` results explicitly and map each entry error into the command's existing `Err(String)` path; add a fault-injection or injectable-directory-reader test for the error case. |
-| R-A4-003 | Codex | Blocking | `crates/sc-observability-log/src/bridge.rs:26-43`, `crates/sc-observability-log/src/mapping.rs:197-234`, `crates/sc-observability-log/src/lib.rs:396-425` | `Bridge::log` obtains `BridgeOptions` and calls `record_to_parts` *before* `__private::emit` enters `handle::submit_guarded`. Formatting `record.args()` (`to_string`) and a non-primitive key-value (`value.to_string`) can call user `Display` code and panic. Such a panic unwinds out through `log!`, violating the documented guarantee that the emit path never panics. A formatter that itself logs also runs before `EmitScope` is active, so its nested record is not classified as `ReentrantEmit`. | open — refactor to one internal guarded bridge operation that covers record lookup, mapping/formatting, event assembly, and `try_log`. Do **not** merely nest the current `__private::emit` inside an outer `submit_guarded`: its own guard would classify every bridge record as reentrant. Keep one private unguarded submit core and invoke it from exactly one guard per record. |
-| R-A4-004 | Codex | Important design gap | `crates/sc-observability-log/src/lib.rs:220-228`, `crates/sc-observability-log/src/handle.rs:64-68` | `LogGuard` exposes cumulative dropped-event counts but no read-only health/diagnostic snapshot from the underlying logger. A consumer can see `WriterDegraded` or a timeout count but cannot inspect writer state, last writer error, queue pressure, active file path, or sink health to determine remediation. This weakens the observability bridge precisely when it is degraded and complicates a common frontend/backend status interface. | open — expose a stable, read-only bridge-health snapshot (or an explicitly curated projection of `sc_observability::Logger::health()`) from `LogGuard`; document thread-safety and post-shutdown behavior, avoid exposing mutable logger ownership, and version the projection for generated bindings. |
+| R-A4-001 | Codex | Blocking | `src-tauri/src/logging.rs:140-159` | If `clear_logs` has cloned `Arc<LogGuard>`, `on_run_event` takes the static owner, fails `Arc::try_unwrap`, and calls only `flush`. Once the command's clone is dropped, `LogGuard::Drop` invokes the bridge's separate flush-and-shutdown sequence. Exit therefore has a second lifecycle operation, its result is discarded, and it is not bounded by the handler's claimed single `LOG_IO_TIMEOUT`. This violates a-4 AC7 and can leave shutdown timing/error handling dependent on the concurrently executing command. | fixed (trailer `Review-Finding: R-A4-001`) — the static `LogLifecycle<LogGuard>` (`src-tauri/src/logging/lifecycle.rs`) is the single guard owner. `clear_logs` flushes through the new non-owning `LogHandle` and claims a clear-write slot; exit marks `ShuttingDown`, waits (bounded) only for a truncating clear, and makes the one final shutdown within 1x `LOG_IO_TIMEOUT` total; its `ExitOutcome` is reported. A clear after exit begins returns `ClearError::ShutdownStarted`. Bridge support: `LogHandle::flush`, `FlushError::ShutDown`. Test: `exit_during_a_held_clear_flush_shuts_down_once_and_stops_the_logger` plus five fake-guard lifecycle tests. |
+| R-A4-002 | Codex | Important | `src-tauri/src/logging.rs:230-243` | `remove_rotated_logs` uses `entries.flatten()`, silently discarding `ReadDir` errors. `clear_logs` can consequently return `Ok(())` even though it failed to inspect one or more directory entries and left rotated JSONL data behind. That breaks the command's stated clear semantics and hides an I/O failure from the frontend. | fixed (trailer `Review-Finding: R-A4-002`) — `remove_rotated_logs` checks every entry result and maps an entry error to `ClearError::ReadDirEntry` in the command's `Err(String)`; the directory reader is injectable. Tests: `clear_log_files_reports_a_directory_entry_error`, `clear_log_files_reports_a_listing_error`. |
+| R-A4-003 | Codex | Blocking | `crates/sc-observability-log/src/bridge.rs:26-43`, `crates/sc-observability-log/src/mapping.rs:197-234`, `crates/sc-observability-log/src/lib.rs:396-425` | `Bridge::log` obtains `BridgeOptions` and calls `record_to_parts` *before* `__private::emit` enters `handle::submit_guarded`. Formatting `record.args()` (`to_string`) and a non-primitive key-value (`value.to_string`) can call user `Display` code and panic. Such a panic unwinds out through `log!`, violating the documented guarantee that the emit path never panics. A formatter that itself logs also runs before `EmitScope` is active, so its nested record is not classified as `ReentrantEmit`. | fixed (trailer `Review-Finding: R-A4-003`) — `Bridge::log` enters `submit_guarded` once and runs the slot read, options lookup, `record_to_parts`, assembly, redaction and `try_log` inside it; `__private::emit` and the bridge share the unguarded cores `handle::submit_installed` / `handle::submit_to`. Test: `tests/bridge_guard.rs` (`bridge_guard_contains_user_formatting`: panicking message, panicking kv value, logging `Display`). |
+| R-A4-004 | Codex | Important design gap | `crates/sc-observability-log/src/lib.rs:220-228`, `crates/sc-observability-log/src/handle.rs:64-68` | `LogGuard` exposes cumulative dropped-event counts but no read-only health/diagnostic snapshot from the underlying logger. A consumer can see `WriterDegraded` or a timeout count but cannot inspect writer state, last writer error, queue pressure, active file path, or sink health to determine remediation. This weakens the observability bridge precisely when it is degraded and complicates a common frontend/backend status interface. | fixed (trailer `Review-Finding: R-A4-004`) — `LogGuard::health()` / `LogHandle::health()` return the bridge-owned, serde-serializable `BridgeHealth` (schema version 1): lifecycle, state, writer state, queue depth/capacity/high-water mark, last writer error and last error with code and remediation, file-sink status and path, console-sink status, dropped-event counters; defined after shutdown. Tests: `health::tests::*`, `tests/health_snapshot.rs`, `tests/api_freeze.rs::a5_health_api_is_frozen`. |
 | R-A4-005 | Codex | Blocking for crate acceptance | `crates/sc-observability-log/src/lib.rs:186-229`, `src-tauri/src/logging.rs:104-221` | The bridge has no settled public lifecycle/control boundary for consumers outside BTIT. The sole-owner `LogGuard` is forced into `Arc` sharing for clear/export work, while bindings would have no supported structured-submit, health, or read-only control API. If BTIT completes around the current shape, `sc-observability` would have to make a later public-API redesign to support its own frontend and Python consumers. | open — BTIT must implement and document the public contract below before its bridge design is accepted. This is a design gate for the crate, not a request to add Tauri/Python dependencies or frontend policy to BTIT. |
 
 ## Required changes and acceptance tests
@@ -154,3 +155,20 @@ Required design evidence:
 1. Close R-A4-001 through R-A4-005 and attach the focused tests specified above.
 2. Re-run the a-4 Rust, frontend, type-check, and manual quit validations after the fixes. Record the app-log path, final JSONL records, health snapshot, and shutdown result in the fix PR.
 3. Obtain an independent `sc-observability` design review before the bridge is migrated or exposed through generated language bindings.
+
+## Fix summary
+
+All four findings were fixed on `feature/sprint-a-5-sc-review` and await
+re-review; each fix commit carries its `Review-Finding:` trailer.
+
+- **Public API change (intentional, recorded in `crates/sc-observability-log/tests/api_freeze.rs`).**
+  Added `LogGuard::health`, `LogGuard::handle`, `LogHandle` (`flush`, `health`),
+  `BridgeHealth` and its component types, `BRIDGE_HEALTH_SCHEMA_VERSION`, the
+  `Timestamp` re-export, `Serialize`/`Deserialize` on `DroppedEvents`, and
+  `FlushError::ShutDown` with code `SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN`.
+  A flush through a live `LogGuard` cannot observe `ShutDown`.
+- **Runtime dependency graph unchanged.** The workspace `serde` dependency gained
+  the `derive` feature; `serde_derive` was already in the graph, so
+  `crates/runtime-deps.txt` and both lockfiles are unchanged.
+- **sprint-a-4 AC7 superseded.** The shared-`Arc` exit design is replaced by the
+  single lifecycle owner described under R-A4-001.
