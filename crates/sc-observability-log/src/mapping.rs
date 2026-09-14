@@ -13,7 +13,7 @@ use std::borrow::Cow;
 
 use sc_observability_types::{
     ActionName, ErrorContext, IdentityError, Level, LogEvent, Observation, ProcessIdentity,
-    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory, error_codes,
+    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory,
 };
 use serde_json::{Map, Value};
 
@@ -164,47 +164,76 @@ pub fn field_key_label(raw: &str) -> Result<Cow<'_, str>, LabelError> {
 /// Resolves `LoggerConfig.process_identity` once, at `init`.
 ///
 /// sc-observability 1.2.0 stores the policy but never applies it, so the bridge
-/// resolves it and stamps every `LogEvent.identity` with the cached value.
+/// resolves it and stamps every `LogEvent.identity` with the cached value. Every
+/// failure carries the stable code `SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED`
+/// and a remediation for its own path; a resolver's error is kept as the source.
 pub(crate) fn resolve_identity(
     policy: &ProcessIdentityPolicy,
 ) -> Result<ProcessIdentity, IdentityError> {
     match policy {
-        ProcessIdentityPolicy::Auto => {
-            let hostname = hostname::get().map_err(|source| {
-                IdentityError(Box::new(
-                    ErrorContext::new(
-                        error_codes::IDENTITY_RESOLUTION_FAILED,
-                        "automatic hostname resolution failed",
-                        Remediation::recoverable(
-                            "verify that the operating system can resolve its hostname",
-                            ["or configure ProcessIdentityPolicy::Fixed"],
-                        ),
-                    )
-                    .source(Box::new(source)),
-                ))
-            })?;
-            let hostname = hostname.to_string_lossy().into_owned();
-            if hostname.is_empty() {
-                return Err(IdentityError(Box::new(ErrorContext::new(
-                    error_codes::IDENTITY_RESOLUTION_FAILED,
-                    "automatic hostname resolution returned an empty hostname",
-                    Remediation::recoverable(
-                        "configure a non-empty operating-system hostname",
-                        ["or configure ProcessIdentityPolicy::Fixed"],
-                    ),
-                ))));
-            }
-            Ok(ProcessIdentity {
-                hostname: Some(hostname),
-                pid: Some(std::process::id()),
-            })
-        }
+        ProcessIdentityPolicy::Auto => resolve_auto_identity(hostname::get),
         ProcessIdentityPolicy::Fixed { hostname, pid } => Ok(ProcessIdentity {
             hostname: hostname.clone(),
             pid: *pid,
         }),
-        ProcessIdentityPolicy::Resolver(resolver) => resolver.resolve(),
+        ProcessIdentityPolicy::Resolver(resolver) => resolver.resolve().map_err(|source| {
+            IdentityError(Box::new(
+                ErrorContext::new(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+                    "the configured ProcessIdentityResolver failed",
+                    Remediation::recoverable(
+                        "fix the ProcessIdentityResolver",
+                        [
+                            "or use ProcessIdentityPolicy::Auto or Fixed",
+                            "call sc_observability_log::init again",
+                        ],
+                    ),
+                )
+                .source(Box::new(source)),
+            ))
+        }),
     }
+}
+
+/// Resolves `ProcessIdentityPolicy::Auto` with `hostname_of` (production: `hostname::get`).
+///
+/// A failed or empty hostname lookup is an error; the pid is the current process id.
+fn resolve_auto_identity(
+    hostname_of: impl FnOnce() -> std::io::Result<std::ffi::OsString>,
+) -> Result<ProcessIdentity, IdentityError> {
+    let hostname = hostname_of().map_err(|source| {
+        IdentityError(Box::new(
+            ErrorContext::new(
+                crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+                "automatic hostname resolution failed",
+                auto_hostname_remediation(),
+            )
+            .source(Box::new(source)),
+        ))
+    })?;
+    let hostname = hostname.to_string_lossy().into_owned();
+    if hostname.is_empty() {
+        return Err(IdentityError(Box::new(ErrorContext::new(
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+            "automatic hostname resolution returned an empty hostname",
+            auto_hostname_remediation(),
+        ))));
+    }
+    Ok(ProcessIdentity {
+        hostname: Some(hostname),
+        pid: Some(std::process::id()),
+    })
+}
+
+/// Remediation for an `Auto` hostname lookup that failed or returned an empty hostname.
+fn auto_hostname_remediation() -> Remediation {
+    Remediation::recoverable(
+        "ensure the operating system resolves a non-empty hostname",
+        [
+            "or use ProcessIdentityPolicy::Fixed",
+            "call sc_observability_log::init again",
+        ],
+    )
 }
 
 pub(crate) fn map_level(level: log::Level) -> Level {
@@ -820,6 +849,49 @@ mod tests {
         );
         let failing = ProcessIdentityPolicy::Resolver(Arc::new(FailingResolver));
         let error = resolve_identity(&failing).unwrap_err();
-        assert_eq!(error.0.diagnostic().code.as_str(), "TEST_RESOLVER_FAILED");
+        assert_eq!(
+            error.0.diagnostic().code,
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED
+        );
+        assert_eq!(
+            error.0.diagnostic().remediation,
+            Remediation::recoverable(
+                "fix the ProcessIdentityResolver",
+                [
+                    "or use ProcessIdentityPolicy::Auto or Fixed",
+                    "call sc_observability_log::init again",
+                ],
+            )
+        );
+        // The resolver's own error is kept as the source.
+        let source = std::error::Error::source(&*error.0)
+            .and_then(|source| source.downcast_ref::<IdentityError>())
+            .unwrap();
+        assert_eq!(source.0.diagnostic().code.as_str(), "TEST_RESOLVER_FAILED");
+    }
+
+    fn assert_auto_hostname_failure(error: &IdentityError) {
+        assert_eq!(
+            error.0.diagnostic().code,
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED
+        );
+        assert_eq!(
+            error.0.diagnostic().remediation,
+            auto_hostname_remediation()
+        );
+    }
+
+    #[test]
+    fn identity_auto_fails_when_the_hostname_lookup_fails() {
+        let error =
+            resolve_auto_identity(|| Err(std::io::Error::other("no hostname"))).unwrap_err();
+        assert_auto_hostname_failure(&error);
+        assert!(std::error::Error::source(&*error.0).is_some());
+    }
+
+    #[test]
+    fn identity_auto_fails_on_an_empty_hostname() {
+        let error = resolve_auto_identity(|| Ok(std::ffi::OsString::new())).unwrap_err();
+        assert_auto_hostname_failure(&error);
     }
 }

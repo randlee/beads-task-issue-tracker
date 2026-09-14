@@ -27,10 +27,10 @@ pub enum InitError {
         #[source]
         source: log::SetLoggerError,
     },
-    /// `ProcessIdentityPolicy::Resolver` failed.
+    /// `ProcessIdentityPolicy::Resolver` failed, or `Auto` could not resolve a non-empty hostname.
     #[error("process identity resolution failed")]
     IdentityResolution {
-        /// Error reported by the resolver.
+        /// The identity failure, carrying the stable code and the path-specific remediation.
         #[source]
         source: sc_observability_types::IdentityError,
     },
@@ -115,9 +115,7 @@ impl InitError {
             Self::ForeignLoggerInstalled { .. } => {
                 error_codes::SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED
             }
-            Self::IdentityResolution { .. } => {
-                error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED
-            }
+            Self::IdentityResolution { source } => source.diagnostic().code.clone(),
             Self::Logger { source } => source.diagnostic().code.clone(),
         }
     }
@@ -133,10 +131,7 @@ impl InitError {
                 "remove the other log::Log implementation",
                 ["or call sc_observability_log::init before it is installed"],
             ),
-            Self::IdentityResolution { .. } => Remediation::recoverable(
-                "fix the ProcessIdentityResolver, or use ProcessIdentityPolicy::Auto or Fixed",
-                ["call sc_observability_log::init again"],
-            ),
+            Self::IdentityResolution { source } => source.diagnostic().remediation.clone(),
             Self::Logger { source } => source.diagnostic().remediation.clone(),
         }
     }
@@ -483,7 +478,9 @@ mod tests {
             ),
             (
                 InitError::IdentityResolution {
-                    source: sc_observability_types::IdentityError(context("X_IDENTITY")),
+                    source: sc_observability_types::IdentityError(context(
+                        "SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED",
+                    )),
                 },
                 error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
             ),
@@ -505,6 +502,14 @@ mod tests {
         };
         assert_eq!(
             wrapped.remediation(),
+            Remediation::recoverable("wrapped step", ["second wrapped step"])
+        );
+        let identity = InitError::IdentityResolution {
+            source: sc_observability_types::IdentityError(context("I")),
+        };
+        assert_eq!(identity.code(), ErrorCode::new_static("I"));
+        assert_eq!(
+            identity.remediation(),
             Remediation::recoverable("wrapped step", ["second wrapped step"])
         );
     }

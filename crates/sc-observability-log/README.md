@@ -277,9 +277,12 @@ for a future sprint if event or field sizes prove to be a real-world problem.
 ## Process identity
 
 sc-observability 1.2.0 stores `LoggerConfig.process_identity` but never applies
-it, so `init` resolves it once: `Auto` records the current pid (no hostname),
-`Fixed` is used as given, and `Resolver` failures fail `init` with
-`InitError::IdentityResolution`.
+it, so `init` resolves it once: `Auto` resolves a non-empty OS hostname plus the
+current PID, `Fixed` is used as given, and `Resolver` runs the resolver. A
+failing resolver, or an `Auto` hostname lookup that fails or returns an empty
+hostname, fails `init` with the retryable `InitError::IdentityResolution`
+(`SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED`), whose remediation names the
+failing path.
 
 ## License
 

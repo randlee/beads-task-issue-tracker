@@ -11,7 +11,7 @@ pub const SC_OBSERVABILITY_LOG_ALREADY_INITIALIZED: ErrorCode =
 /// `InitError::ForeignLoggerInstalled`: another `log::Log` implementation owns the facade.
 pub const SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED");
-/// `InitError::IdentityResolution`: the configured process identity resolver failed.
+/// `InitError::IdentityResolution`: the identity resolver failed or `Auto` found no hostname.
 pub const SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED");
 /// `FlushError::TimedOut`: the writer did not acknowledge a flush within the timeout.

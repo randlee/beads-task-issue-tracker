@@ -10,7 +10,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sc_observability::TryLogError;
 use sc_observability_types::LevelFilter;
@@ -340,14 +340,19 @@ pub(crate) fn run_bounded<T: Send + 'static>(
     timeout: Duration,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, BoundedError> {
-    run_bounded_in(&DETACHED_HELPERS, timeout, work)
+    run_bounded_in(&DETACHED_HELPERS, timeout, work, |_| {})
 }
 
 /// [`run_bounded`] against an explicit detached counter (unit tests use their own).
+///
+/// `after_timeout` runs once, only after `recv_timeout` has timed out and before the
+/// caller's RUNNING→DETACHED transition, with the helper's state. Production passes a
+/// no-op; unit tests use it to order the helper's completion against that transition.
 fn run_bounded_in<T: Send + 'static>(
     detached: &'static AtomicU32,
     timeout: Duration,
     work: impl FnOnce() -> T + Send + 'static,
+    after_timeout: impl FnOnce(&AtomicU8),
 ) -> Result<T, BoundedError> {
     let (tx, rx) = mpsc::sync_channel(1);
     let state = Arc::new(AtomicU8::new(HELPER_RUNNING));
@@ -370,6 +375,7 @@ fn run_bounded_in<T: Send + 'static>(
         Ok(value) => Ok(value),
         Err(RecvTimeoutError::Disconnected) => Err(BoundedError::WorkerLost),
         Err(RecvTimeoutError::Timeout) => {
+            after_timeout(&state);
             // Count first, then publish: the helper's decrement can never precede this increment.
             detached.fetch_add(1, Ordering::SeqCst);
             if state
@@ -399,38 +405,21 @@ fn run_bounded_in<T: Send + 'static>(
 const UNWRAP_BACKOFF_START: Duration = Duration::from_millis(1);
 const UNWRAP_BACKOFF_MAX: Duration = Duration::from_millis(50);
 
-/// Retries `Arc::try_unwrap` with a sleep backoff until `deadline` (`None`: no deadline).
+/// Retries `Arc::try_unwrap` with a sleep backoff until every other clone is released.
 ///
-/// At the deadline the clone held by this call is dropped and `None` is returned.
-pub(crate) fn take_sole<T>(mut shared: Arc<T>, deadline: Option<Instant>) -> Option<T> {
+/// Has no deadline: it returns only once this call holds the sole reference.
+pub(crate) fn take_sole<T>(mut shared: Arc<T>) -> T {
     let mut backoff = UNWRAP_BACKOFF_START;
     loop {
         match Arc::try_unwrap(shared) {
-            Ok(value) => return Some(value),
+            Ok(value) => return value,
             Err(still_shared) => {
-                let now = Instant::now();
-                let remaining = match deadline {
-                    Some(d) if now >= d => return None, // drops this clone
-                    Some(d) => d.saturating_duration_since(now),
-                    None => UNWRAP_BACKOFF_MAX,
-                };
                 shared = still_shared;
-                std::thread::sleep(backoff.min(remaining));
+                std::thread::sleep(backoff);
                 backoff = backoff.saturating_mul(2).min(UNWRAP_BACKOFF_MAX);
             }
         }
     }
-}
-
-/// Crate-private outcome of the shutdown helper.
-#[derive(Debug)]
-pub(crate) enum ShutdownStep {
-    /// Sole ownership was not gained (unreachable: the helper waits without a deadline).
-    StillShared,
-    /// The final flush failed; the logger was still shut down.
-    FinalFlush {
-        source: sc_observability_types::FlushError,
-    },
 }
 
 /// Shutdown helper. `Logger::shutdown(self)` consumes the logger (runtime.rs:224), so the
@@ -447,9 +436,7 @@ pub(crate) fn shutdown_installed(
     timeout: Duration,
 ) -> Result<(), ShutdownError> {
     let outcome = run_bounded(timeout, move || {
-        let Some(sole) = take_sole(installed, None) else {
-            return Err(ShutdownStep::StillShared);
-        };
+        let sole = take_sole(installed);
         let flushed = sole.logger.flush();
         let stopped = sole.logger.shutdown();
         // Final health for post-shutdown snapshots (writer state `Stopped`).
@@ -457,14 +444,12 @@ pub(crate) fn shutdown_installed(
             health::store_final_report(report);
         }
         set_lifecycle(BridgeLifecycle::Stopped);
-        flushed.map_err(|source| ShutdownStep::FinalFlush { source })
+        flushed
     });
     match outcome {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(ShutdownStep::StillShared)) | Err(BoundedError::TimedOut) => {
-            Err(ShutdownError::TimedOut { timeout })
-        }
-        Ok(Err(ShutdownStep::FinalFlush { source })) => Err(ShutdownError::FinalFlush { source }),
+        Err(BoundedError::TimedOut) => Err(ShutdownError::TimedOut { timeout }),
+        Ok(Err(source)) => Err(ShutdownError::FinalFlush { source }),
         Err(BoundedError::Spawn { source }) => Err(ShutdownError::HelperSpawn { source }),
         Err(BoundedError::WorkerLost) => Err(ShutdownError::HelperLost),
     }
@@ -532,6 +517,7 @@ pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn run_bounded_times_out_on_blocked_work() {
@@ -566,10 +552,15 @@ mod tests {
         static DETACHED: AtomicU32 = AtomicU32::new(0);
         let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
         let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
-        let result = run_bounded_in(&DETACHED, Duration::from_millis(20), move || {
-            let _done = SignalOnDrop(done_tx);
-            release_rx.recv().unwrap();
-        });
+        let result = run_bounded_in(
+            &DETACHED,
+            Duration::from_millis(20),
+            move || {
+                let _done = SignalOnDrop(done_tx);
+                release_rx.recv().unwrap();
+            },
+            |_| {},
+        );
         assert!(matches!(result, Err(BoundedError::TimedOut)));
         assert_eq!(DETACHED.load(Ordering::SeqCst), 1);
         release_tx.send(()).unwrap();
@@ -581,7 +572,7 @@ mod tests {
             std::thread::yield_now();
         }
         assert_eq!(
-            run_bounded_in(&DETACHED, Duration::from_secs(5), || 3).ok(),
+            run_bounded_in(&DETACHED, Duration::from_secs(5), || 3, |_| {}).ok(),
             Some(3)
         );
         assert_eq!(DETACHED.load(Ordering::SeqCst), 0);
@@ -592,11 +583,15 @@ mod tests {
     fn run_bounded_uncounts_a_detached_helper_that_panics() {
         static DETACHED: AtomicU32 = AtomicU32::new(0);
         let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
-        let result: Result<(), BoundedError> =
-            run_bounded_in(&DETACHED, Duration::from_millis(20), move || {
+        let result: Result<(), BoundedError> = run_bounded_in(
+            &DETACHED,
+            Duration::from_millis(20),
+            move || {
                 release_rx.recv().unwrap();
                 panic!("detached helper panic (expected by this test)");
-            });
+            },
+            |_| {},
+        );
         assert!(matches!(result, Err(BoundedError::TimedOut)));
         assert_eq!(DETACHED.load(Ordering::SeqCst), 1);
         release_tx.send(()).unwrap();
@@ -608,6 +603,39 @@ mod tests {
             );
             std::thread::yield_now();
         }
+    }
+
+    /// R-A5-006 losing race: the helper publishes its value and completes after the
+    /// caller's `recv_timeout` timed out but before the caller's RUNNING→DETACHED CAS.
+    ///
+    /// The `after_timeout` seam releases the work and waits for `HELPER_DONE`, so the
+    /// CAS deterministically fails and the caller must take the value with `try_recv`.
+    #[test]
+    fn run_bounded_losing_race_returns_the_published_value() {
+        static DETACHED: AtomicU32 = AtomicU32::new(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+        let mut seam_ran = false;
+        let result = run_bounded_in(
+            &DETACHED,
+            Duration::from_millis(20),
+            move || {
+                release_rx.recv().unwrap();
+                11_u32
+            },
+            |state| {
+                seam_ran = true;
+                release_tx.send(()).unwrap();
+                // The helper sends its value before its exit guard publishes DONE.
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while state.load(Ordering::SeqCst) != HELPER_DONE {
+                    assert!(Instant::now() < deadline, "helper never completed");
+                    std::thread::yield_now();
+                }
+            },
+        );
+        assert!(seam_ran, "the caller's recv_timeout must have timed out");
+        assert!(matches!(result, Ok(11)), "{result:?}");
+        assert_eq!(DETACHED.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -640,20 +668,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(30));
             drop(clone);
         });
-        let deadline = Instant::now().checked_add(Duration::from_secs(5));
-        assert_eq!(take_sole(shared, deadline), Some(5));
+        assert_eq!(take_sole(shared), 5);
         releaser.join().unwrap();
-    }
-
-    #[test]
-    fn take_sole_gives_up_at_deadline() {
-        let shared = Arc::new(5_u32);
-        let held = Arc::clone(&shared);
-        let started = Instant::now();
-        let deadline = started.checked_add(Duration::from_millis(100));
-        assert_eq!(take_sole(shared, deadline), None);
-        assert!(started.elapsed() < Duration::from_millis(400));
-        assert_eq!(Arc::strong_count(&held), 1);
     }
 
     #[test]
