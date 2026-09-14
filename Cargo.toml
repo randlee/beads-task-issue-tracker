@@ -5,7 +5,8 @@
 # own version and are exempt from that check.
 [workspace]
 members = [
-    "crates/btit-app",   # b-2..b-6 append btit-types, btit-beads, btit-cli, btit-bd, btit-br
+    "crates/btit-app",   # b-3..b-6 append btit-beads, btit-cli, btit-bd, btit-br
+    "crates/btit-types",
     "crates/sc-observability-log",                 # phase-a crates, in-tree at 0.1.0 (OQ-3 resolved)
     "crates/sc-observability-log-macros",
     "crates/sc-observability-log-consumer-check",
@@ -24,6 +25,7 @@ rust-version = "1.98.1"                  # equals rust-toolchain.toml channel (A
 # app (crates/btit-app)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+btit-types = { path = "crates/btit-types" }   # data-only shared types (b-2)
 # `std` enables log::set_boxed_logger (cfg(feature = "alloc") in log-0.4.34); `kv` is used by the app and the bridge.
 log = { version = "0.4", features = ["std", "kv"] }
 sc-observability-log = { path = "crates/sc-observability-log" }   # in-tree for all of phase-b (OQ-3)

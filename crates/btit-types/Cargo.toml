@@ -1,0 +1,15 @@
+[package]
+name = "btit-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared data types for the Beads Task-Issue Tracker (no I/O, no CLI, no Tauri)."
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
