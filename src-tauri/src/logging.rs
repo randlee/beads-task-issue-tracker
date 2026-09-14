@@ -20,7 +20,6 @@
 mod lifecycle;
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -79,8 +78,8 @@ static LOGGING: LogLifecycle<LogGuard> = LogLifecycle::new();
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Bound on every blocking bridge call this module makes: one `flush` in
-/// `clear_logs`, and the whole exit sequence (waiting for an in-progress clear
-/// plus the final `shutdown`). Two seconds keeps quit responsive while leaving
+/// `clear_logs`, the wait for another clear's write slot, and the whole exit
+/// sequence (waiting for an in-progress clear plus the final `shutdown`). Two seconds keeps quit responsive while leaving
 /// the writer time to drain a normal queue.
 const LOG_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -132,14 +131,39 @@ pub(crate) fn on_run_event(_app: &tauri::AppHandle, event: &tauri::RunEvent) {
     report_exit(&LOGGING.exit(LOG_IO_TIMEOUT));
 }
 
-/// Writes a failed final shutdown to stderr; success and no-op exits are silent.
+/// Stable code written by [`report_exit`] for [`ExitOutcome::ShutDownWhileClearWriting`].
+const EXIT_CLEAR_STILL_WRITING: &str = "BTIT_LOG_EXIT_CLEAR_STILL_WRITING";
+
+/// Writes a failed or degraded final shutdown to stderr; a clean or no-op exit is silent.
+///
+/// The logger is gone by now, so stderr is the only channel (`writeln!` is used
+/// because `eprintln!` panics on a closed stream).
 fn report_exit(outcome: &ExitOutcome) {
-    if let ExitOutcome::ShutDown { result: Err(e) } = outcome {
-        let _ = writeln!(
-            std::io::stderr(),
+    let _ = write_exit_report(&mut std::io::stderr(), outcome);
+}
+
+fn write_exit_report(out: &mut impl std::io::Write, outcome: &ExitOutcome) -> std::io::Result<()> {
+    match outcome {
+        ExitOutcome::ShutDown { result: Err(e) } => writeln!(
+            out,
             "beads-task-issue-tracker: log shutdown failed [{}]: {e}",
             e.code()
-        );
+        ),
+        ExitOutcome::ShutDownWhileClearWriting { result } => {
+            let shutdown = match result {
+                Ok(()) => "ok".to_owned(),
+                Err(e) => format!("failed [{}]: {e}", e.code()),
+            };
+            writeln!(
+                out,
+                "beads-task-issue-tracker: [{EXIT_CLEAR_STILL_WRITING}] exit budget ran out while \
+                 clear_logs was still writing; the at-exit health records were skipped and the \
+                 final log records may be truncated (shutdown {shutdown})"
+            )
+        }
+        ExitOutcome::ShutDown { result: Ok(()) }
+        | ExitOutcome::NotInstalled
+        | ExitOutcome::AlreadyShutDown => Ok(()),
     }
 }
 
@@ -183,6 +207,7 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
         LOGGING
             .clear(
                 &log_path,
+                LOG_IO_TIMEOUT,
                 |control| control.flush(LOG_IO_TIMEOUT),
                 read_log_dir,
             )
@@ -199,6 +224,8 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
 pub(crate) enum ClearError {
     /// Exit has begun: nothing was flushed or removed, so the final records survive.
     ShutdownStarted,
+    /// Another clear still held the write slot after the timeout; no file was touched.
+    WriteSlotTimedOut { timeout: Duration },
     /// The bounded flush before clearing failed; no file was touched.
     Flush { source: FlushError },
     /// Truncating the active JSONL file failed.
@@ -218,6 +245,10 @@ impl std::fmt::Display for ClearError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ShutdownStarted => f.write_str("Logs were not cleared: logging is shutting down"),
+            Self::WriteSlotTimedOut { timeout } => write!(
+                f,
+                "Logs were not cleared: another clear was still writing after {timeout:?}"
+            ),
             Self::Flush { source } => write!(f, "Failed to flush logs: {source}"),
             Self::Truncate { source } => write!(f, "Failed to clear logs: {source}"),
             Self::ListDir { source } => write!(f, "Failed to list log dir: {source}"),
@@ -232,7 +263,7 @@ impl std::fmt::Display for ClearError {
 impl std::error::Error for ClearError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ShutdownStarted => None,
+            Self::ShutdownStarted | Self::WriteSlotTimedOut { .. } => None,
             Self::Flush { source } => Some(source),
             Self::Truncate { source }
             | Self::ListDir { source }
@@ -472,6 +503,28 @@ mod tests {
     #[tokio::test]
     async fn export_logs_reports_an_error_when_no_path_is_set() {
         assert!(export_logs().await.is_err());
+    }
+
+    /// RSH-001: the degraded exit is reported with its stable code.
+    #[test]
+    fn exit_report_names_the_degraded_clear_case() -> Result<(), TestError> {
+        let mut out = Vec::new();
+        write_exit_report(
+            &mut out,
+            &ExitOutcome::ShutDownWhileClearWriting { result: Ok(()) },
+        )?;
+        let text = String::from_utf8(out).map_err(|e| TestError(e.to_string()))?;
+        assert!(
+            text.contains("[BTIT_LOG_EXIT_CLEAR_STILL_WRITING]"),
+            "{text}"
+        );
+        assert!(text.contains("(shutdown ok)"), "{text}");
+
+        let mut silent = Vec::new();
+        write_exit_report(&mut silent, &ExitOutcome::ShutDown { result: Ok(()) })?;
+        write_exit_report(&mut silent, &ExitOutcome::AlreadyShutDown)?;
+        assert!(silent.is_empty());
+        Ok(())
     }
 
     #[test]

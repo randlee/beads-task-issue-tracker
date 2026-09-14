@@ -5,9 +5,11 @@
 //!
 //! - **clear** ([`LogLifecycle::clear`]) never holds the guard. It takes a
 //!   non-owning `LogControl` (`LogGuard::control`) under the lock, releases the
-//!   lock, flushes through the control, then re-acquires the lock to claim the single
-//!   *clear-write slot* before truncating files. Once shutdown has begun it is
-//!   rejected with [`ClearError::ShutdownStarted`] and touches no file.
+//!   lock, flushes through the control, then re-acquires the lock to claim the
+//!   single *clear-write slot* before truncating files. Waiting for another
+//!   clear's slot is bounded by the clear's timeout
+//!   ([`ClearError::WriteSlotTimedOut`]). Once shutdown has begun it is rejected
+//!   with [`ClearError::ShutdownStarted`] and touches no file.
 //! - **exit** ([`LogLifecycle::exit`]) moves the guard out and marks the phase
 //!   `ShuttingDown` in one critical section, so later clears are rejected. It
 //!   waits (bounded by the exit deadline, lock released while waiting) only for
@@ -18,6 +20,15 @@
 //!   is left of the exit timeout, and its `Result` is returned to the caller in
 //!   [`ExitOutcome::ShutDown`]. A second exit reports
 //!   [`ExitOutcome::AlreadyShutDown`] without another shutdown request.
+//! - **degraded exit** — if the exit deadline passes while a clear still holds
+//!   the write slot, exit stops waiting on that file I/O: it skips the
+//!   `[logging] health at exit` records (they could be truncated away or
+//!   interleave with the truncation) and performs the one final shutdown with the
+//!   remaining budget (zero), reporting [`ExitOutcome::ShutDownWhileClearWriting`].
+//!   **Residual risk:** the clear may still truncate or delete files after the
+//!   logger's final flush, so the last records before quit (including ones
+//!   queued before the clear started) can be lost. Exit stays bounded; this
+//!   trade-off is reached only when clear I/O stalls for the whole exit budget.
 //!
 //! No code path holds the lock across a flush, a shutdown or file I/O, and exit
 //! as a whole is bounded by its timeout even while a clear is flushing or
@@ -117,6 +128,15 @@ pub(crate) enum ExitOutcome {
         /// The bridge's shutdown result.
         result: Result<(), ShutdownError>,
     },
+    /// The exit budget ran out while a clear still held the write slot.
+    ///
+    /// The one final shutdown ran anyway (with the remaining budget) and the
+    /// at-exit health records were skipped; the clear's truncation may race the
+    /// final flush (see the module docs, "degraded exit").
+    ShutDownWhileClearWriting {
+        /// The bridge's shutdown result.
+        result: Result<(), ShutdownError>,
+    },
 }
 
 /// Why [`LogLifecycle::install`] rejected a guard.
@@ -211,16 +231,20 @@ impl<G: OwnedGuard> LogLifecycle<G> {
     /// `flush` receives the non-owning control (production:
     /// `|c| c.flush(LOG_IO_TIMEOUT)`); it is not called before installation.
     /// `list_dir` is the directory reader passed to [`clear_log_files`].
+    /// `timeout` bounds the wait for another clear's write slot.
     ///
     /// # Errors
     ///
     /// - [`ClearError::ShutdownStarted`] when shutdown began before the flush or
     ///   before the write slot was claimed; no file is touched.
+    /// - [`ClearError::WriteSlotTimedOut`] when another clear still held the
+    ///   write slot after `timeout`; no file is touched.
     /// - [`ClearError::Flush`] when the flush failed (no file is touched).
     /// - Every file error of [`clear_log_files`].
     pub(crate) fn clear<I>(
         &self,
         log_path: &Path,
+        timeout: Duration,
         flush: impl FnOnce(&G::Control) -> Result<(), FlushError>,
         list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
     ) -> Result<(), ClearError>
@@ -236,13 +260,15 @@ impl<G: OwnedGuard> LogLifecycle<G> {
             }
         };
         let flushed = control.as_ref().map_or(Ok(()), flush);
-        let _write = self.claim_clear_write()?;
+        let _write = self.claim_clear_write(timeout)?;
         flushed.map_err(|source| ClearError::Flush { source })?;
         clear_log_files(log_path, list_dir)
     }
 
-    /// Waits for any other clear's write slot, then claims it unless shutdown has begun.
-    fn claim_clear_write(&self) -> Result<ClearWrite<'_, G>, ClearError> {
+    /// Waits (at most `timeout`) for any other clear's write slot, then claims it
+    /// unless shutdown has begun.
+    fn claim_clear_write(&self, timeout: Duration) -> Result<ClearWrite<'_, G>, ClearError> {
+        let deadline = Instant::now().checked_add(timeout);
         let mut state = self.lock();
         loop {
             if matches!(state.phase, Phase::ShuttingDown | Phase::Stopped) {
@@ -251,19 +277,27 @@ impl<G: OwnedGuard> LogLifecycle<G> {
             if !state.clear_writing {
                 break;
             }
+            let left = remaining(deadline, timeout);
+            if left.is_zero() {
+                return Err(ClearError::WriteSlotTimedOut { timeout });
+            }
             state = self
                 .changed
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
         state.clear_writing = true;
         Ok(ClearWrite { lifecycle: self })
     }
 
     /// Performs the one final shutdown, bounded by `timeout` in total.
+    ///
+    /// Returns [`ExitOutcome::ShutDownWhileClearWriting`] when the budget ran out
+    /// while a clear still held the write slot (see the module docs).
     pub(crate) fn exit(&self, timeout: Duration) -> ExitOutcome {
         let deadline = Instant::now().checked_add(timeout);
-        let guard = {
+        let (guard, clear_still_writing) = {
             let mut state = self.lock();
             let guard = match std::mem::replace(&mut state.phase, Phase::ShuttingDown) {
                 Phase::Running(guard) => guard,
@@ -289,14 +323,21 @@ impl<G: OwnedGuard> LogLifecycle<G> {
                     .unwrap_or_else(PoisonError::into_inner)
                     .0;
             }
-            guard
+            (guard, state.clear_writing)
         };
-        guard.report_before_shutdown();
+        if !clear_still_writing {
+            // Safe to write: no clear can truncate these records any more.
+            guard.report_before_shutdown();
+        }
         self.shutdown_requests.fetch_add(1, Ordering::SeqCst);
         let result = guard.shutdown(remaining(deadline, timeout));
         self.lock().phase = Phase::Stopped;
         self.changed.notify_all();
-        ExitOutcome::ShutDown { result }
+        if clear_still_writing {
+            ExitOutcome::ShutDownWhileClearWriting { result }
+        } else {
+            ExitOutcome::ShutDown { result }
+        }
     }
 }
 
@@ -400,6 +441,7 @@ mod tests {
             let clearing = scope.spawn(move || {
                 lifecycle.clear(
                     log_path,
+                    TIMEOUT,
                     move |control: &LogControl| {
                         // Hold the clear-side flush until exit has returned.
                         let _ = held_tx.send(());
@@ -463,13 +505,16 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn exit_waits_for_a_truncating_clear_but_never_past_its_timeout() -> Result<(), TestError> {
+    /// Runs `exit(exit_timeout)` while a fake clear holds the write slot inside
+    /// its directory listing; the slot is released `release_after` after exit starts.
+    fn exit_during_truncation(
+        exit_timeout: Duration,
+        release_after: Duration,
+    ) -> Result<(ExitOutcome, Duration, Arc<Calls>), TestError> {
         let scratch = ScratchDir::new("lifecycle-truncating")?;
         let log_path = scratch.path().join("app.log.jsonl");
         fs::write(&log_path, "active")?;
         let (lifecycle, calls) = installed_fake()?;
-        let exit_timeout = Duration::from_millis(200);
 
         let (writing_tx, writing_rx) = mpsc::channel::<()>();
         let (release_tx, release_rx) = mpsc::channel::<()>();
@@ -478,6 +523,7 @@ mod tests {
             let clearing = scope.spawn(move || {
                 lifecycle.clear(
                     log_path,
+                    TIMEOUT,
                     |()| Ok(()),
                     move |dir: &Path| {
                         // The write slot is held here: truncation is in progress.
@@ -488,25 +534,114 @@ mod tests {
                 )
             });
             let writing = writing_rx.recv();
+            let releaser = scope.spawn(move || {
+                std::thread::sleep(release_after);
+                let _ = release_tx.send(());
+            });
             let started = Instant::now();
             let outcome = lifecycle.exit(exit_timeout);
             let elapsed = started.elapsed();
-            let _ = release_tx.send(());
+            let _ = releaser.join();
             (writing.map(|()| outcome), elapsed, clearing.join())
         });
         let outcome = outcome.map_err(|e| TestError(e.to_string()))?;
+        let clear_result = clear_result.map_err(|_| TestError("clear panicked".to_owned()))?;
+        if clear_result.is_err() {
+            return Err(TestError(format!(
+                "the in-progress clear must complete: {clear_result:?}"
+            )));
+        }
+        Ok((outcome, elapsed, calls))
+    }
+
+    #[test]
+    fn exit_waits_for_a_truncating_clear_that_finishes_within_its_budget() -> Result<(), TestError>
+    {
+        let release_after = Duration::from_millis(100);
+        let (outcome, elapsed, calls) = exit_during_truncation(TIMEOUT, release_after)?;
 
         assert!(matches!(outcome, ExitOutcome::ShutDown { result: Ok(()) }));
         assert!(
-            elapsed >= exit_timeout,
+            elapsed >= release_after,
             "exit must wait for the truncating clear"
         );
         assert!(elapsed < TIMEOUT, "exit stays bounded: {elapsed:?}");
-        // The whole budget went to waiting, so shutdown got what was left: nothing.
-        assert_eq!(shutdown_timeouts(&calls), vec![Duration::ZERO]);
         assert_eq!(calls.reports.load(Ordering::SeqCst), 1);
-        let clear_result = clear_result.map_err(|_| TestError("clear panicked".to_owned()))?;
-        assert!(clear_result.is_ok(), "the in-progress clear completes");
+        let timeouts = shutdown_timeouts(&calls);
+        assert_eq!(timeouts.len(), 1);
+        assert!(timeouts.iter().all(|t| *t > Duration::ZERO));
+        Ok(())
+    }
+
+    /// RSH-001: the clear is still truncating when the exit budget runs out.
+    #[test]
+    fn exit_reports_a_degraded_shutdown_when_a_clear_is_still_truncating_at_its_deadline(
+    ) -> Result<(), TestError> {
+        let exit_timeout = Duration::from_millis(200);
+        // Released only after exit has returned.
+        let (outcome, elapsed, calls) = exit_during_truncation(exit_timeout, exit_timeout * 3)?;
+
+        assert!(
+            matches!(
+                outcome,
+                ExitOutcome::ShutDownWhileClearWriting { result: Ok(()) }
+            ),
+            "degraded outcome expected, got {outcome:?}"
+        );
+        assert!(elapsed >= exit_timeout, "exit used its whole budget");
+        assert!(elapsed < TIMEOUT, "exit stays bounded: {elapsed:?}");
+        assert_eq!(
+            calls.reports.load(Ordering::SeqCst),
+            0,
+            "no at-exit records while a clear may truncate them"
+        );
+        // Exactly one final shutdown, with what was left of the budget: nothing.
+        assert_eq!(shutdown_timeouts(&calls), vec![Duration::ZERO]);
+        Ok(())
+    }
+
+    /// RSH-002: a second clear gives up waiting for a stuck write slot.
+    #[test]
+    fn clear_times_out_waiting_for_a_held_write_slot() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("lifecycle-slot-timeout")?;
+        let log_path = scratch.path().join("app.log.jsonl");
+        fs::write(&log_path, "active")?;
+        let (lifecycle, _calls) = installed_fake()?;
+        let slot_timeout = Duration::from_millis(100);
+
+        let (writing_tx, writing_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (second, elapsed, first) = std::thread::scope(|scope| {
+            let (lifecycle, log_path) = (&lifecycle, &log_path);
+            let first = scope.spawn(move || {
+                lifecycle.clear(
+                    log_path,
+                    TIMEOUT,
+                    |()| Ok(()),
+                    move |dir: &Path| {
+                        let _ = writing_tx.send(());
+                        let _ = release_rx.recv();
+                        read_log_dir(dir)
+                    },
+                )
+            });
+            let writing = writing_rx.recv();
+            let started = Instant::now();
+            let second = lifecycle.clear(log_path, slot_timeout, |()| Ok(()), read_log_dir);
+            let elapsed = started.elapsed();
+            let _ = release_tx.send(());
+            (writing.map(|()| second), elapsed, first.join())
+        });
+        let second = second.map_err(|e| TestError(e.to_string()))?;
+
+        assert!(
+            matches!(second, Err(ClearError::WriteSlotTimedOut { timeout }) if timeout == slot_timeout),
+            "expected WriteSlotTimedOut, got {second:?}"
+        );
+        assert!(elapsed >= slot_timeout, "waited for the slot: {elapsed:?}");
+        assert!(elapsed < TIMEOUT, "the wait is bounded: {elapsed:?}");
+        let first = first.map_err(|_| TestError("first clear panicked".to_owned()))?;
+        assert!(first.is_ok(), "the slot holder still completes: {first:?}");
         Ok(())
     }
 
@@ -536,7 +671,7 @@ mod tests {
             ExitOutcome::ShutDown { .. }
         ));
 
-        let result = lifecycle.clear(&log_path, |()| Ok(()), read_log_dir);
+        let result = lifecycle.clear(&log_path, TIMEOUT, |()| Ok(()), read_log_dir);
 
         assert!(matches!(result, Err(ClearError::ShutdownStarted)));
         assert_eq!(fs::read_to_string(&log_path)?, "final records");
