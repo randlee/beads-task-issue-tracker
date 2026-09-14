@@ -76,14 +76,20 @@ def check() -> list[str]:
         return [f"{rel(CARGO_TOML)}: [workspace.package].version missing or not semver: {version!r}"]
 
     packages: list[str] = []
-    independent: dict[str, object] = {}
+    independent: dict[str, str | None] = {}
     for manifest_path in workspace_package_manifests(cargo):
         pkg = load_toml(manifest_path).get("package", {})
         name = pkg.get("name", "?")
         if name in INDEPENDENT_VERSION_MEMBERS:
-            independent[name] = pkg.get("version")
-            if not isinstance(pkg.get("version"), str) or not SEMVER.match(pkg.get("version")):
-                errors.append(f"{rel(manifest_path)}: [package].version must be an explicit semver string")
+            member_version = pkg.get("version")
+            if isinstance(member_version, str) and SEMVER.match(member_version):
+                independent[name] = member_version
+            else:
+                independent[name] = None
+                errors.append(
+                    f"{rel(manifest_path)}: [package].version must be an explicit semver string "
+                    f"(independently versioned member), got {member_version!r}"
+                )
             continue
         packages.append(name)
         if pkg.get("version") != {"workspace": True}:
