@@ -88,7 +88,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 
   | Variant | Fields | `Display` (today's string, source) | `code()` | `remediation()` |
   |---|---|---|---|---|
-  | `Spawn` | `binary: String`, `operation: Option<&'static str>`, `source: io::Error` | `operation = None`: `Failed to execute {binary}: {source}` (`cli.rs:563`); `Some(op)`: `Failed to run {binary} {op}: {source}` (`migration.rs:288`) | `BTIT_BEADS_SPAWN` | "Install the CLI or point Settings at its path; the searched directories are in check_bd_compatibility.searchedPaths." |
+  | `Spawn` | `binary: String`, `operation: Option<String>` (the first argv word of a raw invocation, or `None` for `run_json`), `source: io::Error` | `operation = None`: `Failed to execute {binary}: {source}` (`cli.rs:563`); `Some(op)`: `Failed to run {binary} {op}: {source}` (`migration.rs:288`) | `BTIT_BEADS_SPAWN` | "Install the CLI or point Settings at its path; the searched directories are in check_bd_compatibility.searchedPaths." |
   | `CommandFailed` | `binary`, `status: Option<i32>`, `status_display: String` (`ExitStatus`'s `Display`), `stderr: String` | `stderr` when non-empty (`cli.rs:577`); else `bd command failed with status: {status_display}` (`cli.rs:579`, literal `bd`) | `BTIT_BEADS_COMMAND_FAILED` | "Read stderr; run the same command in a terminal from the project directory." |
   | `SchemaMigration` | `binary` | `SCHEMA_MIGRATION_ERROR: Database schema is incompatible. Please use the repair function to fix this issue.` (`cli.rs:573`; the frontend matches the prefix, `bd-api.ts:253,256`) | `BTIT_BEADS_SCHEMA_MIGRATION` | "Use Repair database (bd_repair_database)." |
   | `InvalidJson` | `context: String`, `source: serde_json::Error` | `Invalid JSON: {source}` (`issues.rs:256`) | `BTIT_BEADS_INVALID_JSON` | "Upgrade the CLI; the output is not JSON even with --json." |
@@ -171,8 +171,8 @@ pub trait BeadsBackend: Send + Sync {
 
 /// What only a spawned CLI has. Implemented by `btit-bd` and `btit-br`; not by remote transports.
 pub trait CliBackend: BeadsBackend {
-    /// Configured binary name or path (today `config::get_cli_binary`).
-    fn binary(&self) -> &str;
+    /// Configured binary name or path (today `config::get_cli_binary`, which returns an owned `String`, config.rs:58-60).
+    fn binary(&self) -> String;
     /// Fresh `<binary> --version` from the temp dir with the extended PATH (today `probe_cli_binary`, cli.rs:185-196).
     fn probe(&self) -> Option<CliProbe>;
     /// Detected client kind (today: `get_cli_client_info().0`, cli.rs:326-365); `Unknown` after a failed probe.
@@ -220,7 +220,7 @@ pub enum ParseTarget { Status, Issue, CreatedIssue, UpdatedIssue, UpdatedIssueFe
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum BeadsError {
-    Spawn { binary: String, operation: Option<&'static str>, source: std::io::Error },
+    Spawn { binary: String, operation: Option<String>, source: std::io::Error },
     CommandFailed { binary: String, status: Option<i32>, status_display: String, stderr: String },
     SchemaMigration { binary: String },
     InvalidJson { context: String, source: serde_json::Error },
@@ -305,7 +305,7 @@ mod logging;
 6. `cargo test --workspace` passes; the test-preservation gate prints nothing.
 7. `cargo clippy -p btit-beads --all-targets -- -D warnings` and `cargo rustdoc -p btit-beads -- -D missing-docs` pass; `! grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-beads/src`.
 8. `crates/btit-beads/docs/backend-contract.md` exists with the sections in Deliverable 9, including the transport-neutral vs CLI-only method lists.
-9. `grep -c '^### ADR-008' docs/architecture.md` is `1` and the ADR table lists ADR-008 (Deliverable 12); `tests/api_freeze.rs` pins `BeadsBackend::cli`, `dolt`, `close_suggestions` default bodies returning `None`.
+9. `grep -c '^### ADR-008' docs/architecture.md` is `1` and the ADR table lists ADR-008 (Deliverable 12); `tests/api_freeze.rs` pins `BeadsBackend::cli`, `dolt`, `close_suggestions` default bodies returning `None`, `CliBackend::binary(&self) -> String`, and `BeadsError::Spawn { operation: Option<String>, .. }`.
 10. CI green; every command in Required Validation passes.
 
 ## Required Validation

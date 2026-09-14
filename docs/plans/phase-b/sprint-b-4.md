@@ -64,6 +64,7 @@ Line numbers are at `a18c724` (`crates/btit-app/src/` after b-1).
 - `crates/btit-app/src/cli.rs`: `execute_bd` becomes a wrapper; new `pub(crate) struct AppInvoker;` implementing `btit_cli::CliInvoker` over `config::CLI_BINARY`, `CLI_CLIENT_INFO` and a `static PROJECT_LOCKS: LazyLock<Arc<ProjectLocks>>`
 - `crates/btit-app/src/issue_commands.rs`, `polling.rs:43-60`, `attachments.rs:189-191`, `migration.rs:222-250`: call `btit_cli::ops::*` through `AppInvoker`
 - `crates/btit-app/src/attachments.rs:50` (`crate::cli::new_command("cmd")`) and `crates/btit-app/src/updates.rs:1,75` (`use crate::cli::{.., new_command, ..}`, `new_command("gh")`): rewired to `btit_cli::command::new_command`, keeping `CREATE_NO_WINDOW` on Windows
+- `crates/btit-app/src/config.rs:1` (`use crate::cli::{default_cli_binary, get_extended_path, new_command, reset_bd_version_cache}`) and `crates/btit-app/src/migration.rs:4` (`use crate::cli::{get_cli_client_info, get_extended_path, new_command, project_uses_dolt, supports_daemon_flag, uses_jsonl_files}`): the `new_command`/`get_extended_path` names now come from `btit_cli::{command::new_command, path::get_extended_path}` (and `default_cli_binary` from `btit_cli::probe`); the remaining names stay `crate::cli::…`; call sites unchanged
 - `.github/workflows/ci.yml`: `rust-quality` gains `btit-cli`, `btit-bd`, `btit-br` in every step (fmt, clippy, rustdoc, `cargo tree` gates)
 - `docs/plans/phase-b/sprint-b-4.md` (`status:` frontmatter only)
 
@@ -74,15 +75,15 @@ Every listed deliverable is expected to land at a production-ready level for the
 1. **Crate.** `crates/btit-cli`, `[lints] workspace = true`, `#![deny(missing_docs)]`, `publish = false`. Dependencies: `btit-types`, `btit-beads`, `serde_json`, `log`. No Tauri, no `sc-observability-log`. Cargo feature `test-support` (no dependencies) gates `pub mod testing`.
 2. **`path.rs`.** `get_extended_path` and `extended_path_entries` moved verbatim (`cli.rs:22-59, 200-207`), including the per-OS extra directories and separators. `command.rs`: `new_command` verbatim (`CREATE_NO_WINDOW` on Windows, `cli.rs:63-72`).
 3. **`locks.rs`.** `pub struct ProjectLocks` wrapping today's `Mutex<HashMap<String, Arc<Mutex<()>>>>` (`cli.rs:14-15`) with `fn guard(&self, working_dir: &str) -> Arc<Mutex<()>>`. Poisoning is recovered with `PoisonError::into_inner` where today's code calls `.unwrap()` (`cli.rs:548,553`); this is the one behaviour delta (no panic on a poisoned lock) and is listed in the PR.
-4. **`run.rs`.** `resolve_working_dir(project: &ProjectRef, client: CliClient) -> Result<String, BeadsError>` (cwd → `BEADS_PATH` → `current_dir()` → `"."`, `cli.rs:524-531`; the `#[non_exhaustive]` wildcard arm returns `BeadsError::Unsupported { operation: "non-local project reference", client }`). `run_json(binary, no_daemon: bool, locks: &ProjectLocks, working_dir: &str, command: &str, args: &[String]) -> Result<String, BeadsError>` is `execute_bd`'s body (`cli.rs:533-591`): subcommand split, `--no-daemon` when `no_daemon`, `--json`, the `[bd] …` log lines, the project lock, `PATH`/`BEADS_PATH` env, `SchemaMigration` on `no such column: spec_id`, `CommandFailed` with stderr, the `VERBOSE_LOGGING` preview. `run_raw(binary, working_dir, args: &[&str]) -> Result<CliOutput, BeadsError>`: `new_command(binary).args(args).current_dir(working_dir).env("PATH", ..).env("BEADS_PATH", working_dir).output()`, mapping the spawn error to `Spawn { operation: args.first() }` and any exit status to `Ok(CliOutput)` (the caller decides, as `migration.rs` does today). `probe_version_output(binary) -> Result<CliOutput, BeadsError>`: `--version` from `std::env::temp_dir()` with the extended `PATH` (`config.rs:65-69,129-133`, `cli.rs:186-190`).
+4. **`run.rs`.** `resolve_working_dir(project: &ProjectRef, client: CliClient) -> Result<String, BeadsError>` (cwd → `BEADS_PATH` → `current_dir()` → `"."`, `cli.rs:524-531`; the `#[non_exhaustive]` wildcard arm returns `BeadsError::Unsupported { operation: "non-local project reference", client }`). `run_json(binary, no_daemon: bool, locks: &ProjectLocks, working_dir: &str, command: &str, args: &[String]) -> Result<String, BeadsError>` is `execute_bd`'s body (`cli.rs:533-591`): subcommand split, `--no-daemon` when `no_daemon`, `--json`, the `[bd] …` log lines, the project lock, `PATH`/`BEADS_PATH` env, `SchemaMigration` on `no such column: spec_id`, `CommandFailed` with stderr, the `VERBOSE_LOGGING` preview. `run_raw(binary, working_dir, args: &[&str]) -> Result<CliOutput, BeadsError>`: `new_command(binary).args(args).current_dir(working_dir).env("PATH", ..).env("BEADS_PATH", working_dir).output()`, mapping the spawn error to `Spawn { operation: args.first().map(ToString::to_string) }` and any exit status to `Ok(CliOutput)` (the caller decides, as `migration.rs` does today). **`json_argv(command: &str, args: &[String], no_daemon: bool) -> Vec<String>`** is the single pure assembler of a JSON invocation's argv (`command.split_whitespace()`, then `args`, then `--no-daemon` if `no_daemon`, then `--json`, `cli.rs:534-541`); `run_json` spawns exactly `json_argv(..)` and `RecordingInvoker::run_json` records exactly `json_argv(..)`, so the argv table below is asserted above the spawn seam. `probe_version_output(binary) -> Result<CliOutput, BeadsError>`: `--version` from `std::env::temp_dir()` with the extended `PATH` (`config.rs:65-69,129-133`, `cli.rs:186-190`).
 5. **`probe.rs`.** `probe_cli_binary(binary) -> Option<CliProbe>` (`cli.rs:185-196`, via `probe_version_output` + `parse_cli_probe`) and `default_cli_binary() -> String` (`cli.rs:255-281`, ungated `log::info!/warn!` kept).
 6. **`runner.rs`.** The `CliInvoker` trait (`binary`, `client_info`, `probe`, `run_json`, `run_raw`, with the provided `capabilities`/`client`/`version`) and `CliRunner` exactly as in the code samples. `CliRunner::client_info()` reproduces `get_cli_client_info` (`cli.rs:326-365`): probe lazily, cache only a parsed success, log the same lines. `CliRunner::capabilities()` = `capabilities_for(client, version)`. `CliRunner::with_probe(binary, locks, probe)` (behind `test-support`) pre-seeds the cache for tests.
 7. **`ops.rs`.** One function per operation, generic over `&dyn CliInvoker`, with today's bodies, where every former global read is replaced by the invoker accessor (`supports_list_all_flag()` → `inv.capabilities().supports_list_all_flag`, `supports_delete_hard_flag()` → the `hard` argument, `get_cli_client_info()` client match → `inv.client()`, `supports_daemon_flag()` inside `execute_bd` → `run_json`'s `no_daemon`): `list` (with the `--all` two-call fallback when `!supports_list_all_flag`, `issue_commands.rs:22-39`), `ready`, `status`, `show` (not-found via `e.to_string().to_lowercase()` containing `no issue found`/`not found`, empty stdout, array-or-object, strict deserialize → `ParseFailed { target: Issue, id: Some(id) }`), `create`, `update` (empty stdout → `show` fallback with lenient `.ok()`), `close(inv, project, id, suggest_next: bool)`, `search`, `label_add`, `label_remove`, `delete(inv, project, id, hard: bool)`, `comment_add`, `dep_add(.., relation_type: Option<&str>)`, `dep_remove`, `relation_types(client) -> Vec<RelationType>` (`issue_commands.rs:556-578`), `sync(inv, project, no_daemon) -> Result<(), BeadsError>` (`migration.rs:222-232`, non-zero exit → `CommandFailed`). Log lines keep their text; the `context` label of `parse_issues_tolerant` calls may become the op name (plan "Behaviour preserved").
-8. **`testing.rs` (feature `test-support`).** `pub struct RecordingInvoker` implementing `CliInvoker` with a seeded `CliProbe`, a queue of scripted `Result<String, BeadsError>`/`Result<CliOutput, BeadsError>` replies, and a recorded `Vec<(String /*command*/, Vec<String> /*args*/)>` of every `run_json`/`run_raw` call. Used by this crate's own tests and, through `btit-cli = { features = ["test-support"] }` under `[dev-dependencies]`, by `btit-bd` and `btit-br`.
+8. **`testing.rs` (feature `test-support`).** `pub struct RecordingInvoker` implementing `CliInvoker` with a seeded `Option<CliProbe>` (`None` is the no-probe column: `client_info()` returns `None`, so `client()` is `Unknown` and `capabilities()` all `false`), a queue of scripted `Result<String, BeadsError>`/`Result<CliOutput, BeadsError>` replies, and a recorded `Vec<Vec<String>>` of the **full argv** of every call: `run_json` records `run::json_argv(command, args, self.capabilities().supports_daemon_flag)` (the same assembler `CliRunner::run_json` spawns), `run_raw` records `args` verbatim. Used by this crate's own tests and, through `btit-cli = { features = ["test-support"] }` under `[dev-dependencies]`, by `btit-bd` and `btit-br`.
 9. **Skeleton crates `btit-bd` and `btit-br`.** Each: `Cargo.toml` with the final `[dependencies]` (`btit-types`, `btit-beads`, `btit-cli`, `serde_json`, `log`), `[features] test-support = ["btit-cli/test-support"]` (a crate feature, not `#[cfg(test)]`, so `with_invoker` is usable from the app's tests via `btit-bd = { features = ["test-support"] }` under the app's `[dev-dependencies]` in b-8), `[dev-dependencies] btit-cli = { path = "../btit-cli", features = ["test-support"] }`, `[lints] workspace = true`, `publish = false`; `clippy.toml` with the four `allow-*-in-tests` keys; `src/lib.rs` containing only `#![deny(missing_docs)]` and the crate doc comment. Both are workspace members; `cargo check --workspace` succeeds; the root `Cargo.lock` carries their entries and dependency edges (a feature adds no package, so the `cargo tree -e normal` expectations are unchanged). b-5 and b-6 add code inside these directories only and never touch the root manifests, the lockfile or the workflow.
-10. **App adoption, no duplicated logic.** `execute_bd` = `run_json(&get_cli_binary(), supports_daemon_flag(), &PROJECT_LOCKS, &wd, command, args).map_err(|e| e.to_string())` with `wd` from `resolve_working_dir`. `AppInvoker` implements `CliInvoker` over the statics (transitional; deleted by b-7). The two non-beads spawns that use `crate::cli::new_command` today, `attachments.rs:50` (`cmd /C start`) and `updates.rs:75` (`gh auth token`, imported at `updates.rs:1`), switch to `btit_cli::command::new_command`; `CREATE_NO_WINDOW` behaviour on Windows is unchanged because the function moved verbatim. Every `#[tauri::command]` in `issue_commands.rs` keeps its signature and calls the `ops` function, keeping its own log lines, `transform_issue` mapping and `map_err(|e| e.to_string())`; `bd_delete` keeps the attachment-folder cleanup; `bd_available_relation_types` maps `RelationType` to the same `{"value","label"}` JSON. `polling.rs` `bd_poll_data` uses `ops::list` with `include_all: true` and partitions on `status != "closed"` (today's `--all` path; for the two-call fallback the merged list contains the same issues, `polling.rs:43-56`). `attachments.rs` `purge_orphan_attachments` uses `ops::list(include_all: true)` (today an unconditional `--all` call, `attachments.rs:189`; on bd < 0.55 this now takes the fallback — legacy-only delta listed in the PR). `migration.rs` `sync_bd_database`/`bd_sync` call `ops::sync` and map the result to today's log/return text (table in Required Work).
+10. **App adoption, no duplicated logic.** `execute_bd` = `run_json(&get_cli_binary(), supports_daemon_flag(), &PROJECT_LOCKS, &wd, command, args).map_err(|e| e.to_string())` with `wd` from `resolve_working_dir`. The import lines `config.rs:1` and `migration.rs:4` take `new_command`/`get_extended_path` (and `default_cli_binary`) from `btit-cli`; their call sites (`config.rs:65-69,129-133`, `migration.rs:227-232,282-288,333-339,403-408,623-629,665-671,771-777,879-885,944-950,1003-1009,1081-1087`) are unchanged. `AppInvoker` implements `CliInvoker` over the statics (transitional; deleted by b-7). The two non-beads spawns that use `crate::cli::new_command` today, `attachments.rs:50` (`cmd /C start`) and `updates.rs:75` (`gh auth token`, imported at `updates.rs:1`), switch to `btit_cli::command::new_command`; `CREATE_NO_WINDOW` behaviour on Windows is unchanged because the function moved verbatim. Every `#[tauri::command]` in `issue_commands.rs` keeps its signature and calls the `ops` function, keeping its own log lines, `transform_issue` mapping and `map_err(|e| e.to_string())`; `bd_delete` keeps the attachment-folder cleanup; `bd_available_relation_types` maps `RelationType` to the same `{"value","label"}` JSON. `polling.rs` `bd_poll_data` uses `ops::list` with `include_all: true` and partitions on `status != "closed"` (today's `--all` path; for the two-call fallback the merged list contains the same issues, `polling.rs:43-56`). `attachments.rs` `purge_orphan_attachments` uses `ops::list(include_all: true)` (today an unconditional `--all` call, `attachments.rs:189`; on bd < 0.55 this now takes the fallback — legacy-only delta listed in the PR). `migration.rs` `sync_bd_database`/`bd_sync` call `ops::sync` and map the result to today's log/return text (table in Required Work).
 11. **Tests moved and added.** The cli.rs tests in Exact Targets move to `btit-cli`. New unit tests cover the pure pieces this sprint introduces: `resolve_working_dir` precedence (cwd, `BEADS_PATH`, current dir), the arg vectors built by each `ops` function through `RecordingInvoker` (asserting, for example, `list` with `include_all` on a `supports_list_all_flag = false` invoker issues `list --limit=0` then `list --limit=0 --status=closed`, `issue_commands.rs:25-33`), `show`'s not-found and shape handling, `update`'s empty-output fallback, `close` with and without `--suggest-next`, `delete` with and without `--hard`, `relation_types` for `Br` vs others.
-12. **API freeze and CI.** `crates/btit-cli/tests/api_freeze.rs` pins `CliInvoker` (all five required methods including `probe`), `CliRunner`, `RecordingInvoker` and every `ops` signature; `rust-quality` covers `btit-cli`, `btit-bd`, `btit-br` (the skeletons pass fmt/clippy/rustdoc trivially and their `cargo tree` gates already assert the final dependency sets). The command-signature gate (1) and the frontend invoke-subset gate (2) from the plan ("Command contract gates") pass.
+12. **API freeze and CI.** `crates/btit-cli/tests/api_freeze.rs` pins `CliInvoker` (all five required methods including `probe`), `CliRunner`, `run::json_argv`, `RecordingInvoker::new(Option<CliProbe>)`, `RecordingInvoker::calls() -> Vec<Vec<String>>` and every `ops` signature; `rust-quality` covers `btit-cli`, `btit-bd`, `btit-br` (the skeletons pass fmt/clippy/rustdoc trivially and their `cargo tree` gates already assert the final dependency sets). The command-signature gate (1) and the frontend invoke-subset gate (2) from the plan ("Command contract gates") pass.
 
 ## Required Work
 
@@ -95,7 +96,7 @@ Every listed deliverable is expected to land at a production-ready level for the
   | `Err(Spawn { source, .. })` | `log_error!("[sync] Failed to run {} sync: {}", binary, source)` | `Err(format!("Failed to run {} sync: {}", binary, source))` |
 
 - `ops` functions take `project: &ProjectRef`; the app constructs `ProjectRef::local(options.cwd)`.
-- **Authoritative argv table** (every cell is a `RecordingInvoker` assertion in `crates/btit-cli/tests/ops_argv.rs`; `<flags>` are the flags today's code appends in order; `execute_bd` appends `--no-daemon` only when `supports_daemon_flag` — bd < 0.50 — and always ends with `--json`, `cli.rs:538-541`). Columns are the seeded probes `Bd 1.0.4`, `Bd 0.54.0`, `Bd 0.49.6`, `Br 0.1.33`, `Unknown 9.9.9`, and *no probe* (`client_info() == None`, all gates `false`, client `Unknown`).
+- **Authoritative argv table** (every cell is a `RecordingInvoker` assertion in `crates/btit-cli/tests/ops_argv.rs`; the recorded argv is `run::json_argv(command, args, no_daemon)`, i.e. the subcommand words, the op's args, `--no-daemon` only when `supports_daemon_flag` — bd < 0.50 — and `--json` last, `cli.rs:534-541`). Columns are the seeded probes `Bd 1.0.4`, `Bd 0.54.0`, `Bd 0.49.6`, `Br 0.1.33`, `Unknown 9.9.9`, and *no probe* (`RecordingInvoker::new(None)`: `client_info() == None`, all gates `false`, client `Unknown`). The `--all` vs two-call expectation and every capability-driven flag in the tests are computed from `btit_beads::gates::capabilities_for(client, version)` for the column's probe, not written as literals, so a later change to a gate (b-9, B4/B5/B7) moves the expectation with it; the table shows the values those gates return at `a18c724`.
 
   | `ops` call | Bd 1.0.4 | Bd 0.54.0 | Bd 0.49.6 | Br 0.1.33 | Unknown 9.9.9 / no probe |
   |---|---|---|---|---|---|
@@ -117,7 +118,7 @@ Every listed deliverable is expected to land at a production-ready level for the
   | `sync(no_daemon)` (`run_raw`, `migration.rs:222-232`) | `sync` | `sync` | `sync --no-daemon` | `sync` | `sync` |
   | `relation_types(client)` | common 7 + `tracks`, `until`, `validates` | same | same | common 7 | common 7 + 3 |
 
-  The `hard`/`suggest_next`/`no_daemon` arguments are supplied by the backends from `capabilities()`/client kind (b-5, b-6), so the per-version columns are what those backends produce end-to-end; b-5 and b-6 repeat the table as full-method parity tests through `with_invoker(RecordingInvoker)`.
+  The `hard`/`suggest_next`/`no_daemon` arguments are supplied by the backends from `capabilities()`/client kind (b-5, b-6), so the per-version columns are what those backends produce end-to-end; b-5 and b-6 repeat the table as full-method parity tests through `with_invoker(Box::new(RecordingInvoker::new(..)))`. Footnote: the *no probe* column above is the generic (`BdCli`) behaviour; for a `BrCli` built over a no-probe invoker (b-6 D5) `close` still records `--suggest-next` (the flag is br's, not version-gated) and `list(include_all)` takes the two-call path because `capabilities_for(Unknown, None)` has `supports_list_all_flag == false`.
 - Changelog lines (collated by b-12): "New crate `btit-cli`: the process transport shared by bd and br (extended PATH, per-project lock, `--json` invocation) and the shared issue-operation bodies."
 
 ## Explicit Code Samples
@@ -163,7 +164,6 @@ impl CliRunner {
     pub fn new(binary: impl Into<String>, locks: Arc<ProjectLocks>) -> Self { /* probe: None */ }
     #[cfg(feature = "test-support")]
     pub fn with_probe(binary: impl Into<String>, locks: Arc<ProjectLocks>, probe: CliProbe) -> Self { /* probe: Some(probe) */ }
-    pub fn binary_ref(&self) -> &str { &self.binary }
     fn cached(&self) -> std::sync::MutexGuard<'_, Option<CliProbe>> {
         self.probe.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -188,28 +188,52 @@ impl CliInvoker for CliRunner {
         }
     }
     fn run_json(&self, project: &ProjectRef, command: &str, args: &[String]) -> Result<String, BeadsError> {
-        let wd = crate::run::resolve_working_dir(project, self.client())?;
-        crate::run::run_json(&self.binary, self.capabilities().supports_daemon_flag, &self.locks, &wd, command, args)
+        let info = self.client_info();                                        // one cache read (or one probe) per invocation
+        let client = info.as_ref().map_or(CliClient::Unknown, |p| p.client);
+        let no_daemon = info.as_ref().map_or(false, |p| capabilities_for(p.client, p.version).supports_daemon_flag);
+        let wd = crate::run::resolve_working_dir(project, client)?;
+        crate::run::run_json(&self.binary, no_daemon, &self.locks, &wd, command, args)   // spawns json_argv(command, args, no_daemon)
     }
     fn run_raw(&self, project: &ProjectRef, args: &[&str]) -> Result<CliOutput, BeadsError> {
-        let wd = crate::run::resolve_working_dir(project, self.client())?;
+        let client = self.client_info().map_or(CliClient::Unknown, |p| p.client);
+        let wd = crate::run::resolve_working_dir(project, client)?;
         crate::run::run_raw(&self.binary, &wd, args)
     }
 }
 ```
 
 ```rust
+// crates/btit-cli/src/run.rs — the single argv assembler (execute_bd, cli.rs:534-541)
+pub fn json_argv(command: &str, args: &[String], no_daemon: bool) -> Vec<String> {
+    let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+    argv.extend(args.iter().cloned());
+    if no_daemon { argv.push("--no-daemon".to_owned()); }
+    argv.push("--json".to_owned());
+    argv
+}
+```
+
+```rust
 // crates/btit-cli/src/testing.rs  (cfg(feature = "test-support"))
-/// Scripted `CliInvoker` for unit tests in btit-cli, btit-bd and btit-br: no process is spawned.
+/// Scripted `CliInvoker` for unit tests in btit-cli, btit-bd, btit-br and the app: no process is spawned.
 #[derive(Debug)]
-pub struct RecordingInvoker { /* probe: CliProbe, json_replies: Mutex<VecDeque<Result<String, BeadsError>>>, raw_replies: Mutex<VecDeque<Result<CliOutput, BeadsError>>>, calls: Mutex<Vec<(String, Vec<String>)>> */ }
+pub struct RecordingInvoker { /* binary: String, probe: Option<CliProbe>, json_replies: Mutex<VecDeque<Result<String, BeadsError>>>, raw_replies: Mutex<VecDeque<Result<CliOutput, BeadsError>>>, calls: Mutex<Vec<Vec<String>>> */ }
 impl RecordingInvoker {
-    pub fn new(probe: CliProbe) -> Self;
+    pub fn new(probe: Option<CliProbe>) -> Self;                          // None = the no-probe column
     pub fn reply_json(self, reply: Result<String, BeadsError>) -> Self;   // builder; replies are consumed in order
     pub fn reply_raw(self, reply: Result<CliOutput, BeadsError>) -> Self;
-    pub fn calls(&self) -> Vec<(String, Vec<String>)>;                    // ("list", ["--limit=0", "--json"]) etc.
+    pub fn calls(&self) -> Vec<Vec<String>>;                              // full argv per call, e.g. ["list", "--limit=0", "--json"]
 }
-impl CliInvoker for RecordingInvoker { /* records and pops */ }
+impl CliInvoker for RecordingInvoker {
+    fn binary(&self) -> String { self.binary.clone() }                    // "bd" unless set with `.binary(..)`
+    fn client_info(&self) -> Option<CliProbe> { self.probe.clone() }
+    fn probe(&self) -> Option<CliProbe> { self.probe.clone() }
+    fn run_json(&self, _p: &ProjectRef, command: &str, args: &[String]) -> Result<String, BeadsError> {
+        self.calls.lock().unwrap_or_else(PoisonError::into_inner).push(crate::run::json_argv(command, args, self.capabilities().supports_daemon_flag));
+        self.json_replies.lock().unwrap_or_else(PoisonError::into_inner).pop_front().unwrap_or_else(|| Ok(String::new()))
+    }
+    fn run_raw(&self, _p: &ProjectRef, args: &[&str]) -> Result<CliOutput, BeadsError> { /* records args verbatim, pops raw reply */ }
+}
 ```
 
 ```rust

@@ -85,9 +85,11 @@ Signatures are in the trait inventory below and, authoritatively, in `sprint-b-3
 **Command contract gates (maintainer requirement 6).** Two mechanical gates, referenced by b-4, b-7, b-8, b-12 and phase closure:
 
 ```bash
-# (1) Tauri command signatures: the whole `fn …` header up to `{` (name, visibility, async, parameters with types, return type), at a18c724 vs HEAD, must diff empty.
-sig() { for f in "$1"/*.rs; do awk '/#\[tauri::command\]/{c=1; buf=""; next} c{buf=buf $0; if ($0 ~ /\{/){gsub(/[[:space:]]+/," ",buf); sub(/ *\{.*$/,"",buf); sub(/^ /,"",buf); print buf; c=0}}' "$f"; done | sort; }
-git worktree add -q /tmp/btit-a18c724 a18c724 2>/dev/null; diff <(sig /tmp/btit-a18c724/src-tauri/src) <(sig crates/btit-app/src)
+# (1) Tauri command signatures: the whole `fn …` header up to `{` (name, visibility, async, parameters with types, return type),
+#     at $IMPLEMENTATION_BASELINE (the develop@<sha> b-1 records) vs HEAD, must diff empty. Whitespace and the `( `/`, )` of wrapped
+#     headers are normalized so multi-line headers (watcher.rs:37-41) compare equal to single-line ones; subdirectories are included.
+sig() { find "$1" -name '*.rs' | sort | while read -r f; do awk '/#\[tauri::command\]/{c=1; buf=""; next} c{buf=buf " " $0; if ($0 ~ /\{/){gsub(/[[:space:]]+/," ",buf); sub(/ *\{.*$/,"",buf); gsub(/\( /,"(",buf); gsub(/, \)/,")",buf); gsub(/,\)/,")",buf); sub(/^ /,"",buf); print buf; c=0}}' "$f"; done | sort; }
+git worktree add -q /tmp/btit-baseline "$IMPLEMENTATION_BASELINE" 2>/dev/null; diff <(sig /tmp/btit-baseline/src-tauri/src) <(sig crates/btit-app/src)
 # (2) Every name the frontend invokes exists in generate_handler!.
 comm -23 <(grep -oE "invoke[<(][^)]*'[a-z_]+'" app/utils/bd-api.ts | sed -E "s/.*'([a-z_]+)'/\1/" | sort -u) <(sed -n '/generate_handler!\[/,/\]/p' crates/btit-app/src/lib.rs | grep -oE '[a-z_]+::[a-z_]+' | sed 's/.*:://' | sort -u)   # must print nothing
 ```
@@ -98,8 +100,8 @@ Every "prints nothing" gate in this plan and the sprint docs is executed as `tes
 
 - **bd first, br secondary, fallback bd:** `CLI_CANDIDATES = ["bd","br"]`, `CLI_FALLBACK = "bd"`, `MIN_SUPPORTED_BD_MAJOR = 1`, `rank_cli_candidate`, `select_default_binary` (`cli.rs:76-84,130-163`) move unchanged (pure parts to `btit-beads`, the spawning `probe_cli_binary`/`default_cli_binary` to `btit-cli`).
 - **bd < 1.0 warning:** `is_legacy_bd`, `cli_compatibility_warnings` (`cli.rs:115-121,218-253`) move unchanged to `btit-beads`; `check_bd_compatibility` keeps its name and its `CompatibilityInfo` JSON shape (`app/utils/bd-api.ts:711-733`).
-- **Version-gated helpers:** the five pure `_for` cores keep their names and `(CliClient, u32, u32, u32)` signatures (`cli.rs:372,392,413,434,453`) so their table-driven tests (`cli.rs:1307-1421`) move byte-identical; the wrappers become `BeadsBackend::capabilities()` computed from the backend's cached probe.
-- **`project_uses_dolt` checks:** `BeadsBackend::project_uses_dolt(&self, beads_dir)`; `btit-bd` keeps `project_uses_dolt_for` (`cli.rs:482-515`), `btit-br` returns `false` (the `Br` arm, `cli.rs:487`). Every call site (`watcher.rs:86`, `fs_commands.rs:50,73`, `polling.rs:96`, `migration.rs:200,270,330,513,588`) keeps calling it before choosing a legacy path.
+- **Version-gated helpers:** the five pure `_for` cores keep their names and `(CliClient, u32, u32, u32)` signatures (`cli.rs:372,392,413,434,453`) so their table-driven tests (`cli.rs:1307-1421`) move byte-identical; the wrappers become `CliBackend::capabilities()` (reached from the app through `backend.cli()`), computed from the backend's cached probe.
+- **`project_uses_dolt` checks:** `BeadsBackend::project_uses_dolt(&self, project: &ProjectRef)` (every caller derives today's `beads_dir` as `<working_dir>/.beads`, so the app passes the project and the bd backend derives the directory); `btit-bd` keeps `project_uses_dolt_for` (`cli.rs:482-515`), `btit-br` returns `false` (the `Br` arm, `cli.rs:487`). Every call site (`watcher.rs:86`, `fs_commands.rs:50,73`, `polling.rs:96`, `migration.rs:200,270,330,513,588`) keeps calling it before choosing a legacy path.
 - **`get_extended_path` probing:** `get_extended_path`, `extended_path_entries`, `new_command` (`cli.rs:22-72,200-207`) move to `btit-cli`; every spawn keeps `.env("PATH", get_extended_path())` and `--version` probes keep `current_dir(std::env::temp_dir())`.
 - **Tauri command names and signatures:** the 65 names in `generate_handler!` (`lib.rs:71-137`), their argument names and their `Result<_, String>` shapes are unchanged; the 57 names the frontend invokes (`app/utils/bd-api.ts`) and the `beads-changed` event (`app/composables/useChangeDetection.ts:59`) are unchanged. Error strings the frontend matches (`SCHEMA_MIGRATION_ERROR`, `no such column: spec_id`, `bd-api.ts:253,256`; `Dolt backend configured but database not found`, `bd-api.ts:291`) are reproduced verbatim by `BeadsError`'s `Display`.
 - **Gated logging:** `LOGGING_ENABLED`/`VERBOSE_LOGGING` and the `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros (`logging.rs:32-66`) move to `btit-beads::logging` as `#[macro_export]` macros, so every moved call site keeps its enabled/verbose gate. Two logging changes are allowed, both log text only and of the same class as refactor item A1: (1) the `context` label passed to `parse_issues_tolerant` (for example `bd_list_open`) may become the trait method name; (2) the `log` target of moved code changes with its module path (today `app_lib::cli`, `app_lib::issues`; after the move `btit_cli::run`, `btit_beads::parse`, …, taken from `module_path!()` via `log::Record::target()`), which the JSONL `target` field and the debug panel render without any dependency on the old names (a-4 acceptance criterion 9, `sprint-a-4.md`).
@@ -174,7 +176,7 @@ Source columns cite `src-tauri/src/` at `a18c724`. "bd"/"br" mark the implementi
 
 | Method | Today's source | Notes |
 | --- | --- | --- |
-| `binary() -> &str` | `get_cli_binary`, `config.rs:58-60` | the configured name/path |
+| `binary() -> String` | `get_cli_binary`, `config.rs:58-60` | the configured name/path (owned, as `get_cli_binary` returns today) |
 | `probe() -> Option<CliProbe>` | `probe_cli_binary`, `cli.rs:185-196` | fresh `--version` run from the temp dir, through the invoker |
 | `client() -> CliClient` | `get_cli_client_info` client part, `cli.rs:326-365` | from the cached probe; `Unknown` when the probe failed |
 | `version() -> Option<CliVersion>` | `get_cli_client_info` tuple part | same |
@@ -407,7 +409,7 @@ Trigger definitions (referenced by every sprint doc): `must_follow` merge-forwar
 | `b-11 must_follow b-8, b-10` | edits app modules b-8 rewires (`attachment_refs.rs`, `polling.rs`, `updates.rs`, `attachments.rs`) and `btit-cli`; its test-preservation run applies the b-9, b-10 and b-11 replacement lists; as layer k+2 of group B it merges the late finisher. |
 | `b-12 must_follow b-11` | lint rollout touches every app module after the last behaviour fix; collates every sprint's changelog lines. |
 | `b-5 parallel_safe b-6` | `crates/btit-bd/**` + `sprint-b-5.md` vs `crates/btit-br/**` + `sprint-b-6.md`. The files both would otherwise touch (root `Cargo.toml` members, root `Cargo.lock`, `ci.yml` `rust-quality` rows, a cross-crate recording invoker) are written by b-4 (skeleton crates with final dependency sets; `btit_cli::testing` behind the `test-support` feature). Each has a `git diff --name-only` gate. |
-| `b-5 parallel_safe b-9`, `b-6 parallel_safe b-9` | `crates/btit-beads/**` (behind the API frozen by `tests/api_freeze.rs`) vs `crates/btit-bd/**` / `crates/btit-br/**`; b-9 edits no manifest or workflow. |
+| `b-5 parallel_safe b-9`, `b-6 parallel_safe b-9` | `crates/btit-beads/**` (behind the API frozen by `tests/api_freeze.rs`) vs `crates/btit-bd/**` / `crates/btit-br/**`; b-9 edits no manifest or workflow. b-6's capability and `--all` expectations are derived from `btit_beads::gates::capabilities_for(client, version)` rather than literals, so a b-9 flip of B7 (OQ-4) changes no b-6 file and needs no follow-up edit. |
 | `b-8 parallel_safe b-10` | `crates/btit-app/**` (migration, polling mtime, watcher, fs_commands, updates, cli.rs deletion, lib.rs) vs `crates/btit-bd/**`; `crates/btit-bd/tests/api_freeze.rs` pins `project_uses_dolt_for`'s signature so b-8's callers are unaffected. |
 
 ### Ownership table
@@ -435,7 +437,7 @@ Every row is verified against each sprint doc's Exact Targets.
 | `crates/btit-beads/**` | — | — | **creates** (API frozen) | — | — | — | **fixes behind the frozen API** | — | — | — | — | — |
 | `crates/btit-cli/**` (incl. `testing`, `test-support` feature) | — | — | — | **creates** | — | — | — | — | — | — | B13 probe cache | — |
 | `crates/btit-bd/**` | — | — | — | skeleton (`Cargo.toml`, `clippy.toml`, doc-only `lib.rs`) | **implements** | — | — | — | — | **B3, B10, B13 rename** | — | — |
-| `crates/btit-br/**` | — | — | — | skeleton | — | **implements** | — | — | — | — | OQ-4 follow-up in `src/backend.rs` tests (conditional: only if b-9 flips `supports_list_all_flag_for`) | — |
+| `crates/btit-br/**` | — | — | — | skeleton | — | **implements** | — | — | — | — | — | — |
 | `crates/sc-observability-log*/**`, `crates/Cargo.toml`, `crates/Cargo.lock`, `crates/runtime-deps.txt`, `src-tauri/**` | **deletes/moves** | — | — | — | — | — | — | — | — | — | — | — |
 | `.github/workflows/ci.yml` | **backend job; removes `crates` job** | adds `rust-quality` | extends | extends for `btit-cli`, `btit-bd`, `btit-br` | — | — | — | — | — | — | — | workspace-wide fmt/clippy |
 | `.github/workflows/release.yml` | **artifact paths** | — | — | — | — | — | — | — | — | — | — | — |
@@ -444,7 +446,7 @@ Every row is verified against each sprint doc's Exact Targets.
 | `CHANGELOG.md`, `docs/crate-split-refactor-issues.md` disposition table | — | — | — | — | — | — | — | — | — | — | — | **owns** |
 | `docs/plans/phase-b/sprint-b-N.md` `status:` frontmatter | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc |
 
-Non-intersection proofs for the `parallel_safe` pairs read straight off this table: group A members own `crates/btit-bd/**`, `crates/btit-br/**`, `crates/btit-beads/**` respectively and nothing else; group B members own disjoint sets (`crates/btit-app/**` vs `crates/btit-bd/**`; neither touches `Cargo.lock`). b-11's conditional edit to `crates/btit-br/src/backend.rs` is sequential: b-11 is layer 8, after both parallel windows (group A at layer 5, group B at layer 7) have closed, so it intersects no `parallel_safe` pair.
+Non-intersection proofs for the `parallel_safe` pairs read straight off this table: group A members own `crates/btit-bd/**`, `crates/btit-br/**`, `crates/btit-beads/**` respectively and nothing else; group B members own disjoint sets (`crates/btit-app/**` vs `crates/btit-bd/**`; neither touches `Cargo.lock`). No sprint after b-6 edits `crates/btit-br/**`: its tests derive their expectations from `btit_beads::gates::capabilities_for`, so the B7/OQ-4 outcome propagates from `btit-beads` without a `btit-br` edit.
 
 ## Cross-sprint document ownership
 
@@ -478,7 +480,7 @@ phase-b closes when all of the following hold:
 - b-1 to b-12 are merged to `integrate/phase-b` (group members through their layer-(k+2) branch).
 - `integrate/phase-b` is merged to `develop` through a single phase PR.
 - `src-tauri/` no longer exists; `cargo tree --workspace -e normal` shows the dependency rules of the crate graph; `pnpm tauri:build` produces the bundles from `target/`; the release workflow's artifact globs match them.
-- The 65 Tauri command names in `generate_handler!` are unchanged from `a18c724`; the command-signature gate (1) diffs empty and the frontend invoke-subset gate (2) prints nothing ("Command contract gates").
+- The Tauri command names in `generate_handler!` are unchanged from `$IMPLEMENTATION_BASELINE` (65 at `a18c724`, re-counted by b-1); the command-signature gate (1) diffs empty and the frontend invoke-subset gate (2) prints nothing ("Command contract gates").
 - `docs/architecture.md` carries ADR-008 and ADR-009.
 
 **Not part of phase-b:**

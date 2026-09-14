@@ -69,7 +69,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 2. **`BeadsBackend`** (transport-neutral methods only): `project_uses_dolt(_)` → `false` (the `Br` arm, `cli.rs:487`; no working-dir resolution needed); `close` → `self.close_suggesting_next(..)` (today br always passes `--suggest-next`, `issue_commands.rs:410-413`); `delete` → `hard: self.capabilities().supports_delete_hard_flag` (always `false` for br, `cli.rs:437`; kept data-driven); `relation_types` → `ops::relation_types(CliClient::Br)` (the common seven, `:556-564,571-572`); `sync` → `ops::sync(.., self.capabilities().supports_daemon_flag)` (`false`, `cli.rs:374`); accessors `cli()` → `Some(self)`, `dolt()` → `None`, `close_suggestions()` → `Some(self)`.
 3. **`CliBackend`** (CLI-only facts): `binary()`, `probe()` (via `inv.probe()`), `client()`, `version()`, `capabilities()`, `run_raw()`, `release_source()` → `BR_RELEASE_SOURCE` (`https://api.github.com/repos/Dicklesworthstone/beads_rust/releases/latest`, `https://github.com/Dicklesworthstone/beads_rust/releases`, `updates.rs:286,290`), exported `pub const`.
 4. **`CloseSuggestions`.** `close_suggesting_next` → `ops::close(self.inv.as_ref(), p, id, true)`.
-5. **Full-method parity tests** (`tests/parity.rs`, through `BrCli::with_invoker(Box::new(RecordingInvoker::new(probe)))`) for the seeded probe `Br 0.1.33` and the no-probe case: every `BeadsBackend` method is called once and the recorded argv equals the b-4 Required Work table's `Br 0.1.33` column (`close` records `close <id> --suggest-next --json`); `project_uses_dolt` is `false` even when `<dir>/.beads/.dolt` exists; `relation_types()` is exactly the seven common entries in order; `release_source()`; `dolt().is_none()`; `cli().is_some()`; `close_suggestions().is_some()`; `capabilities()` for `(Br, 0.1.33)` equals `{ supports_daemon_flag: false, uses_jsonl_files: true, uses_dolt_backend: false, supports_list_all_flag: true, supports_delete_hard_flag: false }` (`cli.rs:374,394,416,437,455`; the `supports_list_all_flag` value is B7/OQ-4 — if b-9 flips it, b-11 updates this expectation).
+5. **Full-method parity tests** (`tests/parity.rs`, through `BrCli::with_invoker(Box::new(RecordingInvoker::new(Some(probe))))` for `Br 0.1.33` and `RecordingInvoker::new(None)` for the no-probe case): every `BeadsBackend` method is called once and the recorded full argv equals the b-4 Required Work table's `Br 0.1.33` column (`close` records `close <id> --suggest-next --json`; `list(include_all)` records `--all` or the two-call form according to `capabilities_for(Br, Some(0.1.33)).supports_list_all_flag`, computed in the test, not a literal — so a b-9 flip of B7/OQ-4 changes no file in this crate). **No-probe column for `BrCli`:** `list(include_all)` → the two calls `list --limit=0 --json`, `list --limit=0 --status=closed --json` (`capabilities_for(Unknown, None)` is all `false`); `close` → `close <id> --suggest-next --json` (the flag is br's, not version-gated); every other row as `Br 0.1.33`. `project_uses_dolt` is `false` even when `<dir>/.beads/.dolt` exists; `relation_types()` is exactly the seven common entries in order; `release_source()`; `dolt().is_none()`; `cli().is_some()`; `close_suggestions().is_some()`; `capabilities()` equals `capabilities_for(Br, Some(0.1.33))` (whose fields at `a18c724` are `{ supports_daemon_flag: false, uses_jsonl_files: true, uses_dolt_backend: false, supports_list_all_flag: true, supports_delete_hard_flag: false }`, `cli.rs:374,394,416,437,455`).
 6. **API freeze.** `crates/btit-br/tests/api_freeze.rs` pins `BrCli::new`, `BrCli::with_invoker` (with `--features test-support`), `BR_RELEASE_SOURCE`, `fn _obj(b: &BrCli) -> &dyn BeadsBackend { b }` and `fn _cli(b: &BrCli) -> &dyn CliBackend { b }`.
 
 ## Required Work
@@ -107,7 +107,7 @@ impl BeadsBackend for BrCli {
 }
 
 impl CliBackend for BrCli {
-    fn binary(&self) -> &str { self.inv.binary_ref() }
+    fn binary(&self) -> String { self.inv.binary() }
     fn probe(&self) -> Option<CliProbe> { self.inv.probe() }
     fn client(&self) -> CliClient { self.inv.client() }
     fn version(&self) -> Option<CliVersion> { self.inv.version() }
@@ -124,7 +124,7 @@ impl CloseSuggestions for BrCli {
 ## This Sprint Does Not Close
 
 - App construction of `BrCli` (b-7).
-- B7 (`supports_list_all_flag` for br), pending OQ-4 (b-9; expectation update in b-11).
+- B7 (`supports_list_all_flag` for br), pending OQ-4 (b-9); no follow-up edit here because the tests derive their expectations from `capabilities_for`.
 
 ## Acceptance Criteria
 

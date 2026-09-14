@@ -129,6 +129,7 @@ pub(crate) fn base64_encode(data: &[u8]) -> String {
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo test --workspace`
 - `for c in btit-types btit-beads btit-cli btit-bd btit-br; do cargo rustdoc -p "$c" -- -D missing-docs; done`
+- `test "$(cargo tree -e normal,features -p beads-issue-tracker | grep -c 'test-support')" = 0` (the `test-support` features never reach the normal build)
 - `RUSTFLAGS="-D warnings" PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `pnpm test`
 - `npx vue-tsc --noEmit`
