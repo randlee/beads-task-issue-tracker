@@ -16,9 +16,9 @@ dependency_relations:
     relation: must_follow
     rationale: "btit-cli's CliRunner returns BeadsError, uses parse/gates/detect and the log_*! macros from btit-beads"
   - prerequisite: b-3
-    dependent: b-8
+    dependent: b-9
     relation: must_follow
-    rationale: "b-8 edits the pure functions this sprint moves into btit-beads, behind the API frozen by tests/api_freeze.rs"
+    rationale: "b-9 edits the pure functions this sprint moves into btit-beads, behind the API frozen by tests/api_freeze.rs"
 ---
 
 # Sprint b-3 — `btit-beads`: backend traits, `BeadsError`, pure beads logic, log gate
@@ -32,7 +32,7 @@ Planning advice; team-lead assigns from the active pool.
 ## Goal
 
 - Create `crates/btit-beads` holding (a) the backend contract: `BeadsBackend`, `CliBackend`, `DoltOperations`, `CloseSuggestions`; (b) `BeadsError`, the only error type that crosses crate boundaries; (c) the pure beads logic both CLIs share today, moved from `cli.rs` and `issues.rs` with its tests; (d) the `LOGGING_ENABLED`/`VERBOSE_LOGGING` gate and the `log_*!` macros.
-- Freeze the public API with a compile-time test so b-4..b-7 build against it while b-8 changes behaviour behind it.
+- Freeze the public API with a compile-time test so b-4..b-8 build against it while b-9 changes behaviour behind it.
 - The app consumes the moved pure logic through re-exports; no behaviour changes.
 
 ## Hard Dependencies
@@ -41,11 +41,11 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Dependency Relations
 
-`must_follow` merge-forward trigger: parent development is pushed, not QA; merge parent → child before every dev/fix round. PR-completion trigger: parent PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+Trigger definitions, per-branch QA and fix-layer rules: `plan-phase-b.md` "Dependency relations" and "Parallel groups: fork and re-merge".
 
 - b-2 → b-3 — `must_follow`.
 - b-3 → b-4 — `must_follow`: b-4 implements against this contract.
-- b-3 → b-8 — `must_follow`: b-8 edits `crates/btit-beads/src/{issues,gates,compat}.rs` and their tests behind the frozen API; it starts when b-3 is pushed (plan "Execution lanes").
+- b-3 → b-9 — `must_follow`: b-9 edits `crates/btit-beads/src/{issues,gates,compat}.rs` and their tests behind the frozen API; it starts when b-3 is pushed (plan "Execution lanes").
 
 Stack: `phase-b-core` · layer 3.
 
@@ -75,7 +75,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 5. **Tests moved with the code.** The cli.rs tests listed in Exact Targets and all 31 issues.rs tests move into the corresponding `#[cfg(test)] mod tests`, with `crate::test_support::*` fixtures (`probe`, `minimal_issue_json`, `issue_json_with_metadata`). Test bodies change only for tuple → `CliVersion` conversions. The plan's test-preservation gate passes.
 6. **Log gate.** `src/logging.rs`: `pub static LOGGING_ENABLED: AtomicBool`, `pub static VERBOSE_LOGGING: AtomicBool`, `pub use log;` and the four `#[macro_export]` macros expanding to `$crate::logging::log::info!(..)` etc. under the same conditions as `logging.rs:36-66`. The app's `logging.rs` re-exports the statics (`pub(crate) use btit_beads::logging::{LOGGING_ENABLED, VERBOSE_LOGGING};`) so `get_logging_enabled`/`set_logging_enabled`/`get_verbose_logging`/`set_verbose_logging` (`logging.rs:166-191`) are unchanged.
 7. **App consumes the crate.** `issues.rs`, `test_support.rs` deleted; `cli.rs` shrinks to the process-spawning and global-state parts (`get_extended_path`, `new_command`, `probe_cli_binary`, `extended_path_entries`, `default_cli_binary`, `get_cli_client_info`, the five wrappers, `project_uses_dolt(_for)`, `reset_bd_version_cache`, `execute_bd`, `check_bd_compatibility`, statics) plus re-exports. `cargo test --workspace` passes the full set.
-8. **API freeze.** `crates/btit-beads/tests/api_freeze.rs` pins every public function signature (as `let _: fn(..) -> .. = path;` items), every trait method (via a `struct Probe; impl BeadsBackend for Probe { .. }` with `todo!()`-free bodies returning fixed values, under the test allowances), every `BeadsError` variant and the `code()` strings. b-8 must leave this file byte-identical.
+8. **API freeze.** `crates/btit-beads/tests/api_freeze.rs` pins every public function signature (as `let _: fn(..) -> .. = path;` items), every trait method (via a `struct Probe; impl BeadsBackend for Probe { .. }` with `todo!()`-free bodies returning fixed values, under the test allowances), every `BeadsError` variant and the `code()` strings. b-9 must leave this file byte-identical.
 9. **Contract doc.** `crates/btit-beads/docs/backend-contract.md`: the trait inventory (from the plan, with signatures), the error table, the `ProjectRef` headroom note, the "sync trait, blocking calls" note, the rule that only `btit-app` depends on `tauri` and `sc-observability-log`, the "no process-global client state in library crates" rule (backends are instances; two may coexist for two projects), and a "future backend-specific traits" paragraph naming issue #51 (Dolt commit log / `AS OF` snapshots / `dolt_diff`) as bd-only headroom behind an accessor like `dolt()`, with no method planned.
 11. **No global state.** `crates/btit-beads/src` declares no `static` other than `LOGGING_ENABLED` and `VERBOSE_LOGGING`; every function in `detect`, `compat`, `gates`, `issues`, `parse` is pure (inputs → outputs, plus `log_*!`).
 10. **CI.** `rust-quality` runs fmt/clippy/rustdoc/`cargo tree` gates for `btit-beads` too (`-p btit-types -p btit-beads`).
@@ -96,8 +96,8 @@ Every listed deliverable is expected to land at a production-ready level for the
 
   Every variant is `Debug`; `source()` returns the inner `io::Error`/`serde_json::Error` where present.
 - `parse_issues_tolerant` keeps its `context: &str` parameter and its log lines (`issues.rs:251-309`).
-- The `_for` cores keep their doc comments, including the B7 comment at `cli.rs:409` ("br: NO") — b-8 owns its correction.
-- Changelog lines (collated by b-10): "New crate `btit-beads`: the `BeadsBackend`/`CliBackend` contract shared by bd and br, the bd-only `DoltOperations` and br-only `CloseSuggestions` traits, the discriminated-union `BeadsError`, and the pure version/capability/issue logic."
+- The `_for` cores keep their doc comments, including the B7 comment at `cli.rs:409` ("br: NO") — b-9 owns its correction.
+- Changelog lines (collated by b-12): "New crate `btit-beads`: the `BeadsBackend`/`CliBackend` contract shared by bd and br, the bd-only `DoltOperations` and br-only `CloseSuggestions` traits, the discriminated-union `BeadsError`, and the pure version/capability/issue logic."
 
 ## Explicit Code Samples
 
@@ -286,8 +286,8 @@ mod logging;
 ## This Sprint Does Not Close
 
 - Any `impl BeadsBackend` (b-5, b-6) or the process-spawning transport (b-4).
-- Removal of the app's global-state wrappers, `execute_bd`, `project_uses_dolt(_for)` (b-7 and b-5).
-- Behaviour fixes to the moved pure functions (b-8).
+- Removal of the app's global-state wrappers, `execute_bd`, `project_uses_dolt(_for)` (b-7, b-8).
+- Behaviour fixes to the moved pure functions (b-9).
 
 ## Acceptance Criteria
 

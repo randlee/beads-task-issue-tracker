@@ -37,7 +37,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Dependency Relations
 
-`must_follow` merge-forward trigger: parent development is pushed, not QA; merge parent → child before every dev/fix round. PR-completion trigger: parent PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+Trigger definitions, per-branch QA and fix-layer rules: `plan-phase-b.md` "Dependency relations" and "Parallel groups: fork and re-merge".
 
 - b-1 → b-2 — `must_follow` (b-2 follows b-1): workspace membership.
 - b-2 → b-3 — `must_follow` (b-3 follows b-2): b-3 is typed with this crate.
@@ -68,15 +68,15 @@ Every listed deliverable is expected to land at a production-ready level for the
 3. **`CliProbe`** moves (`cli.rs:88-93`) with `pub` fields and `version: Option<CliVersion>`. `From<(u32, u32, u32)> for CliVersion` and `From<CliVersion> for (u32, u32, u32)` keep every `_for` core call site and the `test_support::probe` helper (`test_support.rs:4-11`) compiling with a `.into()`.
 4. **New value types** exactly as in the code samples: `CliVersion`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`. No methods beyond derives, `From` impls and `Display` for `CliVersion` (`"{major}.{minor}.{patch}"`, the format `get_cli_client_info` logs today, `cli.rs:358`).
 5. **App consumes the crate.** `types.rs` deleted; every `use crate::types::…` replaced; `CompatibilityInfo` constructed in `check_bd_compatibility` with the same field values. `cargo test --workspace` passes the same test set (142 minus the three moved to `btit-types/tests`, which appear there).
-6. **API freeze.** `crates/btit-types/tests/api_freeze.rs` names every public type, field and derive it depends on (`let _: fn(CliProbe) -> Option<CliVersion> = |p| p.version;` style pins, plus `serde_json::to_string` round trips for each DTO), so b-3..b-7 cannot change the contract silently. b-8/b-9 do not touch this crate.
+6. **API freeze.** `crates/btit-types/tests/api_freeze.rs` names every public type, field and derive it depends on (`let _: fn(CliProbe) -> Option<CliVersion> = |p| p.version;` style pins, plus `serde_json::to_string` round trips for each DTO), so b-3..b-8 cannot change the contract silently. b-9, b-10 and b-11 do not touch this crate.
 7. **CI.** `rust-quality` job (3 OSes): `cargo fmt --check -p btit-types`, `cargo clippy -p btit-types --all-targets -- -D warnings`, `cargo rustdoc -p btit-types -- -D missing-docs`, and the dependency gate `cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')`. Later sprints append their crates to the same job.
 
 ## Required Work
 
 - Module layout inside the crate: `cli.rs` (`CliClient`, `CliVersion`, `CliProbe`, `BackendCapabilities`, `CompatibilityInfo`, `ReleaseSource`, `CliOutput`), `issue.rs` (raw and normalized issue types), `fs.rs` (`DirectoryEntry`, `FsListResult`, `PurgeResult`), `payload.rs` (`ListOptions`, `CwdOptions`, `CreatePayload`, `UpdatePayload`, `ListQuery`), `backend.rs` (`ProjectRef`, `RelationType`). `lib.rs` re-exports every type at the crate root, so consumers write `btit_types::Issue`.
-- Item A4: the orphaned doc comment at `cli.rs:594-595` ("Auto-run refs migration v3 …") is deleted here, because the lines around it (`CompatibilityInfo`) move. b-7 adds the doc comment to `ensure_refs_migrated_v3`.
+- Item A4: the orphaned doc comment at `cli.rs:594-595` ("Auto-run refs migration v3 …") is deleted here, because the lines around it (`CompatibilityInfo`) move. b-8 adds the doc comment to `ensure_refs_migrated_v3`.
 - `CliSelection` (`cli.rs:97-111`) is **not** moved: it carries `is_legacy()` logic and goes to `btit-beads::detect` in b-3.
-- Changelog lines (collated by b-10): "New crate `btit-types`: the frontend data contract and CLI probe/capability value types, data only."
+- Changelog lines (collated by b-12): "New crate `btit-types`: the frontend data contract and CLI probe/capability value types, data only."
 
 ## Explicit Code Samples
 

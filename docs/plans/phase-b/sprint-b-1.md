@@ -39,7 +39,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Dependency Relations
 
-`must_follow` merge-forward trigger: parent development is pushed, not QA; merge parent → child before every dev/fix round. PR-completion trigger: parent PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+Trigger definitions, per-branch QA and fix-layer rules: `plan-phase-b.md` "Dependency relations" and "Parallel groups: fork and re-merge".
 
 - phase-a merge → b-1 — `must_follow`: see Hard Dependencies.
 - b-1 → b-2 — `must_follow` (b-2 follows b-1): `btit-types` joins the workspace b-1 creates.
@@ -70,7 +70,7 @@ Line numbers are at `a18c724`.
 Every listed deliverable is expected to land at a production-ready level for the scope this sprint claims. If that cannot be done cleanly in one sprint, the sprint must be split before implementation begins. No deliverable may be silently dropped or partially deferred.
 
 1. **Root workspace.** `Cargo.toml` at the repository root as in the code sample: `members = ["crates/btit-app"]`, `resolver = "2"`, `[workspace.package]` carrying today's values from `src-tauri/Cargo.toml:8-15` (`version = "1.24.5"`, authors, `license = "MIT"`, `repository = ""`, `edition` per OQ-1, `rust-version = "1.98.1"`), `[workspace.dependencies]` for every dependency `src-tauri/Cargo.toml:31-49` declares today (later sprints append their own), and `[workspace.lints]` equal to `crates/Cargo.toml:31-43`. One `Cargo.lock` at the root, produced by moving today's lockfile and running `cargo check --workspace`, so every third-party version that is not affected by the `sc-observability-log` switch stays as it is (diff of the lockfile reviewed in the PR).
-2. **Tauri crate at `crates/btit-app`.** Every file under `src-tauri/` is moved with `git mv` (rename detection ≥ 95% in `git diff -M --stat`). `crates/btit-app/Cargo.toml` keeps `name = "beads-issue-tracker"`, `[lib] name = "app_lib"`, `crate-type = ["staticlib", "cdylib", "rlib"]`, `[build-dependencies] tauri-build`, and inherits `version`, `authors`, `license`, `repository`, `edition`, `rust-version` from the workspace. Every `[dependencies]` entry becomes `name.workspace = true`. It does **not** add `[lints] workspace = true` (b-10 does; the crate has 19 clippy warnings and 283 rustfmt diffs at the baseline). No file under `crates/btit-app/src/` changes content.
+2. **Tauri crate at `crates/btit-app`.** Every file under `src-tauri/` is moved with `git mv` (rename detection ≥ 95% in `git diff -M --stat`). `crates/btit-app/Cargo.toml` keeps `name = "beads-issue-tracker"`, `[lib] name = "app_lib"`, `crate-type = ["staticlib", "cdylib", "rlib"]`, `[build-dependencies] tauri-build`, and inherits `version`, `authors`, `license`, `repository`, `edition`, `rust-version` from the workspace. Every `[dependencies]` entry becomes `name.workspace = true`. It does **not** add `[lints] workspace = true` (b-12 does; the crate has 19 clippy warnings and 283 rustfmt diffs at the baseline). No file under `crates/btit-app/src/` changes content.
 3. **`sc-observability-log` from outside btit.** `[workspace.dependencies] sc-observability-log = "<version from handoff-a-6.md>"` (or the git `rev` form, OQ-3). `crates/btit-app/src/logging.rs` compiles unchanged against it: the a-4 API it uses (`init`, `ActionName`, `BridgeOptions`, `DropCause`, `LevelFilter`, `LogGuard`, `LoggerConfig`, `ServiceName`, `logging.rs:26-28`) is the API a-5/a-6 froze. If the published API differs, that is a hard stop, not a local patch.
 4. **Phase-a workspace removed.** `crates/Cargo.toml`, `crates/Cargo.lock`, `crates/runtime-deps.txt` and the three `crates/sc-observability-log*` directories are deleted. Nothing else under `crates/` exists except `btit-app`.
 5. **`tauri.conf.json`.** Only `build.frontendDist` changes (`../../.output/public`). `productName`, `identifier`, window, CSP, bundle and icon entries are byte-identical.
@@ -78,16 +78,16 @@ Every listed deliverable is expected to land at a production-ready level for the
 7. **CI.** `backend` job: `Swatinem/rust-cache` without `workspaces:`; `cargo check --workspace --all-targets`; `cargo test --workspace`. The `crates` job (fmt, clippy, runtime graph, isolation contract, rustdoc, MSRV) is removed together with the phase-a crates. `version-sync` and `frontend` jobs unchanged.
 8. **Release workflow.** Every `src-tauri/target/` path becomes `target/` (six edits). `tauri-apps/tauri-action@v0` keeps `projectPath` at its default (it globs `**/tauri.conf.json`; plan "Release workflow").
 9. **Version script.** `scripts/check_version_sync.py` reads `ROOT/Cargo.toml`, `ROOT/Cargo.lock`, `ROOT/crates/btit-app/tauri.conf.json`; the docstring names the new paths; every check and `--set` keep their semantics. `python3 scripts/check_version_sync.py` prints `version sync OK: app 1.24.5, rust toolchain 1.98.1 (beads-issue-tracker)`.
-10. **Docs and comments.** Path references listed in Exact Targets are rewritten to the new locations. No content change beyond paths; `.claude/codebase-map.md` line 16 reads `crates/btit-app/src/` and line 208 heading reads ``## Backend Structure (`crates/btit-app/`)`` (b-10 rewrites the section).
+10. **Docs and comments.** Path references listed in Exact Targets are rewritten to the new locations. No content change beyond paths; `.claude/codebase-map.md` line 16 reads `crates/btit-app/src/` and line 208 heading reads ``## Backend Structure (`crates/btit-app/`)`` (b-12 rewrites the section).
 11. **Tests and app behaviour.** `cargo test --workspace` runs the same 142 tests; `pnpm tauri:dev` launches the app and its startup log lines (`[startup] …`, `lib.rs:40-66`) appear in the JSONL log.
 
 ## Required Work
 
 - Move order: (1) `git mv src-tauri crates/btit-app`; (2) write the root `Cargo.toml`; (3) edit `crates/btit-app/Cargo.toml`; (4) `git mv crates/btit-app/Cargo.lock Cargo.lock`; (5) delete the phase-a workspace files; (6) `cargo check --workspace`; (7) tooling and docs. Commit (1) separately from the rest so the rename is reviewable.
 - `.gitignore`: `/target/` at the root; `crates/btit-app/.gitignore` keeps only `/gen/schemas`.
-- Do not run `cargo fmt` or `cargo clippy --fix` on the moved sources (b-10 owns formatting).
+- Do not run `cargo fmt` or `cargo clippy --fix` on the moved sources (b-12 owns formatting).
 - `rust-toolchain.toml` comment: "Pinned Rust toolchain (repo root, applies to every workspace crate and to the Tauri CLI). Keep in sync with `rust-version` in Cargo.toml and the `toolchain:` pins in .github/workflows/*.yml — `python3 scripts/check_version_sync.py` enforces this."
-- Changelog lines (collated by b-10): "Rust workspace moved to the repository root; the Tauri crate lives at `crates/btit-app/` (package name unchanged). `sc-observability-log` is consumed from `<crates.io | sc-observability git>` instead of an in-repo copy."
+- Changelog lines (collated by b-12): "Rust workspace moved to the repository root; the Tauri crate lives at `crates/btit-app/` (package name unchanged). `sc-observability-log` is consumed from `<crates.io | sc-observability git>` instead of an in-repo copy."
 
 ## Explicit Code Samples
 
@@ -172,7 +172,7 @@ dotenvy.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-# no [lints] until b-10
+# no [lints] until b-12
 ```
 
 ```python
@@ -197,9 +197,9 @@ TAURI_CONF = ROOT / "crates" / "btit-app" / "tauri.conf.json"
 ## This Sprint Does Not Close
 
 - Any crate other than `btit-app` (b-2 to b-6).
-- Formatting, clippy cleanliness or workspace lints on `btit-app` (b-10).
-- The `## Backend Structure` rewrite in `.claude/codebase-map.md` and the `CHANGELOG.md` entry (b-10).
-- Any behaviour change (b-8, b-9).
+- Formatting, clippy cleanliness or workspace lints on `btit-app` (b-12).
+- The `## Backend Structure` rewrite in `.claude/codebase-map.md` and the `CHANGELOG.md` entry (b-12).
+- Any behaviour change (b-9, b-10, b-11).
 
 ## Acceptance Criteria
 

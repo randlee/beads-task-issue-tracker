@@ -10,23 +10,19 @@ dependency_relations:
   - prerequisite: b-4
     dependent: b-6
     relation: must_follow
-    rationale: "BrCli wraps CliRunner and delegates to btit_cli::ops (content dependency)"
-  - prerequisite: b-5
-    dependent: b-6
-    relation: must_follow
-    rationale: "stack parent only: GitHub stacks are linear, so b-6 sits above b-5; development starts as soon as the b-5 branch exists"
+    rationale: "BrCli wraps CliRunner, delegates to btit_cli::ops, tests with testing::RecordingInvoker, and fills the btit-br skeleton b-4 registered; group A, forked from the b-4 head"
   - prerequisite: b-6
     dependent: b-7
     relation: must_follow
-    rationale: "the app constructs BrCli"
+    rationale: "the app constructs BrCli; b-7 is the join layer of group A"
   - prerequisite: none
     parallel_pair: [b-6, b-5]
     relation: parallel_safe
-    rationale: "disjoint crates; only the root Cargo.toml member list is shared and is resolved in the rebase"
+    rationale: "crates/btit-br/** vs crates/btit-bd/**; shared manifests, lockfile, workflow and the recording invoker were written by b-4"
   - prerequisite: none
-    parallel_pair: [b-6, b-8]
+    parallel_pair: [b-6, b-9]
     relation: parallel_safe
-    rationale: "b-6 owns crates/btit-br/**; b-8 owns crates/btit-beads/** behind the frozen API"
+    rationale: "crates/btit-br/** vs crates/btit-beads/** behind the frozen btit-beads API"
 ---
 
 # Sprint b-6 — `btit-br`: `BrCli`
@@ -39,47 +35,45 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Goal
 
-- Create `crates/btit-br` with `BrCli`, the backend for the Rust `br` CLI (beads_rust), implementing `BeadsBackend`, `CliBackend` and `CloseSuggestions`, with today's br-specific choices: never Dolt, `--suggest-next` on close, the common relation types only, the beads_rust release repository.
+- Fill the `crates/btit-br` skeleton with `BrCli`, the backend for the Rust `br` CLI (beads_rust), implementing `BeadsBackend`, `CliBackend` and `CloseSuggestions`, with today's br-specific choices: never Dolt, `--suggest-next` on close, the common relation types only, the beads_rust release repository.
 
 ## Hard Dependencies
 
-- b-4 pushed. The b-5 branch exists (stack parent; its content is not needed).
+- b-4 closure criteria met and QA-1 without Blocking finding. This branch is forked from the `feature/sprint-b-4-btit-cli` head; b-5's content is not needed.
 
 ## Dependency Relations
 
-`must_follow` merge-forward trigger: parent development is pushed, not QA; merge parent → child before every dev/fix round. PR-completion trigger: parent PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
+Trigger definitions, per-branch QA and fix-layer rules: `plan-phase-b.md` "Dependency relations" and "Parallel groups: fork and re-merge".
 
-- b-4 → b-6 — `must_follow` (content); b-5 → b-6 — `must_follow` (stack parent).
-- b-6 → b-7 — `must_follow`.
-- b-6 ↔ b-5, b-6 ↔ b-8 — `parallel_safe`.
+- b-4 → b-6 — `must_follow`.
+- b-6 → b-7 — `must_follow` (b-7 is group A's join layer).
+- b-6 ↔ b-5, b-6 ↔ b-9 — `parallel_safe`.
 
-Stack: `phase-b-core` · layer 6.
+Stack: group A · layer 5 (b-5 | b-6 | b-9, first to close). If this sprint closes first it is linked as layer 5; otherwise it is merged into the b-7 branch when it closes.
 
 ## Exact Targets
 
 Line numbers are at `a18c724`.
 
-- `Cargo.toml` (root): member `crates/btit-br`
-- `crates/btit-br/Cargo.toml`, `clippy.toml`, `src/lib.rs`, `src/backend.rs`, `tests/api_freeze.rs`
+- `crates/btit-br/src/lib.rs` (module declarations and re-exports), `src/backend.rs`, `tests/api_freeze.rs`
 - Source of the br-specific arms it implements: `cli.rs:374,394,416,437,455,487` (`Br` arms of the gates and Dolt detection), `issue_commands.rs:410-413` (`--suggest-next`), `:571-572` (common relation types), `updates.rs:286,290` (release URLs)
-- `.github/workflows/ci.yml`: `rust-quality` gains `btit-br`
 - `docs/plans/phase-b/sprint-b-6.md` (`status:` frontmatter only)
+
+No edit to the root `Cargo.toml`, `Cargo.lock`, `crates/btit-br/Cargo.toml`, `crates/btit-br/clippy.toml`, `.github/workflows/ci.yml` or anything under `crates/btit-app/`.
 
 ## Deliverables
 
 Every listed deliverable is expected to land at a production-ready level for the scope this sprint claims. If that cannot be done cleanly in one sprint, the sprint must be split before implementation begins. No deliverable may be silently dropped or partially deferred.
 
-1. **Crate.** `crates/btit-br`, `[lints] workspace = true`, `#![deny(missing_docs)]`, `publish = false`. Dependencies: `btit-types`, `btit-beads`, `btit-cli`, `serde_json`, `log`. Never `btit-bd`.
-2. **`BrCli`** as in the code sample. `BeadsBackend`: `project_uses_dolt` → `false` (the `Br` arm, `cli.rs:487`); `close` → `self.close_suggesting_next(..)` (today br always passes `--suggest-next`, `issue_commands.rs:410-413`); `delete` → `hard: capabilities().supports_delete_hard_flag` (always `false` for br, `cli.rs:437`; kept data-driven); `relation_types` → `ops::relation_types(CliClient::Br)` (the common seven, `:556-564,571-572`); `sync` → `ops::sync(.., false)` via `capabilities().supports_daemon_flag` (`cli.rs:374`); `dolt()` → `None`; `close_suggestions()` → `Some(self)`.
-3. **`CliBackend`.** `release_source()` → `BR_RELEASE_SOURCE` (`https://api.github.com/repos/Dicklesworthstone/beads_rust/releases/latest`, `https://github.com/Dicklesworthstone/beads_rust/releases`, `updates.rs:286,290`), exported `pub const`.
-4. **`CloseSuggestions`.** `close_suggesting_next` → `ops::close(&self.runner, p, id, true)`.
-5. **Unit tests** through a pre-seeded `CliRunner` (`#[cfg(test)] BrCli::with_probe`): `project_uses_dolt` is `false` even when `<dir>/.dolt` exists; `relation_types()` is exactly the seven common entries in order; `release_source()`; `dolt().is_none()`; `close_suggestions().is_some()`; `capabilities()` for `(Br, 0.1.33)` equals `{ supports_daemon_flag: false, uses_jsonl_files: true, uses_dolt_backend: false, supports_list_all_flag: true, supports_delete_hard_flag: false }` (`cli.rs:374,394,416,437,455`; the `supports_list_all_flag` value is B7/OQ-4 and this test is the one b-8 updates if the maintainer confirms the doc comment); `close` through the recording invoker issues `close <id> --suggest-next`.
-6. **API freeze and CI.** `crates/btit-br/tests/api_freeze.rs` pins `BrCli::new`, `BR_RELEASE_SOURCE` and `fn _obj(b: &BrCli) -> &dyn CliBackend { b }`; `rust-quality` covers `btit-br`.
+1. **`BrCli`** as in the code sample. `BeadsBackend`: `project_uses_dolt` → `false` (the `Br` arm, `cli.rs:487`); `close` → `self.close_suggesting_next(..)` (today br always passes `--suggest-next`, `issue_commands.rs:410-413`); `delete` → `hard: capabilities().supports_delete_hard_flag` (always `false` for br, `cli.rs:437`; kept data-driven); `relation_types` → `ops::relation_types(CliClient::Br)` (the common seven, `:556-564,571-572`); `sync` → `ops::sync(.., capabilities().supports_daemon_flag)` (`false`, `cli.rs:374`); `dolt()` → `None`; `close_suggestions()` → `Some(self)`.
+2. **`CliBackend`.** `release_source()` → `BR_RELEASE_SOURCE` (`https://api.github.com/repos/Dicklesworthstone/beads_rust/releases/latest`, `https://github.com/Dicklesworthstone/beads_rust/releases`, `updates.rs:286,290`), exported `pub const`.
+3. **`CloseSuggestions`.** `close_suggesting_next` → `ops::close(&self.runner, p, id, true)`.
+4. **Unit tests** through `BrCli::with_probe` (`#[cfg(test)]`, built on `CliRunner::with_probe`) and `RecordingInvoker`: `project_uses_dolt` is `false` even when `<dir>/.dolt` exists; `relation_types()` is exactly the seven common entries in order; `release_source()`; `dolt().is_none()`; `close_suggestions().is_some()`; `capabilities()` for `(Br, 0.1.33)` equals `{ supports_daemon_flag: false, uses_jsonl_files: true, uses_dolt_backend: false, supports_list_all_flag: true, supports_delete_hard_flag: false }` (`cli.rs:374,394,416,437,455`; the `supports_list_all_flag` value is B7/OQ-4 — if b-9 flips it, b-11 updates this expectation); `close` issues `close <id> --suggest-next`.
+5. **API freeze.** `crates/btit-br/tests/api_freeze.rs` pins `BrCli::new`, `BR_RELEASE_SOURCE` and `fn _obj(b: &BrCli) -> &dyn CliBackend { b }`.
 
 ## Required Work
 
-- No app changes in this sprint.
-- Changelog lines (collated by b-10): "New crate `btit-br`: the `br` (beads_rust) backend (`BeadsBackend`, `CliBackend`, `CloseSuggestions`)."
+- Changelog lines (collated by b-12): "New crate `btit-br`: the `br` (beads_rust) backend (`BeadsBackend`, `CliBackend`, `CloseSuggestions`)."
 
 ## Explicit Code Samples
 
@@ -126,27 +120,27 @@ impl CloseSuggestions for BrCli {
 ## This Sprint Does Not Close
 
 - App construction of `BrCli` (b-7).
-- B7 (`supports_list_all_flag` for br), pending OQ-4 (b-8).
+- B7 (`supports_list_all_flag` for br), pending OQ-4 (b-9; expectation update in b-11).
 
 ## Acceptance Criteria
 
-1. `cargo tree -e normal -p btit-br --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rn 'btit_bd\|btit-bd' crates/btit-br`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-br/src`.
-2. `BrCli` implements `BeadsBackend`, `CliBackend`, `CloseSuggestions` (pinned by `tests/api_freeze.rs`); it does not implement `DoltOperations`.
-3. The Deliverable 5 tests pass.
-4. `cargo test --workspace` passes; test-preservation gate prints nothing.
-5. `cargo clippy -p btit-br --all-targets -- -D warnings`, `cargo rustdoc -p btit-br -- -D missing-docs` pass; no `allow(clippy::…)` for the deny set in `src`.
-6. `git diff --exit-code feature/sprint-b-5-btit-bd...HEAD -- crates/btit-beads crates/btit-types crates/btit-cli crates/btit-bd crates/btit-app` is empty.
-7. CI green; every command in Required Validation passes.
+1. `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-br/|docs/plans/phase-b/sprint-b-6.md$)'` prints nothing (group A non-intersection).
+2. `cargo tree -e normal -p btit-br --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rn 'btit_bd\|btit-bd' crates/btit-br`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-br/src`.
+3. `BrCli` implements `BeadsBackend`, `CliBackend`, `CloseSuggestions` (pinned by `tests/api_freeze.rs`); it does not implement `DoltOperations`.
+4. The Deliverable 4 tests pass.
+5. `cargo test --workspace` passes; test-preservation gate prints nothing.
+6. `cargo clippy -p btit-br --all-targets -- -D warnings`, `cargo rustdoc -p btit-br -- -D missing-docs` pass; no `allow(clippy::…)` for the deny set in `src`.
+7. QA-1 for this branch complete (per-branch rule); CI green; every command in Required Validation passes.
 
 ## Required Validation
 
-- `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br`
+- `cargo fmt --check -p btit-br`
 - `cargo clippy -p btit-br --all-targets -- -D warnings`
 - `cargo rustdoc -p btit-br -- -D missing-docs`
 - `cargo test --workspace`
 - `cargo check --workspace --all-targets`
 - `cargo tree -e normal -p btit-br --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-br\nbtit-cli\nbtit-types\nlog\nserde_json\n')`
-- `git diff --exit-code feature/sprint-b-5-btit-bd...HEAD -- crates/btit-beads crates/btit-types crates/btit-cli crates/btit-bd crates/btit-app`
+- `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-br/|docs/plans/phase-b/sprint-b-6.md$)'` prints nothing
 - `python3 scripts/check_version_sync.py`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
