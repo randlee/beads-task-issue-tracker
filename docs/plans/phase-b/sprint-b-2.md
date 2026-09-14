@@ -5,7 +5,7 @@ status: planned
 branch: feature/sprint-b-2-btit-types
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-2-btit-types
 target: integrate/phase-b
-recommended_model: standard (bounded code motion plus seven small new value types)
+recommended_model: standard (bounded code motion plus eight small new value types)
 dependency_relations:
   - prerequisite: b-1
     dependent: b-2
@@ -21,14 +21,14 @@ dependency_relations:
 
 ## Recommended Agent / Model
 
-Recommended model: standard (bounded code motion plus seven small new value types).
+Recommended model: standard (bounded code motion plus eight small new value types).
 Recommended agent: not set — the btit developer pane is still `tbd` in `.atm.toml`.
 Planning advice; team-lead assigns from the active pool.
 
 ## Goal
 
 - Create `crates/btit-types`, the leaf crate holding every data type shared between the app, the backend contract and the backends. Data only: no I/O, no process, no Tauri, no logging.
-- Move the types listed in the plan's type-move inventory out of `crates/btit-app/src/types.rs` and `cli.rs`, and add the value types the b-3 traits need (`CliVersion`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`).
+- Move the types listed in the plan's type-move inventory out of `crates/btit-app/src/types.rs` and `cli.rs`, and add the value types the b-3 traits need (`CliVersion`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`, `DoltOpResult`).
 - The app consumes `btit-types` through `use btit_types::…`; its behaviour does not change.
 
 ## Hard Dependencies

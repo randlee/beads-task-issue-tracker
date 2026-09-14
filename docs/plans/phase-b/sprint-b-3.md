@@ -37,7 +37,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- b-2 pushed (`btit-types` with `CliVersion`, `CliProbe`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`).
+- b-2 pushed (`btit-types` with `CliVersion`, `CliProbe`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`, `DoltOpResult`).
 
 ## Dependency Relations
 
@@ -45,7 +45,7 @@ Trigger definitions, per-branch QA and fix-layer rules: `plan-phase-b.md` "Depen
 
 - b-2 → b-3 — `must_follow`.
 - b-3 → b-4 — `must_follow`: b-4 implements against this contract.
-- b-3 → b-9 — `must_follow`: b-9 edits `crates/btit-beads/src/{issues,gates,compat}.rs` and their tests behind the frozen API; it starts when b-3 is pushed (plan "Execution lanes").
+- b-3 → b-9 — `must_follow`: b-9 edits `crates/btit-beads/src/{issues,gates,compat}.rs` and their tests behind the frozen API; content dependency on b-3 only, but the branch is forked from the b-4 head as a group A member (plan "Execution lanes").
 
 Stack: `phase-b-core` · layer 3.
 

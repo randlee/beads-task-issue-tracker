@@ -56,7 +56,7 @@ Line numbers are at `a18c724`; paths are the post-b-8 locations.
 - `docs/attachments.md`: lines 10, 22, 31, 46 (`{issue-id}` → `{short-id}`), plus a collision note; `crates/btit-app/src/attachments.rs` tests 793-806 (comment)
 - `crates/btit-app/src/updates.rs`: `compare_versions` (130-155), `find_platform_asset` (114-128); tests 424-449, 484-490
 - `crates/btit-app/src/attachments.rs`: `sanitize_filename` (237-290); tests 675-713
-- `crates/btit-cli/src/runner.rs`: `ProbeState`, `CliRunner::client_info` failure caching, the `test-support` seam `CliRunner::with_version_probe`; `crates/btit-cli/tests/api_freeze.rs` (pins for both); `crates/btit-app/src/backend.rs`: reset on `replace`/`check_bd_compatibility`
+- `crates/btit-cli/src/runner.rs`: `ProbeState`, `CliRunner::client_info` failure caching, the `test-support` seam `CliRunner::with_version_probe`; `crates/btit-cli/tests/api_freeze.rs` (pins for both). `crates/btit-app/src/backend.rs` is not edited: the reset path is the b-7 rebuild in `replace`/`check_bd_compatibility`
 - `docs/plans/phase-b/sprint-b-11.md` (`status:` frontmatter and Implementation Notes)
 
 ## Deliverables
