@@ -10,23 +10,28 @@
 //! sc-observability-log bridge wiring: install, exit shutdown, and the log commands.
 //!
 //! The active log file is `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`
-//! (`LogGuard::active_log_path`, captured once at [`install_logging`]). Every
-//! entry point that touches the process-wide guard — [`install_logging`],
-//! [`on_run_event`] and [`clear_logs`] — takes or clones the `Arc` and releases
-//! the `LOG_GUARD` lock before doing any I/O, so no code path holds the lock
-//! across a flush or a shutdown.
+//! (`LogGuard::active_log_path`, captured once at [`install_logging`]). The guard
+//! has exactly one owner, the static [`LOGGING`] lifecycle (see
+//! [`lifecycle`]): [`install_logging`] hands the guard to it, [`clear_logs`]
+//! flushes through a non-owning `LogHandle` and is serialized with exit, and
+//! [`on_run_event`] performs the single final shutdown on `RunEvent::Exit`. No
+//! code path holds the lifecycle lock across a flush, a shutdown or file I/O.
+
+mod lifecycle;
 
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use sc_observability_log::{
-    init, ActionName, BridgeOptions, DropCause, LevelFilter, LogGuard, LoggerConfig, ServiceName,
+    init, ActionName, BridgeOptions, FlushError, LevelFilter, LogGuard, LoggerConfig, ServiceName,
 };
 use tauri::Manager;
+
+use lifecycle::{ExitOutcome, LogLifecycle};
 
 // Global flags for logging
 pub(crate) static LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -69,10 +74,14 @@ macro_rules! log_debug {
 // Bridge lifecycle
 // ============================================================================
 
-static LOG_GUARD: Mutex<Option<Arc<LogGuard>>> = Mutex::new(None);
+/// The single owner of the process-wide `LogGuard`.
+static LOGGING: LogLifecycle<LogGuard> = LogLifecycle::new();
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// Bound on every blocking bridge call this module makes (`flush`/`shutdown`).
+/// Bound on every blocking bridge call this module makes: one `flush` in
+/// `clear_logs`, and the whole exit sequence (waiting for an in-progress clear
+/// plus the final `shutdown`). Two seconds keeps quit responsive while leaving
+/// the writer time to drain a normal queue.
 const LOG_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Installs the sc-observability-log bridge as the process-wide `log` logger.
@@ -105,57 +114,32 @@ pub(crate) fn install_logging(app: &tauri::App) -> Result<(), Box<dyn std::error
     if let Some(path) = guard.active_log_path() {
         let _ = LOG_PATH.set(path.to_path_buf());
     }
-    *LOG_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(guard));
+    LOGGING.install(guard, LOG_IO_TIMEOUT)?;
     Ok(())
 }
 
 /// Runs on every Tauri run-loop event; only `RunEvent::Exit` does anything.
 ///
-/// Takes the guard out of `LOG_GUARD` and releases the lock in the same
-/// statement, so exit never waits behind a `clear_logs` flush. Logs one `warn`
-/// with the per-`DropCause` counts when any events were dropped, then makes
-/// exactly one bounded call: `shutdown` when this is the sole owner, otherwise
-/// `flush` on the still-shared clone (a `clear_logs` flush holds the other
-/// clone at that instant). Either branch is bounded by 1x `LOG_IO_TIMEOUT`.
+/// Delegates to [`LogLifecycle::exit`](lifecycle::LogLifecycle::exit): the
+/// guard's single final shutdown, bounded by 1x `LOG_IO_TIMEOUT` in total even
+/// while `clear_logs` is flushing or truncating. The shutdown result is
+/// reported here: a failure is written to stderr (the logger is gone, and
+/// `eprintln!` panics on a closed stream). A repeated `Exit` does nothing.
 pub(crate) fn on_run_event(_app: &tauri::AppHandle, event: &tauri::RunEvent) {
     if !matches!(event, tauri::RunEvent::Exit) {
         return;
     }
-    let taken = LOG_GUARD
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-    let Some(shared) = taken else {
-        return;
-    };
-    let dropped = shared.dropped_events();
-    if dropped.total() > 0 {
-        let summary: Vec<String> = DropCause::ALL
-            .iter()
-            .filter(|cause| dropped.get(**cause) > 0)
-            .map(|cause| format!("{cause:?}={}", dropped.get(*cause)))
-            .collect();
-        log::warn!("[logging] dropped events: {}", summary.join(", "));
-    }
-    match Arc::try_unwrap(shared) {
-        Ok(guard) => {
-            if let Err(e) = guard.shutdown(LOG_IO_TIMEOUT) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "beads-task-issue-tracker: log shutdown failed: {e:?}"
-                );
-            }
-        }
-        // A clear_logs flush holds the other clone: flush once instead (still
-        // bounded by 1x LOG_IO_TIMEOUT). Shutdown cannot consume a shared guard.
-        Err(shared) => {
-            if let Err(e) = shared.flush(LOG_IO_TIMEOUT) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "beads-task-issue-tracker: log flush at exit failed: {e:?}"
-                );
-            }
-        }
+    report_exit(&LOGGING.exit(LOG_IO_TIMEOUT));
+}
+
+/// Writes a failed final shutdown to stderr; success and no-op exits are silent.
+fn report_exit(outcome: &ExitOutcome) {
+    if let ExitOutcome::ShutDown { result: Err(e) } = outcome {
+        let _ = writeln!(
+            std::io::stderr(),
+            "beads-task-issue-tracker: log shutdown failed [{}]: {e}",
+            e.code()
+        );
     }
 }
 
@@ -192,23 +176,17 @@ pub(crate) async fn set_verbose_logging(enabled: bool) {
 
 #[tauri::command]
 pub(crate) async fn clear_logs() -> Result<(), String> {
-    // Clone the Arc and release the lock before flushing: an exit that arrives
-    // during the flush takes the guard at once and stays bounded by
-    // 1x LOG_IO_TIMEOUT. The clone (not the lock) is moved into the blocking
-    // closure, so LOG_GUARD is never held across the flush or the file I/O
-    // below.
-    let shared = LOG_GUARD
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
+    // The lifecycle hands out a non-owning handle, never the guard, and rejects
+    // the clear once exit has begun; see `lifecycle` for the serialization.
     let log_path = get_log_path();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(guard) = shared {
-            guard
-                .flush(LOG_IO_TIMEOUT)
-                .map_err(|e| format!("Failed to flush logs: {e}"))?;
-        } // None: logger not installed (before setup) or already taken at exit — no flush.
-        clear_log_files(&log_path, read_log_dir).map_err(|e| e.to_string())?;
+        LOGGING
+            .clear(
+                &log_path,
+                |handle| handle.flush(LOG_IO_TIMEOUT),
+                read_log_dir,
+            )
+            .map_err(|e| e.to_string())?;
         log_info!("[debug] Logs cleared");
         Ok(())
     })
@@ -216,9 +194,13 @@ pub(crate) async fn clear_logs() -> Result<(), String> {
     .map_err(|e| format!("Failed to clear logs: {e}"))?
 }
 
-/// Why clearing the log files failed; rendered into `clear_logs`'s `Err(String)`.
+/// Why `clear_logs` failed; rendered into the command's `Err(String)`.
 #[derive(Debug)]
 pub(crate) enum ClearError {
+    /// Exit has begun: nothing was flushed or removed, so the final records survive.
+    ShutdownStarted,
+    /// The bounded flush before clearing failed; no file was touched.
+    Flush { source: FlushError },
     /// Truncating the active JSONL file failed.
     Truncate { source: std::io::Error },
     /// The log directory could not be opened for listing.
@@ -235,6 +217,8 @@ pub(crate) enum ClearError {
 impl std::fmt::Display for ClearError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ShutdownStarted => f.write_str("Logs were not cleared: logging is shutting down"),
+            Self::Flush { source } => write!(f, "Failed to flush logs: {source}"),
             Self::Truncate { source } => write!(f, "Failed to clear logs: {source}"),
             Self::ListDir { source } => write!(f, "Failed to list log dir: {source}"),
             Self::ReadDirEntry { source } => write!(f, "Failed to read log dir entry: {source}"),
@@ -248,6 +232,8 @@ impl std::fmt::Display for ClearError {
 impl std::error::Error for ClearError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::ShutdownStarted => None,
+            Self::Flush { source } => Some(source),
             Self::Truncate { source }
             | Self::ListDir { source }
             | Self::ReadDirEntry { source }
@@ -414,7 +400,7 @@ mod tests {
     /// (returning `Result` from a `#[test]` fn) rather than panicking, so this
     /// module stays clean under the repo's no-panic grep check.
     #[derive(Debug)]
-    struct TestError(String);
+    pub(super) struct TestError(pub(super) String);
 
     impl std::fmt::Display for TestError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -435,10 +421,10 @@ mod tests {
     }
 
     /// Unique scratch directory under `std::env::temp_dir()`, removed on drop.
-    struct ScratchDir(PathBuf);
+    pub(super) struct ScratchDir(PathBuf);
 
     impl ScratchDir {
-        fn new(label: &str) -> Result<Self, TestError> {
+        pub(super) fn new(label: &str) -> Result<Self, TestError> {
             // Path-safe on every OS: `Instant`'s Debug output contains `:` and
             // braces, which Windows rejects in directory names (os error 267).
             static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -452,7 +438,7 @@ mod tests {
             Ok(Self(dir))
         }
 
-        fn path(&self) -> &Path {
+        pub(super) fn path(&self) -> &Path {
             &self.0
         }
     }
@@ -478,7 +464,7 @@ mod tests {
 
     #[tokio::test]
     async fn clear_logs_is_a_noop_when_no_guard_and_no_existing_file() {
-        // LOG_GUARD is None (install_logging never ran) and get_log_path() is
+        // LOGGING is Uninstalled (install_logging never ran) and get_log_path() is
         // empty, so clear_logs must return Ok(()) without touching the filesystem.
         assert_eq!(clear_logs().await, Ok(()));
     }
