@@ -72,6 +72,10 @@ Three trait families, all in `crates/btit-beads/src/backend.rs`, all object-safe
 
 Design headroom, not planned work: `ProjectRef` is a `#[non_exhaustive]` enum with the single variant `Local { cwd: Option<String> }` (today's `cwd: Option<&str>`); a remote transport adds a variant and callers that only pass a `ProjectRef` through do not change. The traits are synchronous, matching today's blocking `Command::output()` calls inside `async` Tauri commands (`cli.rs:555-560`); an async twin is not planned.
 
+**No process-global client state in library crates (binding).** Today the CLI choice and its detected version are process globals: `AppConfig.cli_binary` and `static CLI_BINARY` (`config.rs:8-13`), `static CLI_CLIENT_INFO` (`cli.rs:19-20`), `static BD_PROJECT_LOCKS` (`cli.rs:14-15`). After phase-b every backend is an instance: `CliRunner` owns its binary and probe cache, `ProjectLocks` is passed in at construction, and `btit-beads`, `btit-cli`, `btit-bd`, `btit-br` contain no `static` mutable state other than the two logging atomics (gate in b-3..b-6: `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-{cli,bd,br}/src` and, for `btit-beads`, only `LOGGING_ENABLED`/`VERBOSE_LOGGING`). Two `BdCli`/`BrCli` instances for two projects can therefore coexist in one process. The only global that remains is the app's backend slot in `crates/btit-app/src/backend.rs` (b-7), reached through the single function `backend::current()`; a per-project resolver would replace that function's body (`backend::for_project(&ProjectRef)`) without touching any trait, backend crate or command signature. Whether to add per-project backend selection (config schema, Settings UI, and which project a command belongs to) is OQ-8; it is a product change, not a restructuring, so it is not planned here. Note: `.claude/codebase-map.md:390` lists a per-project `backendMode` localStorage key; `grep -rn backendMode app/` finds no such code at `a18c724`, so that row is stale and b-10 removes it.
+
+**Dolt history (issue #51), headroom only.** Issue #51 (bead diff between two Dolt commits: `dolt_log`, `AS OF '<ref>'` snapshots and `dolt_diff` over the `issues`, `dependencies`, `labels` and `comments` tables) is a bd-Dolt-only capability. Under this design it is a further backend-specific trait next to `DoltOperations` (working name `DoltHistory`: commit log, snapshot at a ref, table diff between two refs), reached through an optional accessor like `dolt()`, implemented by `btit-bd` only and `None` for `btit-br`. It is referenced in `crates/btit-beads/docs/backend-contract.md` as headroom; no method, type or sprint for it is planned in phase-b, because #51's own open questions (SQL access path in embedded vs server mode, snapshot strategy) are undecided.
+
 Signatures are in the trait inventory below and, authoritatively, in `sprint-b-3.md` "Explicit Code Samples".
 
 ### Behaviour preserved (maintainer requirement 6)
@@ -363,7 +367,7 @@ git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> push --force-with-
 
 ## Error inventory
 
-`btit_beads::BeadsError` is the only error type crossing crate boundaries. Its authoritative variant table, with `code()`, `remediation()` and the `Display` string each variant must reproduce, is in `sprint-b-3.md` "Required Work". Later sprints add no variants without a plan change; b-9's B3 work uses the existing `Io` variant.
+`btit_beads::BeadsError` is the only error type crossing crate boundaries. Its authoritative variant table, with `code()`, `remediation()` and the `Display` string each variant must reproduce, is in `sprint-b-3.md` "Required Work". Later sprints add no variants without a plan change; b-9's B3 work needs none (an unreadable or unparsable `metadata.json` yields `false`, not an error).
 
 ## Test preservation
 
@@ -390,6 +394,8 @@ phase-b closes when all of the following hold:
 **Not part of phase-b:**
 
 - Implementing a beads-dolt SQL transport or a DoltHub transport (design headroom only, maintainer requirement 5).
+- Issue #51 (Dolt commit log and bead diff between commits): headroom as a future bd-only trait; not implemented.
+- Per-project backend selection (OQ-8): the instance-based design permits it; the config/UI change is not planned.
 - Splitting attachments, migration, polling, watcher, updates or probe out of `btit-app`.
 - Changing the attachment folder layout (B8 is closed as documentation).
 - The frontend double-warning question (B13, OQ-5).
@@ -406,4 +412,5 @@ phase-b closes when all of the following hold:
 | OQ-4 | B7: does `br` support `list --all`? The doc comment (`cli.rs:409`) says no, the code (`cli.rs:416`) says yes; br source and binary are unavailable locally. | code unchanged; doc comment marked unverified |
 | OQ-5 | B13 "double warning": should the frontend suppress the legacy banner when the version could not be parsed? Unverified in the UI. | out of scope for phase-b |
 | OQ-6 | Gated logging: keep the `LOGGING_ENABLED`-gated `log_*!` macros (behaviour-preserving, moved to `btit-beads::logging`), or switch library crates to plain `log::` calls filtered by the bridge level? | keep the gate |
+| OQ-8 | Per-project backend selection: today one `cli_binary` applies to every project (`config.rs:8-13`, `cli.rs:19-20`). The phase-b traits and backends are instances with no process-global client state (binding rule above), so bd for one project and br for another is possible; should phase-b also add the per-project *selection* (a `cli_binary` per project in `settings.json`, Settings UI, and `backend::for_project(&ProjectRef)` replacing `backend::current()`), or is that a later feature? | later feature; b-7 keeps one slot behind the single `backend::current()` seam |
 | OQ-7 | Should `bd_migrate_to_dolt`'s restore steps (`label add`, `dep add`, `comments add`, `migration.rs:944-1087`) keep their raw, un-JSON'd, un-locked invocations through `CliBackend::run_raw`, or go through `BeadsBackend::label_add`/`dep_add`/`comment_add` (which add `--json` and take the project lock)? | `run_raw`, byte-identical invocations |

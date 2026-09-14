@@ -212,7 +212,7 @@ impl CliInvoker for AppInvoker {
 
 ## Acceptance Criteria
 
-1. `cargo tree -e normal -p btit-cli --depth 1` lists exactly `btit-beads`, `btit-types`, `log`, `serde_json`; `! grep -rn 'tauri\|sc_observability' crates/btit-cli/src`.
+1. `cargo tree -e normal -p btit-cli --depth 1` lists exactly `btit-beads`, `btit-types`, `log`, `serde_json`; `! grep -rn 'tauri\|sc_observability' crates/btit-cli/src`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-cli/src` (no process-global client state: `CliRunner` owns binary and probe cache, `ProjectLocks` is passed in).
 2. `crates/btit-app/src/cli.rs` contains none of the moved functions from Exact Targets; `execute_bd` is a ≤ 10-line wrapper over `btit_cli::run_json`; no `#[tauri::command]` body in `issue_commands.rs` builds CLI args itself (`! grep -nE '"--(status|type|priority|assignee|all|limit|force|hard|suggest-next|title|description|set-labels|external-ref|estimate|design|acceptance|notes|metadata|spec-id|parent)' crates/btit-app/src/issue_commands.rs`).
 3. `git diff -M origin/integrate/phase-b...HEAD` shows the op bodies as moves; deltas inside them are limited to `execute_bd(..)?` → `inv.run_json(..)?`, `Err(String)` → `BeadsError` constructors from the b-3 error table, and `context` labels; listed in the PR description.
 4. The recording-invoker tests from Deliverable 9 pass and cover every `ops` function.

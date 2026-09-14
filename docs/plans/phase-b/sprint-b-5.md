@@ -147,7 +147,7 @@ impl DoltOperations for BdCli {
 
 ## Acceptance Criteria
 
-1. `cargo tree -e normal -p btit-bd --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`.
+1. `cargo tree -e normal -p btit-bd --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-bd/src` (instances only; two `BdCli` for two projects may coexist).
 2. `BdCli` implements `BeadsBackend`, `CliBackend`, `DoltOperations` (pinned by `tests/api_freeze.rs`); it does not implement `CloseSuggestions`.
 3. `project_uses_dolt_for` and its seven tests exist in `crates/btit-bd` and no longer in `crates/btit-app/src/cli.rs`; the app wrapper calls the moved function.
 4. The argument-vector tests (Deliverable 4) and the behaviour tests (Deliverable 6) pass.
