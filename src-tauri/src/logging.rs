@@ -13,7 +13,7 @@
 //! (`LogGuard::active_log_path`, captured once at [`install_logging`]). The guard
 //! has exactly one owner, the static [`LOGGING`] lifecycle (see
 //! [`lifecycle`]): [`install_logging`] hands the guard to it, [`clear_logs`]
-//! flushes through a non-owning `LogHandle` and is serialized with exit, and
+//! flushes through a non-owning `LogControl` and is serialized with exit, and
 //! [`on_run_event`] performs the single final shutdown on `RunEvent::Exit`. No
 //! code path holds the lifecycle lock across a flush, a shutdown or file I/O.
 
@@ -176,14 +176,14 @@ pub(crate) async fn set_verbose_logging(enabled: bool) {
 
 #[tauri::command]
 pub(crate) async fn clear_logs() -> Result<(), String> {
-    // The lifecycle hands out a non-owning handle, never the guard, and rejects
+    // The lifecycle hands out a non-owning control, never the guard, and rejects
     // the clear once exit has begun; see `lifecycle` for the serialization.
     let log_path = get_log_path();
     tauri::async_runtime::spawn_blocking(move || {
         LOGGING
             .clear(
                 &log_path,
-                |handle| handle.flush(LOG_IO_TIMEOUT),
+                |control| control.flush(LOG_IO_TIMEOUT),
                 read_log_dir,
             )
             .map_err(|e| e.to_string())?;

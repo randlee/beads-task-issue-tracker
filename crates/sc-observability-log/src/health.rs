@@ -1,10 +1,10 @@
 //! Read-only, bridge-owned health snapshot of the installed logger.
 //!
-//! [`BridgeHealth`] is a curated projection of `sc_observability::Logger::health()`
+//! [`BridgeHealthReport`] is a curated projection of `sc_observability::Logger::health()`
 //! plus the bridge's own lifecycle and dropped-event counters. It is returned by
-//! [`LogGuard::health`](crate::LogGuard::health) and
-//! [`LogHandle::health`](crate::LogHandle::health) and never exposes the mutable
-//! `Logger`.
+//! [`LogControl::health`](crate::LogControl::health) and
+//! [`LogGuard::health`](crate::LogGuard::health) and never exposes the mutable
+//! `Logger` or any ownership handle.
 //!
 //! # Stability and bindings
 //!
@@ -26,13 +26,23 @@
 //! `expect`s on internal mutexes; a panic there is caught and reported as
 //! `logger: None` with `state: Unavailable` instead of unwinding.
 //!
-//! # After shutdown
+//! # After shutdown: timeout versus final stop
 //!
-//! Shutdown sets `lifecycle` to `ShuttingDown` when it starts and to `Stopped`
-//! when it returns, whatever its result. Once the logger has been taken out of
-//! the slot, a snapshot reports the final `Logger::health()` captured right after
-//! `Logger::shutdown` (writer state `Stopped`), or `logger: None` when shutdown
-//! did not get that far (for example `ShutdownError::TimedOut`). A snapshot whose
+//! Shutdown sets `lifecycle` to `ShuttingDown` when it starts. When it returns:
+//!
+//! - `Stopped` — final. The logger was shut down (also after
+//!   `ShutdownError::FinalFlush`), or shutdown failed in a way that leaves
+//!   nothing to finish (`HelperSpawn`, `HelperLost`).
+//! - `ShutdownTimedOut` — `ShutdownError::TimedOut` was returned, but the
+//!   detached helper is still waiting for the logger (for example for a flush or
+//!   a submission blocked in a sink). When it completes, the lifecycle becomes
+//!   `Stopped` and the final report appears; that transition is how a caller
+//!   observes late completion. A process that exits first never sees it.
+//!
+//! Once the logger has been taken out of the slot, a snapshot reports the final
+//! `Logger::health()` captured right after `Logger::shutdown` (writer state
+//! `Stopped`), or `logger: None` while that has not happened (for example during
+//! `ShutdownTimedOut`). A snapshot whose
 //! `lifecycle` is not `Running` always has `state: Unavailable`, and the file and
 //! console sinks report `Unavailable` (or `Disabled`), because nothing is written
 //! any more. `dropped_events` stays readable; records logged after shutdown are
@@ -53,13 +63,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DroppedEvents, handle};
 
-/// Version of the [`BridgeHealth`] shape; bumped whenever a field or variant changes.
+/// Version of the [`BridgeHealthReport`] shape; bumped whenever a field or variant changes.
 pub const BRIDGE_HEALTH_SCHEMA_VERSION: u32 = 1;
 
 /// Point-in-time health of the bridge and its logger.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct BridgeHealth {
+pub struct BridgeHealthReport {
     /// [`BRIDGE_HEALTH_SCHEMA_VERSION`] of the producer.
     pub schema_version: u32,
     /// Bridge lifecycle phase.
@@ -84,7 +94,9 @@ pub enum BridgeLifecycle {
     Running,
     /// `shutdown` has started: records are no longer accepted.
     ShuttingDown,
-    /// `shutdown` has returned (successfully or not).
+    /// `shutdown` returned `ShutdownError::TimedOut`; a detached helper may still complete it.
+    ShutdownTimedOut,
+    /// Final: the logger has shut down, or shutdown ended with nothing left to complete.
     Stopped,
 }
 
@@ -211,6 +223,14 @@ pub(crate) fn set_sink_config(config: SinkConfig) {
     let _ = SINK_CONFIG.set(config);
 }
 
+/// The active JSONL path captured at `init`; `None` before `init` or with the file sink disabled.
+pub(crate) fn active_log_path() -> Option<PathBuf> {
+    SINK_CONFIG
+        .get()
+        .filter(|config| config.file_enabled)
+        .and_then(|config| config.active_log_path.clone())
+}
+
 /// Stores the final report read from the stopped logger.
 pub(crate) fn store_final_report(report: LoggingHealthReport) {
     *FINAL_REPORT.lock().unwrap_or_else(PoisonError::into_inner) = Some(report);
@@ -224,7 +244,7 @@ pub(crate) fn read_report<State>(
 }
 
 /// Takes a snapshot; see the module docs for the contract.
-pub(crate) fn snapshot() -> BridgeHealth {
+pub(crate) fn snapshot() -> BridgeHealthReport {
     let lifecycle = handle::lifecycle();
     let report = match handle::current_installed() {
         Some(installed) => read_report(&installed.logger),
@@ -247,7 +267,7 @@ fn project(
     report: Option<&LoggingHealthReport>,
     config: Option<&SinkConfig>,
     dropped_events: DroppedEvents,
-) -> BridgeHealth {
+) -> BridgeHealthReport {
     let running = lifecycle == BridgeLifecycle::Running;
     let state = match (running, report) {
         (true, Some(report)) => match report.state {
@@ -260,7 +280,7 @@ fn project(
     let file_enabled = config.is_some_and(|c| c.file_enabled);
     let console_enabled = config.is_some_and(|c| c.console_enabled);
     let file = sink_snapshot(file_enabled, running, report, JSONL_FILE_SINK_NAME);
-    BridgeHealth {
+    BridgeHealthReport {
         schema_version: BRIDGE_HEALTH_SCHEMA_VERSION,
         lifecycle,
         state,
@@ -350,25 +370,25 @@ fn remediation_for(code: Option<&ErrorCode>) -> Remediation {
     if *code == upstream_codes::LOGGER_QUEUE_FULL {
         Remediation::recoverable(
             "reduce logging pressure or increase LoggerConfig.queue_capacity",
-            ["inspect BridgeHealth.logger.queue.depth and high_water_mark"],
+            ["inspect BridgeHealthReport.logger.queue.depth and high_water_mark"],
         )
     } else if *code == upstream_codes::LOGGER_WRITER_DEGRADED {
         Remediation::recoverable(
             "restart the process: the bridge cannot reinstall the logger in-process",
-            ["inspect BridgeHealth.logger.last_writer_error"],
+            ["inspect BridgeHealthReport.logger.last_writer_error"],
         )
     } else if *code == upstream_codes::LOGGER_FLUSH_FAILED {
         Remediation::recoverable(
             "inspect the writer-thread flush failure",
             [
-                "inspect BridgeHealth.logger.last_writer_error",
+                "inspect BridgeHealthReport.logger.last_writer_error",
                 "retry the flush after the writer recovers",
             ],
         )
     } else if *code == upstream_codes::LOGGER_SINK_WRITE_FAILED {
         Remediation::recoverable(
             "check that the log directory exists, is writable and has free space",
-            ["inspect BridgeHealth.file_sink.active_log_path"],
+            ["inspect BridgeHealthReport.file_sink.active_log_path"],
         )
     } else if *code == upstream_codes::LOGGER_SHUTDOWN_TIMED_OUT {
         Remediation::not_recoverable(
@@ -495,7 +515,11 @@ mod tests {
     #[test]
     fn non_running_lifecycle_is_unavailable() {
         let report = report(LoggingHealthState::Healthy, SinkHealthState::Healthy);
-        for lifecycle in [BridgeLifecycle::ShuttingDown, BridgeLifecycle::Stopped] {
+        for lifecycle in [
+            BridgeLifecycle::ShuttingDown,
+            BridgeLifecycle::ShutdownTimedOut,
+            BridgeLifecycle::Stopped,
+        ] {
             let health = project(
                 lifecycle,
                 Some(&report),
@@ -556,7 +580,7 @@ mod tests {
         );
         assert_eq!(writer_error["remediation"]["kind"], "recoverable");
         assert_eq!(writer_error["at"], "1970-01-01T00:00:00Z");
-        let decoded: BridgeHealth = serde_json::from_value(json).unwrap();
+        let decoded: BridgeHealthReport = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, health);
     }
 }

@@ -29,6 +29,27 @@ pub const SC_OBSERVABILITY_LOG_HELPER_LOST: ErrorCode =
 /// `FlushError::ShutDown`: a flush was requested after shutdown had started.
 pub const SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN");
+/// `SubmitError::QueueFull`: the writer queue was full.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL");
+/// `SubmitError::InvalidInput`: the structured record was invalid; see its reason.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT");
+/// `SubmitError::Stopped`: the bridge lifecycle is not running.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_STOPPED: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_STOPPED");
+/// `SubmitError::Reentrant`: submitted from inside another submission on the same thread.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_REENTRANT: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_REENTRANT");
+/// `SubmitError::WriterDegraded`: the writer thread is degraded.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_WRITER_DEGRADED: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_WRITER_DEGRADED");
+/// `SubmitError::BackendShutdownTimedOut`: the logger runtime exceeded its shutdown threshold.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_BACKEND_SHUTDOWN_TIMED_OUT: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_BACKEND_SHUTDOWN_TIMED_OUT");
+/// `SubmitError::ContainedPanic`: a panic inside the logger, a sink or a redactor was contained.
+pub const SC_OBSERVABILITY_LOG_SUBMIT_CONTAINED_PANIC: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_CONTAINED_PANIC");
 
 /// Every code defined by this crate, in declaration order.
 pub const ALL: &[ErrorCode] = &[
@@ -40,6 +61,13 @@ pub const ALL: &[ErrorCode] = &[
     SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
     SC_OBSERVABILITY_LOG_HELPER_LOST,
     SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+    SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL,
+    SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT,
+    SC_OBSERVABILITY_LOG_SUBMIT_STOPPED,
+    SC_OBSERVABILITY_LOG_SUBMIT_REENTRANT,
+    SC_OBSERVABILITY_LOG_SUBMIT_WRITER_DEGRADED,
+    SC_OBSERVABILITY_LOG_SUBMIT_BACKEND_SHUTDOWN_TIMED_OUT,
+    SC_OBSERVABILITY_LOG_SUBMIT_CONTAINED_PANIC,
 ];
 
 #[cfg(test)]
@@ -53,6 +81,6 @@ mod tests {
             assert!(code.as_str().starts_with("SC_OBSERVABILITY_LOG_"));
             assert!(seen.insert(code.as_str()), "duplicate code {code}");
         }
-        assert_eq!(ALL.len(), 8);
+        assert_eq!(ALL.len(), 15);
     }
 }

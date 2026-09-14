@@ -168,31 +168,6 @@ fn child_context(parent: Option<TraceContext>) -> Option<TraceContext> {
     }
 }
 
-/// Reserved field holding user values displaced by a completion key.
-///
-/// `duration_ms`, `return` and `error` are always authoritative: if a
-/// same-named parameter or `fields(..)` entry already occupies that key, its
-/// value is moved here under the original key instead of being silently
-/// overwritten, mirroring `sc_observability_log.serialize_errors` in
-/// `callsite.rs`.
-const SHADOWED_FIELDS_KEY: &str = "sc_observability_log.shadowed_fields";
-
-/// Inserts `value` at the reserved completion key `key`, which always wins.
-///
-/// Uses [`Map::insert`]'s returned `Option<Value>` to detect a collision with
-/// an existing user field; the displaced value is preserved under
-/// `fields[SHADOWED_FIELDS_KEY][key]` rather than dropped. Never panics.
-fn insert_completion_field(fields: &mut Map<String, Value>, key: &str, value: Value) {
-    if let Some(previous) = fields.insert(key.to_owned(), value) {
-        let shadowed = fields
-            .entry(SHADOWED_FIELDS_KEY)
-            .or_insert_with(|| Value::Object(Map::new()));
-        if let Value::Object(shadowed) = shadowed {
-            shadowed.insert(key.to_owned(), previous);
-        }
-    }
-}
-
 /// Levels of the completion event, resolved by the `#[instrument]` expansion.
 #[derive(Debug, Clone, Copy)]
 pub struct CallLevels {
@@ -307,7 +282,7 @@ impl CallSpan {
     ///
     /// The reserved completion keys `duration_ms` and `return`/`error` always
     /// win over a same-named recorded argument or `fields(..)` entry; see
-    /// [`SHADOWED_FIELDS_KEY`].
+    /// `sc_observability_log.shadowed_fields`.
     fn complete(&mut self, outcome: CallOutcome, value: Option<FieldRecord>) {
         self.finished = true;
         let level = self.levels.for_outcome(outcome);
@@ -316,14 +291,14 @@ impl CallSpan {
         }
         let mut fields = std::mem::take(&mut self.fields);
         let duration_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        insert_completion_field(&mut fields, "duration_ms", Value::from(duration_ms));
+        crate::mapping::insert_authoritative(&mut fields, "duration_ms", Value::from(duration_ms));
         if let Some(record) = value {
             let key = match outcome {
                 CallOutcome::Error => "error",
                 CallOutcome::Ok | CallOutcome::Panicked | CallOutcome::Cancelled => "return",
             };
             match record {
-                FieldRecord::Value(v) => insert_completion_field(&mut fields, key, v),
+                FieldRecord::Value(v) => crate::mapping::insert_authoritative(&mut fields, key, v),
                 // Unreachable from the `#[instrument]` expansion: `ret`/`err`
                 // values always format through `debug_value`/`display_value`
                 // (`FieldRecord::Value`). Kept for `FieldRecord` completeness;

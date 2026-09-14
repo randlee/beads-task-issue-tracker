@@ -6,7 +6,8 @@ use crate::handle::{self, THRESHOLD};
 use crate::{DropCause, mapping};
 
 /// Maps every enabled `log` record to a `LogEvent` and submits it through the
-/// guarded emit core (one guard per record, shared with `__private::emit`).
+/// guarded submission core (one guard per record, shared with `__private::emit`
+/// and `LogControl::submit`).
 #[derive(Debug)]
 pub(crate) struct Bridge;
 
@@ -28,22 +29,30 @@ impl log::Log for Bridge {
     /// while the guard is active on this thread (a formatter, panic hook, sink or
     /// redactor that logs) is dropped and counted once as
     /// `DropCause::ReentrantEmit`; a target the sanitizer cannot label is counted
-    /// as `DropCause::InvalidEvent`.
+    /// as `DropCause::InvalidEvent`. A key-value whose key is empty or reserved is
+    /// omitted (the record still emits) and counted once as `InvalidEvent`.
     fn log(&self, record: &log::Record<'_>) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        handle::submit_guarded(|| {
+        // The facade has no result channel: the result is discarded only after
+        // `submit_guarded` has counted a rejection under exactly one DropCause.
+        let _ = handle::submit_guarded(|| {
             let installed = handle::current_installed().ok_or(DropCause::NotInstalled)?;
-            let parts = mapping::record_to_parts(record, &installed.options)
+            let mapped = mapping::record_to_parts(record, &installed.options)
                 .map_err(|_label_error| DropCause::InvalidEvent)?;
-            handle::submit_to(&installed, parts)
+            for _ in 0..mapped.omitted_fields {
+                // An omitted key-value is not a dropped event: the record still emits.
+                handle::record_drop(DropCause::InvalidEvent);
+            }
+            handle::submit_to(&installed, mapped.parts)
         });
     }
 
     /// No-op by design: `log::Log::flush` has no timeout or error channel, and
     /// sc-observability's flush is unbounded (`maintenance.rs:137-164`), so
     /// delegating would let any `log::logger().flush()` caller hang. Use
-    /// [`LogGuard::flush`](crate::LogGuard::flush) for a bounded flush.
+    /// [`LogControl::flush`](crate::LogControl::flush) (or
+    /// [`LogGuard::flush`](crate::LogGuard::flush)) for a bounded flush.
     fn flush(&self) {}
 }

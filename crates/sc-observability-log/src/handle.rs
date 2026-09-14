@@ -1,5 +1,5 @@
-//! Process-global logger slot, drop accounting, the guarded emit core, and the
-//! bounded flush / shutdown helpers.
+//! Process-global logger slot, drop accounting, the guarded submission core, and
+//! the bounded flush / shutdown helpers.
 //!
 //! Every lock acquisition recovers from poisoning with `PoisonError::into_inner`:
 //! the slot holds only an `Option<Arc<Installed>>`, which has no invariant a
@@ -17,6 +17,33 @@ use sc_observability_types::LevelFilter;
 
 use crate::__private::EventParts;
 use crate::{BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, health};
+
+/// A rejected submission: every failure of the guarded core maps to exactly one [`DropCause`].
+///
+/// Implemented by `DropCause` (the facade and the macros, which discard the
+/// result) and by `SubmitError` (`LogControl::submit`, which returns it).
+pub(crate) trait Rejection: Sized {
+    /// The single counter this rejection increments.
+    fn drop_cause(&self) -> DropCause;
+    /// The rejection for a call made while this thread is already inside the guard.
+    fn reentrant() -> Self;
+    /// The rejection for a panic caught inside the guard.
+    fn panicked() -> Self;
+}
+
+impl Rejection for DropCause {
+    fn drop_cause(&self) -> DropCause {
+        *self
+    }
+
+    fn reentrant() -> Self {
+        DropCause::ReentrantEmit
+    }
+
+    fn panicked() -> Self {
+        DropCause::LoggerPanicked
+    }
+}
 
 /// Everything the emit path needs, shared behind one `Arc`.
 pub(crate) struct Installed {
@@ -38,15 +65,27 @@ static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_STOPPED);
 const LIFECYCLE_RUNNING: u8 = 0;
 const LIFECYCLE_SHUTTING_DOWN: u8 = 1;
 const LIFECYCLE_STOPPED: u8 = 2;
+const LIFECYCLE_SHUTDOWN_TIMED_OUT: u8 = 3;
 
 /// Publishes a lifecycle transition; read lock-free by health snapshots.
 pub(crate) fn set_lifecycle(lifecycle: BridgeLifecycle) {
     let encoded = match lifecycle {
         BridgeLifecycle::Running => LIFECYCLE_RUNNING,
         BridgeLifecycle::ShuttingDown => LIFECYCLE_SHUTTING_DOWN,
+        BridgeLifecycle::ShutdownTimedOut => LIFECYCLE_SHUTDOWN_TIMED_OUT,
         BridgeLifecycle::Stopped => LIFECYCLE_STOPPED,
     };
     LIFECYCLE.store(encoded, Ordering::SeqCst);
+}
+
+/// `ShuttingDown` -> `ShutdownTimedOut`, unless the detached helper already reached `Stopped`.
+fn mark_shutdown_timed_out() {
+    let _ = LIFECYCLE.compare_exchange(
+        LIFECYCLE_SHUTTING_DOWN,
+        LIFECYCLE_SHUTDOWN_TIMED_OUT,
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+    );
 }
 
 /// Current lifecycle phase.
@@ -54,6 +93,7 @@ pub(crate) fn lifecycle() -> BridgeLifecycle {
     match LIFECYCLE.load(Ordering::SeqCst) {
         LIFECYCLE_RUNNING => BridgeLifecycle::Running,
         LIFECYCLE_SHUTTING_DOWN => BridgeLifecycle::ShuttingDown,
+        LIFECYCLE_SHUTDOWN_TIMED_OUT => BridgeLifecycle::ShutdownTimedOut,
         _ => BridgeLifecycle::Stopped,
     }
 }
@@ -158,27 +198,35 @@ impl Drop for EmitScope {
     }
 }
 
-/// Emit guard: reentrancy guard plus panic containment. Every dropped event is counted exactly once.
+/// The guarded submission core: reentrancy guard plus panic containment.
 ///
-/// This is the single outermost boundary of every emission: exactly one call per
-/// record. The closure must reach the logger only through the unguarded cores
-/// [`submit_installed`] / [`submit_to`]; calling `__private::emit` (which is
-/// itself guarded) from inside the closure would classify the record as
-/// `DropCause::ReentrantEmit`.
-pub(crate) fn submit_guarded(submit: impl FnOnce() -> Result<(), DropCause>) {
+/// This is the single outermost boundary of every submission, shared by the
+/// `log` facade, the event macros / `#[instrument]` and `LogControl::submit`:
+/// exactly one call per record. A rejection is counted under its one
+/// [`DropCause`] *before* it is returned, so a caller that discards the result
+/// (the facade and the macros) still leaves exactly-once drop accounting.
+///
+/// The closure must reach the logger only through the unguarded cores
+/// [`submit_installed`] / [`submit_to`]; calling a guarded entry point from
+/// inside the closure would classify the record as `DropCause::ReentrantEmit`.
+pub(crate) fn submit_guarded<E: Rejection>(
+    submit: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
     let Some(_scope) = EmitScope::enter() else {
-        record_drop(DropCause::ReentrantEmit);
-        return;
+        let rejection = E::reentrant();
+        record_drop(rejection.drop_cause());
+        return Err(rejection);
     };
     // AssertUnwindSafe: the closure reaches Logger, which holds dyn LogSink / dyn Redactor /
     // dyn ProcessIdentityResolver; none is RefUnwindSafe (E0277 without the wrapper). After a
     // caught panic nothing reads logger state except try_log itself, which reports its
     // poisoned mutexes by panicking again.
-    match catch_unwind(AssertUnwindSafe(submit)) {
-        Ok(Ok(())) => {}
-        Ok(Err(cause)) => record_drop(cause),
-        Err(_payload) => record_drop(DropCause::LoggerPanicked),
+    let result =
+        catch_unwind(AssertUnwindSafe(submit)).unwrap_or_else(|_payload| Err(E::panicked()));
+    if let Err(rejection) = &result {
+        record_drop(rejection.drop_cause());
     }
+    result
 }
 
 /// Unguarded submit core: event assembly, ambient trace context and `Logger::try_log`.
@@ -272,7 +320,7 @@ pub(crate) fn take_sole<T>(mut shared: Arc<T>, deadline: Option<Instant>) -> Opt
 /// Crate-private outcome of the shutdown helper.
 #[derive(Debug)]
 pub(crate) enum ShutdownStep {
-    /// Another `Arc<Installed>` clone outlived the deadline.
+    /// Sole ownership was not gained (unreachable: the helper waits without a deadline).
     StillShared,
     /// The final flush failed; the logger was still shut down.
     FinalFlush {
@@ -281,15 +329,20 @@ pub(crate) enum ShutdownStep {
 }
 
 /// Shutdown helper. `Logger::shutdown(self)` consumes the logger (runtime.rs:224), so the
-/// helper first gains sole ownership. A helper detached by a timed-out `LogGuard::flush`
-/// holds an `Arc` clone and forces `ShutdownError::TimedOut`.
+/// helper first gains sole ownership.
+///
+/// The caller waits at most `timeout`. The helper itself has no deadline: an
+/// `Arc<Installed>` clone held past `timeout` (a detached `flush` helper, or a
+/// submission blocked in a sink or redactor) makes the caller return
+/// `ShutdownError::TimedOut` while the detached helper keeps waiting. When it
+/// completes late it stores the final health report and publishes
+/// `BridgeLifecycle::Stopped`, so the late completion is observable.
 pub(crate) fn shutdown_installed(
     installed: Arc<Installed>,
     timeout: Duration,
 ) -> Result<(), ShutdownError> {
-    let deadline = Instant::now().checked_add(timeout);
     let outcome = run_bounded(timeout, move || {
-        let Some(sole) = take_sole(installed, deadline) else {
+        let Some(sole) = take_sole(installed, None) else {
             return Err(ShutdownStep::StillShared);
         };
         let flushed = sole.logger.flush();
@@ -298,6 +351,7 @@ pub(crate) fn shutdown_installed(
         if let Some(report) = health::read_report(&stopped) {
             health::store_final_report(report);
         }
+        set_lifecycle(BridgeLifecycle::Stopped);
         flushed.map_err(|source| ShutdownStep::FinalFlush { source })
     });
     match outcome {
@@ -313,8 +367,10 @@ pub(crate) fn shutdown_installed(
 
 /// `LogGuard::shutdown` and `Drop for LogGuard` both call this once.
 ///
-/// The lifecycle is `ShuttingDown` from the first statement and `Stopped` once
-/// this returns, whatever the result.
+/// The lifecycle is `ShuttingDown` from the first statement. When this returns
+/// it is `Stopped` for every result except `ShutdownError::TimedOut`, which
+/// leaves `ShutdownTimedOut` until the detached helper completes and publishes
+/// `Stopped` (see [`shutdown_installed`]).
 pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> {
     set_lifecycle(BridgeLifecycle::ShuttingDown);
     THRESHOLD.store(THRESHOLD_OFF, Ordering::SeqCst);
@@ -324,7 +380,11 @@ pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> 
         Some(installed) => shutdown_installed(installed, timeout),
         None => Ok(()),
     };
-    set_lifecycle(BridgeLifecycle::Stopped);
+    if matches!(result, Err(ShutdownError::TimedOut { .. })) {
+        mark_shutdown_timed_out();
+    } else {
+        set_lifecycle(BridgeLifecycle::Stopped);
+    }
     result
 }
 
@@ -333,7 +393,7 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
     SLOT.read().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
-/// `LogGuard::flush` / `LogHandle::flush`: the helper owns an `Arc` clone until
+/// `LogGuard::flush` / `LogControl::flush`: the helper owns an `Arc` clone until
 /// sc-observability's flush returns.
 ///
 /// An empty slot means shutdown has taken the logger: `FlushError::ShutDown`. A
@@ -440,30 +500,40 @@ mod tests {
         // 1. A nested call inside the closure is counted once as ReentrantEmit.
         let reentrant_before = drop_count(DropCause::ReentrantEmit);
         let panicked_before = drop_count(DropCause::LoggerPanicked);
-        submit_guarded(|| {
-            submit_guarded(|| Ok(()));
-            Ok(())
+        let _ = submit_guarded(|| {
+            assert_eq!(
+                submit_guarded(|| Ok::<(), DropCause>(())),
+                Err(DropCause::ReentrantEmit)
+            );
+            Ok::<(), DropCause>(())
         });
         assert_eq!(drop_count(DropCause::ReentrantEmit), reentrant_before + 1);
         assert_eq!(drop_count(DropCause::LoggerPanicked), panicked_before);
 
         // 2. A panicking closure is counted once as LoggerPanicked, and the panic hook's
         //    own submit_guarded call (same thread, still inside emit) once as ReentrantEmit.
-        std::panic::set_hook(Box::new(|_| submit_guarded(|| Ok(()))));
-        submit_guarded(|| panic!("simulated sc-observability panic"));
+        std::panic::set_hook(Box::new(|_| {
+            let _ = submit_guarded(|| Ok::<(), DropCause>(()));
+        }));
+        let panicked: Result<(), DropCause> =
+            submit_guarded(|| panic!("simulated sc-observability panic"));
+        assert_eq!(panicked, Err(DropCause::LoggerPanicked));
         // 3. Remove the hook.
         let _ = std::panic::take_hook();
         assert_eq!(drop_count(DropCause::LoggerPanicked), panicked_before + 1);
         assert_eq!(drop_count(DropCause::ReentrantEmit), reentrant_before + 2);
 
         // 4. The EmitScope was released during unwinding: a fresh call is not counted.
-        submit_guarded(|| Ok(()));
+        assert_eq!(submit_guarded(|| Ok::<(), DropCause>(())), Ok(()));
         assert_eq!(drop_count(DropCause::ReentrantEmit), reentrant_before + 2);
         assert_eq!(drop_count(DropCause::LoggerPanicked), panicked_before + 1);
 
         // A closure error is counted under its own cause.
         let invalid_before = drop_count(DropCause::InvalidEvent);
-        submit_guarded(|| Err(DropCause::InvalidEvent));
+        assert_eq!(
+            submit_guarded(|| Err(DropCause::InvalidEvent)),
+            Err(DropCause::InvalidEvent)
+        );
         assert_eq!(drop_count(DropCause::InvalidEvent), invalid_before + 1);
         record_drop(DropCause::QueueFull);
         let snapshot = dropped_events();

@@ -4,8 +4,8 @@
 //! serializes the three operations that touch the logger's lifetime:
 //!
 //! - **clear** ([`LogLifecycle::clear`]) never holds the guard. It takes a
-//!   non-owning handle (`LogGuard::handle`) under the lock, releases the lock,
-//!   flushes through the handle, then re-acquires the lock to claim the single
+//!   non-owning `LogControl` (`LogGuard::control`) under the lock, releases the
+//!   lock, flushes through the control, then re-acquires the lock to claim the single
 //!   *clear-write slot* before truncating files. Once shutdown has begun it is
 //!   rejected with [`ClearError::ShutdownStarted`] and touches no file.
 //! - **exit** ([`LogLifecycle::exit`]) moves the guard out and marks the phase
@@ -29,17 +29,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use sc_observability_log::{DropCause, FlushError, LogGuard, LogHandle, ShutdownError};
+use sc_observability_log::{DropCause, FlushError, LogControl, LogGuard, ShutdownError};
 
 use super::{clear_log_files, ClearError, LogDirEntry};
 
 /// Guard operations the lifecycle owner needs: `LogGuard` in production, a fake in tests.
 pub(crate) trait OwnedGuard: Send {
     /// Non-owning flush capability handed to a clear.
-    type Handle;
+    type Control;
 
-    /// Returns a handle that neither keeps the logger alive nor can shut it down.
-    fn handle(&self) -> Self::Handle;
+    /// Returns a control that neither keeps the logger alive nor can shut it down.
+    fn control(&self) -> Self::Control;
 
     /// Records final diagnostics while the logger still accepts records.
     fn report_before_shutdown(&self);
@@ -53,10 +53,10 @@ pub(crate) trait OwnedGuard: Send {
 }
 
 impl OwnedGuard for LogGuard {
-    type Handle = LogHandle;
+    type Control = LogControl;
 
-    fn handle(&self) -> LogHandle {
-        LogGuard::handle(self)
+    fn control(&self) -> LogControl {
+        LogGuard::control(self)
     }
 
     /// Logs one `warn` with per-cause drop counts (when any) and one `info` with the health snapshot.
@@ -206,10 +206,10 @@ impl<G: OwnedGuard> LogLifecycle<G> {
         })
     }
 
-    /// Flushes through a handle, then truncates the log files; serialized with exit.
+    /// Flushes through a `LogControl`, then truncates the log files; serialized with exit.
     ///
-    /// `flush` receives the non-owning handle (production:
-    /// `|h| h.flush(LOG_IO_TIMEOUT)`); it is not called before installation.
+    /// `flush` receives the non-owning control (production:
+    /// `|c| c.flush(LOG_IO_TIMEOUT)`); it is not called before installation.
     /// `list_dir` is the directory reader passed to [`clear_log_files`].
     ///
     /// # Errors
@@ -221,21 +221,21 @@ impl<G: OwnedGuard> LogLifecycle<G> {
     pub(crate) fn clear<I>(
         &self,
         log_path: &Path,
-        flush: impl FnOnce(&G::Handle) -> Result<(), FlushError>,
+        flush: impl FnOnce(&G::Control) -> Result<(), FlushError>,
         list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
     ) -> Result<(), ClearError>
     where
         I: IntoIterator<Item = std::io::Result<LogDirEntry>>,
     {
-        let handle = {
+        let control = {
             let state = self.lock();
             match &state.phase {
                 Phase::Uninstalled => None,
-                Phase::Running(guard) => Some(guard.handle()),
+                Phase::Running(guard) => Some(guard.control()),
                 Phase::ShuttingDown | Phase::Stopped => return Err(ClearError::ShutdownStarted),
             }
         };
-        let flushed = handle.as_ref().map_or(Ok(()), flush);
+        let flushed = control.as_ref().map_or(Ok(()), flush);
         let _write = self.claim_clear_write()?;
         flushed.map_err(|source| ClearError::Flush { source })?;
         clear_log_files(log_path, list_dir)
@@ -328,9 +328,9 @@ mod tests {
     struct FakeGuard(Arc<Calls>);
 
     impl OwnedGuard for FakeGuard {
-        type Handle = ();
+        type Control = ();
 
-        fn handle(&self) {}
+        fn control(&self) {}
 
         fn report_before_shutdown(&self) {
             self.0.reports.fetch_add(1, Ordering::SeqCst);
@@ -385,7 +385,7 @@ mod tests {
             .active_log_path()
             .ok_or_else(|| TestError("file sink disabled".to_owned()))?
             .to_path_buf();
-        let late_handle = guard.handle();
+        let late_control = guard.control();
         let lifecycle = LogLifecycle::new();
         lifecycle
             .install(guard, TIMEOUT)
@@ -400,11 +400,11 @@ mod tests {
             let clearing = scope.spawn(move || {
                 lifecycle.clear(
                     log_path,
-                    move |handle: &LogHandle| {
+                    move |control: &LogControl| {
                         // Hold the clear-side flush until exit has returned.
                         let _ = held_tx.send(());
                         let _ = release_rx.recv();
-                        handle.flush(TIMEOUT)
+                        control.flush(TIMEOUT)
                     },
                     read_log_dir,
                 )
@@ -446,7 +446,7 @@ mod tests {
             "a clear racing exit is rejected, got {clear_result:?}"
         );
 
-        let health = late_handle.health();
+        let health = late_control.health();
         assert_eq!(health.lifecycle, BridgeLifecycle::Stopped);
         assert_eq!(health.state, BridgeHealthState::Unavailable);
 

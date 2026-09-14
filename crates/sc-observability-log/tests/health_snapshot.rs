@@ -1,4 +1,4 @@
-//! One `init` per test binary: `LogGuard::health` / `LogHandle::health` (R-A4-004).
+//! One `init` per test binary: `LogGuard::health` / `LogControl::health` (R-A4-004).
 //!
 //! Covers the running snapshot, the serialized shape and the defined result after
 //! shutdown, all inside the single test fn.
@@ -13,13 +13,13 @@
 use std::time::Duration;
 
 use sc_observability_log::{
-    ActionName, BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealth, BridgeHealthState, BridgeLifecycle,
-    DropCause, LevelFilter, LoggerConfig, ServiceName, SinkStatus, WriterStatus,
+    ActionName, BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState,
+    BridgeLifecycle, DropCause, LevelFilter, LoggerConfig, ServiceName, SinkStatus, WriterStatus,
 };
 
 const QUEUE_CAPACITY: usize = 64;
 
-fn assert_running(health: &BridgeHealth, expected_path: &std::path::Path) {
+fn assert_running(health: &BridgeHealthReport, expected_path: &std::path::Path) {
     assert_eq!(health.schema_version, BRIDGE_HEALTH_SCHEMA_VERSION);
     assert_eq!(health.lifecycle, BridgeLifecycle::Running);
     assert_eq!(health.state, BridgeHealthState::Healthy);
@@ -36,7 +36,7 @@ fn assert_running(health: &BridgeHealth, expected_path: &std::path::Path) {
     assert_eq!(health.console_sink.status, SinkStatus::Disabled);
 }
 
-fn assert_serialized_shape(health: &BridgeHealth) {
+fn assert_serialized_shape(health: &BridgeHealthReport) {
     let json = serde_json::to_value(health).unwrap();
     assert_eq!(json["lifecycle"], "running");
     assert_eq!(json["state"], "healthy");
@@ -44,7 +44,7 @@ fn assert_serialized_shape(health: &BridgeHealth) {
     assert_eq!(json["file_sink"]["status"], "healthy");
     assert_eq!(json["console_sink"]["status"], "disabled");
     assert!(json["dropped_events"]["not_installed"].is_u64());
-    let decoded: BridgeHealth = serde_json::from_value(json).unwrap();
+    let decoded: BridgeHealthReport = serde_json::from_value(json).unwrap();
     assert_eq!(&decoded, health);
 }
 
@@ -64,22 +64,23 @@ fn health_snapshot_tracks_the_lifecycle() {
     };
     let guard = sc_observability_log::init(config, options).unwrap();
     let path = guard.active_log_path().unwrap().to_path_buf();
-    let handle = guard.handle();
+    let control = guard.control();
+    assert_eq!(control.active_log_path().as_deref(), Some(path.as_path()));
 
     log::info!(target: "health", "a record before the snapshot");
     guard.flush(Duration::from_secs(5)).unwrap();
 
-    handle.flush(Duration::from_secs(5)).unwrap();
+    control.flush(Duration::from_secs(5)).unwrap();
     let from_guard = guard.health();
     assert_running(&from_guard, &path);
-    assert_running(&handle.health(), &path);
+    assert_running(&control.health(), &path);
     assert_eq!(from_guard.dropped_events, guard.dropped_events());
     assert_serialized_shape(&from_guard);
 
     guard.shutdown(Duration::from_secs(5)).unwrap();
 
     // Defined result after shutdown: the final report of the stopped logger.
-    let stopped = handle.health();
+    let stopped = control.health();
     assert_eq!(stopped.lifecycle, BridgeLifecycle::Stopped);
     assert_eq!(stopped.state, BridgeHealthState::Unavailable);
     let logger = stopped.logger.as_ref().expect("final logger health");
@@ -91,16 +92,22 @@ fn health_snapshot_tracks_the_lifecycle() {
         Some(path.as_path())
     );
 
-    // A handle outlives the guard without owning it: a late flush is rejected clearly.
+    assert_eq!(
+        control.active_log_path(),
+        Some(path.clone()),
+        "the owned path stays available after shutdown"
+    );
+
+    // A control outlives the guard without owning it: a late flush is rejected clearly.
     assert!(matches!(
-        handle.flush(Duration::from_secs(1)),
+        control.flush(Duration::from_secs(1)),
         Err(sc_observability_log::FlushError::ShutDown)
     ));
 
     // A record after shutdown is filtered before the bridge: not written, not counted.
     let dropped = stopped.dropped_events;
     log::error!(target: "health", "a record after shutdown");
-    let after = handle.health();
+    let after = control.health();
     assert_eq!(after.dropped_events, dropped);
     assert_eq!(after.lifecycle, BridgeLifecycle::Stopped);
     assert!(

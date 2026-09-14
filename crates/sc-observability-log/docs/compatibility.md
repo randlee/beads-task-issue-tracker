@@ -97,7 +97,8 @@ itself (for example `sc_observability_log.serialize_errors`). Literal
 (`"sc_observability_log.x" = v`) and dotted (`sc_observability_log.x = v`) keys
 with that prefix, and the empty literal key, are rejected at compile time.
 Literal and dotted keys are otherwise stored exactly as written (after removing
-`r#`).
+`r#`). The same prefix is reserved at runtime for `{ KEY } = v` keys, `log`
+key-values and `LogControl::submit` fields (`mapping.md`, "Field keys").
 
 ### Runtime labels and keys
 
@@ -241,7 +242,9 @@ not lost — it is moved to
 `fields["sc_observability_log.shadowed_fields"][key]`, a JSON object keyed by
 the original field name, mirroring how a serialize failure is recorded under
 `sc_observability_log.serialize_errors` (see "Serialization failures" above).
-A call with no such collision has no `shadowed_fields` key at all.
+A call with no such collision has no `shadowed_fields` key at all. The `log`
+bridge applies the same rule to its `code.module` / `code.file` / `code.line`
+keys; `mapping.md`, "Field keys", lists the unified rules for every producer.
 
 ### Outcomes
 

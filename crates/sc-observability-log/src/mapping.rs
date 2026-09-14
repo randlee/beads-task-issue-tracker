@@ -1,9 +1,11 @@
 //! Pure record mapping and the single phase-a label sanitizer.
 //!
 //! Nothing in this module touches global state: `record_to_parts` turns a
-//! `log::Record` into [`EventParts`], `assemble_event` completes the envelope,
-//! and the sanitizer functions turn arbitrary strings into valid
-//! `TargetCategory` / `ActionName` values and field keys. The sanitizer items are
+//! `log::Record` into [`EventParts`], `structured_to_parts` does the same for a
+//! [`StructuredRecord`], `assemble_event` completes the envelope, and the
+//! sanitizer functions turn arbitrary strings into valid `TargetCategory` /
+//! `ActionName` values and field keys. The unified field-key and collision rules
+//! shared by every producer are documented in `docs/mapping.md`, "Field keys". The sanitizer items are
 //! `pub` inside this private module so `__private` can re-export them; they are
 //! reachable from outside the crate only through `__private`.
 
@@ -17,9 +19,35 @@ use serde_json::{Map, Value};
 
 use crate::__private::EventParts;
 use crate::BridgeOptions;
+use crate::control::StructuredRecord;
+use crate::error::InvalidInputReason;
 
 /// Field keys starting with this prefix are reserved for the bridge itself.
 pub const RESERVED_FIELD_PREFIX: &str = "sc_observability_log.";
+
+/// Reserved field holding user values displaced by a crate-owned key.
+///
+/// Crate-owned keys (`code.module` / `code.file` / `code.line` on `log`
+/// records; `duration_ms` / `return` / `error` on `#[instrument]` completion
+/// events) are always authoritative: a user field already occupying one is
+/// moved here under its original key instead of being silently overwritten.
+pub(crate) const SHADOWED_FIELDS_KEY: &str = "sc_observability_log.shadowed_fields";
+
+/// Inserts `value` at the crate-owned key `key`, which always wins.
+///
+/// Uses [`Map::insert`]'s returned `Option<Value>` to detect a collision with
+/// an existing user field; the displaced value is preserved under
+/// `fields[SHADOWED_FIELDS_KEY][key]` rather than dropped. Never panics.
+pub(crate) fn insert_authoritative(fields: &mut Map<String, Value>, key: &str, value: Value) {
+    if let Some(previous) = fields.insert(key.to_owned(), value) {
+        let shadowed = fields
+            .entry(SHADOWED_FIELDS_KEY)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(shadowed) = shadowed {
+            shadowed.insert(key.to_owned(), previous);
+        }
+    }
+}
 
 /// Which kind of label failed validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,8 +204,13 @@ fn split_bracket_tag(message: &str) -> Option<(&str, &str)> {
 }
 
 /// Collects `log` key-values into JSON fields.
+///
+/// A key rejected by [`field_key_label`] (empty or reserved after sanitizing) is
+/// omitted and counted in `omitted`; accepted keys are stored as written, like
+/// literal event-macro keys.
 struct FieldCollector<'a> {
     fields: &'a mut Map<String, Value>,
+    omitted: u64,
 }
 
 impl<'kvs> log::kv::VisitSource<'kvs> for FieldCollector<'_> {
@@ -186,10 +219,23 @@ impl<'kvs> log::kv::VisitSource<'kvs> for FieldCollector<'_> {
         key: log::kv::Key<'kvs>,
         value: log::kv::Value<'kvs>,
     ) -> Result<(), log::kv::Error> {
+        if field_key_label(key.as_str()).is_err() {
+            self.omitted = self.omitted.saturating_add(1);
+            return Ok(());
+        }
         self.fields
             .insert(key.as_str().to_owned(), kv_value_to_json(&value));
         Ok(())
     }
+}
+
+/// A mapped `log` record plus the number of key-values omitted by the key rules.
+#[derive(Debug)]
+pub(crate) struct MappedRecord {
+    /// The call-site-controlled parts of the event.
+    pub(crate) parts: EventParts,
+    /// Key-values with an empty or reserved key; each is counted as `DropCause::InvalidEvent`.
+    pub(crate) omitted_fields: u64,
 }
 
 /// Numbers, bools and strings stay typed; everything else is rendered with `to_string()`.
@@ -219,7 +265,7 @@ fn kv_value_to_json(value: &log::kv::Value<'_>) -> Value {
 pub(crate) fn record_to_parts(
     record: &log::Record<'_>,
     options: &BridgeOptions,
-) -> Result<EventParts, LabelError> {
+) -> Result<MappedRecord, LabelError> {
     let target = target_label(record.target())?;
     let formatted = record
         .args()
@@ -236,24 +282,78 @@ pub(crate) fn record_to_parts(
     };
 
     let mut fields = Map::new();
-    let _ = record.key_values().visit(&mut FieldCollector {
+    let mut collector = FieldCollector {
         fields: &mut fields,
-    });
+        omitted: 0,
+    };
+    let _ = record.key_values().visit(&mut collector);
+    let omitted_fields = collector.omitted;
     if let Some(module) = record.module_path() {
-        fields.insert("code.module".to_owned(), Value::from(module));
+        insert_authoritative(&mut fields, "code.module", Value::from(module));
     }
     if let Some(file) = record.file() {
-        fields.insert("code.file".to_owned(), Value::from(file));
+        insert_authoritative(&mut fields, "code.file", Value::from(file));
     }
     if let Some(line) = record.line() {
-        fields.insert("code.line".to_owned(), Value::from(line));
+        insert_authoritative(&mut fields, "code.line", Value::from(line));
     }
 
-    Ok(EventParts {
-        level: map_level(record.level()),
+    Ok(MappedRecord {
+        parts: EventParts {
+            level: map_level(record.level()),
+            target,
+            action,
+            message: Some(message),
+            outcome: None,
+            fields,
+        },
+        omitted_fields,
+    })
+}
+
+/// Maps a [`StructuredRecord`] to event parts, or the reason it is invalid.
+///
+/// Uses the same sanitizer as every other producer. Because `LogControl::submit`
+/// has a result channel, input the facade or the macros would repair and count
+/// (an empty action, an empty or reserved field key) rejects the whole request
+/// instead; nothing is written. Accepted field keys are stored as written.
+pub(crate) fn structured_to_parts(
+    record: StructuredRecord,
+) -> Result<EventParts, InvalidInputReason> {
+    let StructuredRecord {
+        level,
         target,
         action,
-        message: Some(message),
+        message,
+        fields,
+    } = record;
+    let target = target_label(&target).map_err(|_| InvalidInputReason::RejectedTarget)?;
+    let action = action
+        .map(|raw| {
+            action_label(&raw).map_err(|error| match error {
+                LabelError::Empty { .. } => InvalidInputReason::EmptyAction,
+                LabelError::ReservedPrefix { .. } | LabelError::Rejected { .. } => {
+                    InvalidInputReason::RejectedAction
+                }
+            })
+        })
+        .transpose()?;
+    for key in fields.keys() {
+        match field_key_label(key) {
+            Ok(_) => {}
+            Err(LabelError::ReservedPrefix { .. }) => {
+                return Err(InvalidInputReason::ReservedFieldKey { key: key.clone() });
+            }
+            Err(LabelError::Empty { .. } | LabelError::Rejected { .. }) => {
+                return Err(InvalidInputReason::EmptyFieldKey);
+            }
+        }
+    }
+    Ok(EventParts {
+        level: level.into(),
+        target,
+        action,
+        message,
         outcome: None,
         fields,
     })
@@ -313,7 +413,7 @@ mod tests {
             .target(target)
             .args(args)
             .build();
-        record_to_parts(&record, &options(parse)).unwrap()
+        record_to_parts(&record, &options(parse)).unwrap().parts
     }
 
     // ---- sanitizer ----
@@ -388,7 +488,13 @@ mod tests {
                 .target("t")
                 .args(format_args!("m"))
                 .build();
-            assert_eq!(record_to_parts(&record, &options(true)).unwrap().level, to);
+            assert_eq!(
+                record_to_parts(&record, &options(true))
+                    .unwrap()
+                    .parts
+                    .level,
+                to
+            );
         }
     }
 
@@ -490,7 +596,9 @@ mod tests {
             .args(format_args!("m"))
             .key_values(&kvs)
             .build();
-        let fields = record_to_parts(&record, &options(true)).unwrap().fields;
+        let mapped = record_to_parts(&record, &options(true)).unwrap();
+        assert_eq!(mapped.omitted_fields, 0);
+        let fields = mapped.parts.fields;
         assert_eq!(fields["int"], Value::from(-7));
         assert_eq!(fields["uint"], Value::from(u64::MAX));
         assert_eq!(fields["float"], Value::from(1.5));
@@ -511,7 +619,10 @@ mod tests {
             .file(Some("src/sync.rs"))
             .line(Some(12))
             .build();
-        let fields = record_to_parts(&record, &options(true)).unwrap().fields;
+        let fields = record_to_parts(&record, &options(true))
+            .unwrap()
+            .parts
+            .fields;
         assert_eq!(fields["code.module"], Value::from("app_lib::sync"));
         assert_eq!(fields["code.file"], Value::from("src/sync.rs"));
         assert_eq!(fields["code.line"], Value::from(12));
@@ -547,6 +658,77 @@ mod tests {
         assert!(event.state_transition.is_none());
         let age = sc_observability_types::Timestamp::now_utc() - event.timestamp;
         assert!(age.is_positive() || age.is_zero());
+    }
+
+    #[test]
+    fn kv_key_rules_omit_reserved_and_empty_keys_and_shadow_code_keys() {
+        let kvs: [(&str, log::kv::Value<'_>); 5] = [
+            (
+                "sc_observability_log.shadowed_fields",
+                log::kv::Value::from(1),
+            ),
+            ("sc_observability_log::x", log::kv::Value::from(2)),
+            ("", log::kv::Value::from(3)),
+            ("code.line", log::kv::Value::from("user line")),
+            ("a b", log::kv::Value::from(4)),
+        ];
+        let record = log::Record::builder()
+            .level(log::Level::Info)
+            .target("t")
+            .args(format_args!("m"))
+            .line(Some(7))
+            .key_values(&kvs)
+            .build();
+        let mapped = record_to_parts(&record, &options(true)).unwrap();
+        assert_eq!(mapped.omitted_fields, 3);
+        let fields = mapped.parts.fields;
+        assert_eq!(fields["code.line"], Value::from(7));
+        assert_eq!(
+            fields[SHADOWED_FIELDS_KEY],
+            serde_json::json!({"code.line": "user line"})
+        );
+        assert_eq!(
+            fields["a b"],
+            Value::from(4),
+            "accepted keys are stored as written"
+        );
+        assert_eq!(fields.len(), 3);
+    }
+
+    #[test]
+    fn structured_record_rules() {
+        use crate::Level as TracingLevel;
+        let ok = StructuredRecord::new(TracingLevel::WARN, "app::ui")
+            .with_action("ui.click")
+            .with_message("clicked")
+            .with_field("a b", 1);
+        let parts = structured_to_parts(ok).unwrap();
+        assert_eq!(parts.level, Level::Warn);
+        assert_eq!(parts.target.as_str(), "app.ui");
+        assert_eq!(parts.action.unwrap().as_str(), "ui.click");
+        assert_eq!(parts.message.as_deref(), Some("clicked"));
+        assert_eq!(parts.fields["a b"], Value::from(1));
+
+        let empty_action = StructuredRecord::new(TracingLevel::INFO, "t").with_action("");
+        assert_eq!(
+            structured_to_parts(empty_action).unwrap_err(),
+            InvalidInputReason::EmptyAction
+        );
+        let reserved = StructuredRecord::new(TracingLevel::INFO, "t")
+            .with_field("sc_observability_log::x", true);
+        assert_eq!(
+            structured_to_parts(reserved).unwrap_err(),
+            InvalidInputReason::ReservedFieldKey {
+                key: "sc_observability_log::x".to_owned()
+            }
+        );
+        let empty_key = StructuredRecord::new(TracingLevel::INFO, "t").with_field("", true);
+        assert_eq!(
+            structured_to_parts(empty_key).unwrap_err(),
+            InvalidInputReason::EmptyFieldKey
+        );
+        let default_target = structured_to_parts(StructuredRecord::new(TracingLevel::INFO, ""));
+        assert_eq!(default_target.unwrap().target.as_str(), "log");
     }
 
     // ---- process identity ----
