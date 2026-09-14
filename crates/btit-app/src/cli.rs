@@ -1,7 +1,6 @@
 use crate::config::get_cli_binary;
 use crate::logging::VERBOSE_LOGGING;
-use crate::types::CliClient;
-use serde::Serialize;
+use btit_types::{CliClient, CliProbe, CompatibilityInfo};
 use std::collections::HashMap;
 use std::env;
 use std::process::Command;
@@ -83,15 +82,6 @@ pub(crate) const CLI_FALLBACK: &str = "bd";
 /// surfaced to the user. Raise this when the supported floor moves.
 pub(crate) const MIN_SUPPORTED_BD_MAJOR: u32 = 1;
 
-/// Result of running `<bin> --version` on a candidate CLI binary.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CliProbe {
-    pub(crate) client: CliClient,
-    pub(crate) version: Option<(u32, u32, u32)>,
-    /// Trimmed first line of `--version` output, for logs and the UI.
-    pub(crate) raw: String,
-}
-
 /// Outcome of auto-detection.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CliSelection {
@@ -105,7 +95,7 @@ impl CliSelection {
     fn is_legacy(&self) -> bool {
         self.probe
             .as_ref()
-            .map(|p| is_legacy_bd(p.client, p.version))
+            .map(|p| is_legacy_bd(p.client, p.version.map(Into::into)))
             .unwrap_or(false)
     }
 }
@@ -129,7 +119,7 @@ pub(crate) fn is_legacy_bd(client: CliClient, version: Option<(u32, u32, u32)>) 
 /// 3: unknown client
 pub(crate) fn rank_cli_candidate(probe: &CliProbe) -> u8 {
     match probe.client {
-        CliClient::Bd if !is_legacy_bd(probe.client, probe.version) => 0,
+        CliClient::Bd if !is_legacy_bd(probe.client, probe.version.map(Into::into)) => 0,
         CliClient::Bd => 1,
         CliClient::Br => 2,
         CliClient::Unknown => 3,
@@ -172,7 +162,7 @@ pub(crate) fn parse_cli_probe(stdout: &str) -> CliProbe {
         .to_string();
     CliProbe {
         client: detect_cli_client(&raw),
-        version: parse_bd_version(&raw),
+        version: parse_bd_version(&raw).map(Into::into),
         raw,
     }
 }
@@ -591,40 +581,13 @@ pub(crate) fn execute_bd(command: &str, args: &[String], cwd: Option<&str>) -> R
     Ok(stdout)
 }
 
-/// Auto-run refs migration v3 (filesystem-only attachments) if needed.
-/// Called synchronously before br sync to prevent UNIQUE constraint errors.
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CompatibilityInfo {
-    /// Configured binary name or path (e.g. "bd").
-    binary: String,
-    /// False when `binary --version` could not be run.
-    found: bool,
-    /// Raw `--version` output, or a "not found" message.
-    version: String,
-    /// "bd", "br", or "unknown"
-    client_type: String,
-    version_tuple: Option<Vec<u32>>,
-    /// True when a bd below `MIN_SUPPORTED_BD_MAJOR` is in use.
-    legacy: bool,
-    min_supported_major: u32,
-    supports_daemon_flag: bool,
-    uses_jsonl_files: bool,
-    uses_dolt_backend: bool,
-    supports_list_all_flag: bool,
-    /// Directories searched when resolving the binary (for the "not found" UI).
-    searched_paths: Vec<String>,
-    warnings: Vec<String>,
-}
-
 #[tauri::command]
 pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo {
     let binary = get_cli_binary();
     let probe = probe_cli_binary(&binary);
 
     let (found, version_string, client, tuple) = match &probe {
-        Some(p) => (true, p.raw.clone(), p.client, p.version),
+        Some(p) => (true, p.raw.clone(), p.client, p.version.map(Into::into)),
         None => (false, format!("{} not found", binary), CliClient::Unknown, None),
     };
 
@@ -668,6 +631,7 @@ pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo {
 mod tests {
     use super::*;
     use crate::test_support::*;
+    use btit_types::CliVersion;
 
     // ---- CLI auto-detection -------------------------------------------------
 
@@ -746,7 +710,7 @@ mod tests {
     fn parse_probe_uses_first_line_only() {
         let p = parse_cli_probe("bd version 1.0.4 (ce242a879)\nextra line\n");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 0, patch: 4 }));
         assert_eq!(p.raw, "bd version 1.0.4 (ce242a879)");
     }
 
@@ -812,34 +776,6 @@ mod tests {
         // Split on the platform separator, not a hardcoded one
         let sep = if cfg!(windows) { ';' } else { ':' };
         assert!(entries.iter().all(|e| !e.contains(sep)), "entry contains separator: {entries:?}");
-    }
-
-    #[test]
-    fn compatibility_info_serializes_camel_case() {
-        let info = CompatibilityInfo {
-            binary: "bd".into(),
-            found: true,
-            version: "bd version 1.0.4".into(),
-            client_type: "bd".into(),
-            version_tuple: Some(vec![1, 0, 4]),
-            legacy: false,
-            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
-            supports_daemon_flag: false,
-            uses_jsonl_files: false,
-            uses_dolt_backend: true,
-            supports_list_all_flag: true,
-            searched_paths: vec!["/opt/homebrew/bin".into()],
-            warnings: vec![],
-        };
-        let json = serde_json::to_value(&info).unwrap();
-        for key in [
-            "binary", "found", "version", "clientType", "versionTuple", "legacy", "minSupportedMajor",
-            "supportsDaemonFlag", "usesJsonlFiles", "usesDoltBackend", "supportsListAllFlag",
-            "searchedPaths", "warnings",
-        ] {
-            assert!(json.get(key).is_some(), "missing camelCase key {key}: {json}");
-        }
-        assert!(json.get("client_type").is_none());
     }
 
     #[test]
@@ -914,7 +850,7 @@ mod tests {
     fn parse_probe_strips_crlf_line_endings() {
         let p = parse_cli_probe("bd version 1.0.4 (abc)\r\n");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 0, patch: 4 }));
         assert_eq!(p.raw, "bd version 1.0.4 (abc)");
         assert!(!p.raw.contains('\r'));
     }
@@ -923,7 +859,7 @@ mod tests {
     fn parse_probe_trims_surrounding_whitespace_on_first_line() {
         let p = parse_cli_probe("  bd version 1.0.4 (abc)  \n");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 0, patch: 4 }));
         assert_eq!(p.raw, "bd version 1.0.4 (abc)");
     }
 
@@ -931,7 +867,7 @@ mod tests {
     fn parse_probe_skips_leading_blank_lines() {
         let p = parse_cli_probe("\n  \nbd version 1.0.4 (abc)\n");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 0, 4)));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 0, patch: 4 }));
         assert_eq!(p.raw, "bd version 1.0.4 (abc)");
     }
 
@@ -939,9 +875,9 @@ mod tests {
     fn parse_probe_accepts_v_prefixed_version() {
         let p = parse_cli_probe("bd v1.2.0");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 2, 0)));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 2, patch: 0 }));
         assert_eq!(p.raw, "bd v1.2.0");
-        assert!(!is_legacy_bd(p.client, p.version));
+        assert!(!is_legacy_bd(p.client, p.version.map(Into::into)));
         assert_eq!(rank_cli_candidate(&p), 0);
         assert_eq!(parse_bd_version("bd version V0.49.6"), Some((0, 49, 6)));
     }
@@ -950,19 +886,19 @@ mod tests {
     fn parse_probe_br_banner_with_beads_rust_in_later_word() {
         let p = parse_cli_probe("beads beads_rust 0.1.5 (rustc 1.85.0)\n");
         assert_eq!(p.client, CliClient::Br);
-        assert_eq!(p.version, Some((0, 1, 5)));
+        assert_eq!(p.version, Some(CliVersion { major: 0, minor: 1, patch: 5 }));
 
         let p = parse_cli_probe("cli beads-rust 0.2.0");
         assert_eq!(p.client, CliClient::Br);
-        assert_eq!(p.version, Some((0, 2, 0)));
+        assert_eq!(p.version, Some(CliVersion { major: 0, minor: 2, patch: 0 }));
     }
 
     #[test]
     fn parse_probe_bd_1x_prerelease_with_dotted_suffix() {
         let p = parse_cli_probe("bd version 1.3.0-rc.1 (abc)\n");
         assert_eq!(p.client, CliClient::Bd);
-        assert_eq!(p.version, Some((1, 3, 0)));
-        assert!(!is_legacy_bd(p.client, p.version));
+        assert_eq!(p.version, Some(CliVersion { major: 1, minor: 3, patch: 0 }));
+        assert!(!is_legacy_bd(p.client, p.version.map(Into::into)));
         assert_eq!(rank_cli_candidate(&p), 0);
     }
 
@@ -1163,59 +1099,6 @@ mod tests {
         assert_eq!(cli_client_name(CliClient::Bd), "bd");
         assert_eq!(cli_client_name(CliClient::Br), "br");
         assert_eq!(cli_client_name(CliClient::Unknown), "unknown");
-    }
-
-    #[test]
-    fn compatibility_info_arrays_and_null_tuple_serialize() {
-        let info = CompatibilityInfo {
-            binary: "bd".into(),
-            found: false,
-            version: "bd not found".into(),
-            client_type: cli_client_name(CliClient::Unknown).into(),
-            version_tuple: None,
-            legacy: false,
-            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
-            supports_daemon_flag: false,
-            uses_jsonl_files: false,
-            uses_dolt_backend: false,
-            supports_list_all_flag: false,
-            searched_paths: vec!["/a".into(), "/b".into()],
-            warnings: vec!["w1".into(), "w2".into()],
-        };
-        let json = serde_json::to_value(&info).unwrap();
-        assert!(json["warnings"].is_array());
-        assert_eq!(json["warnings"].as_array().unwrap().len(), 2);
-        assert!(json["searchedPaths"].is_array());
-        assert_eq!(json["searchedPaths"], serde_json::json!(["/a", "/b"]));
-        // Present and null, not omitted: the frontend distinguishes "unknown" from "missing key".
-        assert!(json.as_object().unwrap().contains_key("versionTuple"));
-        assert!(json["versionTuple"].is_null());
-        assert_eq!(json["found"], serde_json::json!(false));
-        assert_eq!(json["clientType"], serde_json::json!("unknown"));
-        assert_eq!(json["minSupportedMajor"], serde_json::json!(MIN_SUPPORTED_BD_MAJOR));
-    }
-
-    #[test]
-    fn compatibility_info_empty_arrays_serialize_as_empty_not_null() {
-        let info = CompatibilityInfo {
-            binary: "bd".into(),
-            found: true,
-            version: "bd version 1.0.4".into(),
-            client_type: "bd".into(),
-            version_tuple: Some(vec![1, 0, 4]),
-            legacy: false,
-            min_supported_major: MIN_SUPPORTED_BD_MAJOR,
-            supports_daemon_flag: false,
-            uses_jsonl_files: false,
-            uses_dolt_backend: true,
-            supports_list_all_flag: true,
-            searched_paths: vec![],
-            warnings: vec![],
-        };
-        let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["warnings"], serde_json::json!([]));
-        assert_eq!(json["searchedPaths"], serde_json::json!([]));
-        assert_eq!(json["versionTuple"], serde_json::json!([1, 0, 4]));
     }
 
     #[test]

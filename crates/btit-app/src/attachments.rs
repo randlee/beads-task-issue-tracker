@@ -1,7 +1,7 @@
 use crate::cli::execute_bd;
 use std::process::Command;
 use crate::issues::parse_issues_tolerant;
-use crate::types::PurgeResult;
+use btit_types::PurgeResult;
 use serde::Serialize;
 use std::env;
 use std::fs;

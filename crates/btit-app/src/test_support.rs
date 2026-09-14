@@ -1,5 +1,4 @@
-use crate::cli::CliProbe;
-use crate::types::CliClient;
+use btit_types::{CliClient, CliProbe};
 
     pub(crate) fn probe(client: CliClient, version: Option<(u32, u32, u32)>) -> CliProbe {
         let raw = match (client, version) {
@@ -7,7 +6,7 @@ use crate::types::CliClient;
             (CliClient::Br, Some((a, b, c))) => format!("br {}.{}.{} (rustc 1.85.0)", a, b, c),
             _ => "mystery 9.9.9".to_string(),
         };
-        CliProbe { client, version, raw }
+        CliProbe { client, version: version.map(Into::into), raw }
     }
 
     pub(crate) fn minimal_issue_json(id: &str, title: &str) -> String {

@@ -1,7 +1,7 @@
 use crate::cli::{execute_bd, project_uses_dolt, supports_list_all_flag, uses_jsonl_files};
 use crate::issues::{parse_issues_tolerant, transform_issue};
 use crate::migration::sync_bd_database;
-use crate::types::{BdRawIssue, Issue};
+use btit_types::{BdRawIssue, Issue};
 use std::fs;
 use serde::Serialize;
 use std::collections::HashMap;

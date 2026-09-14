@@ -1,5 +1,5 @@
 use crate::attachment_refs::is_real_external_ref;
-use crate::types::CliClient;
+use btit_types::CliClient;
 use crate::attachments::issue_short_id;
 use crate::cli::{get_cli_client_info, get_extended_path, new_command, project_uses_dolt, supports_daemon_flag, uses_jsonl_files};
 use crate::config::get_cli_binary;

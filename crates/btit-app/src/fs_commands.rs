@@ -1,5 +1,5 @@
 use crate::cli::project_uses_dolt;
-use crate::types::{DirectoryEntry, FsListResult};
+use btit_types::{DirectoryEntry, FsListResult};
 use std::path::PathBuf;
 
 #[tauri::command]

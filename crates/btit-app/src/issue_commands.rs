@@ -2,7 +2,7 @@ use crate::attachments::issue_short_id;
 use crate::cli::{execute_bd, get_cli_client_info, supports_delete_hard_flag, supports_list_all_flag};
 use crate::issues::{parse_issues_tolerant, priority_to_number, transform_issue};
 use crate::migration::sync_bd_database;
-use crate::types::*;
+use btit_types::*;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -18,7 +18,7 @@ pub(crate) async fn bd_list(options: ListOptions) -> Result<Vec<Issue>, String> 
     let mut args: Vec<String> = Vec::new();
 
     // --all flag only works correctly on bd >= 0.55; for older versions, fallback to 2 calls
-    let use_all = options.include_all.unwrap_or(false);
+    let use_all = options.query.include_all.unwrap_or(false);
     if use_all && !supports_list_all_flag() {
         // Fallback: fetch open + closed separately and merge
         log_info!("[bd_list] --all requested but bd < 0.55 — falling back to 2 calls");
@@ -41,23 +41,23 @@ pub(crate) async fn bd_list(options: ListOptions) -> Result<Vec<Issue>, String> 
     if use_all {
         args.push("--all".to_string());
     }
-    if let Some(ref statuses) = options.status {
+    if let Some(ref statuses) = options.query.status {
         if !statuses.is_empty() {
             args.push(format!("--status={}", statuses.join(",")));
         }
     }
-    if let Some(ref types) = options.issue_type {
+    if let Some(ref types) = options.query.issue_type {
         if !types.is_empty() {
             args.push(format!("--type={}", types.join(",")));
         }
     }
-    if let Some(ref priorities) = options.priority {
+    if let Some(ref priorities) = options.query.priority {
         if !priorities.is_empty() {
             let nums: Vec<String> = priorities.iter().map(|p| priority_to_number(p)).collect();
             args.push(format!("--priority={}", nums.join(",")));
         }
     }
-    if let Some(ref assignee) = options.assignee {
+    if let Some(ref assignee) = options.query.assignee {
         args.push(format!("--assignee={}", assignee));
     }
 

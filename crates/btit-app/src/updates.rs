@@ -1,6 +1,6 @@
 use crate::cli::{detect_cli_client, new_command, parse_bd_version};
 use crate::config::get_bd_version;
-use crate::types::CliClient;
+use btit_types::CliClient;
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 use std::env;

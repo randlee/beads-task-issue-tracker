@@ -1,6 +1,5 @@
 #[macro_use]
 mod logging;
-mod types;
 mod issues;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -53,7 +52,7 @@ pub fn run() {
             match cli::probe_cli_binary(&binary) {
                 Some(p) => {
                     log::info!("[startup] {} found: {} ({})", binary, p.raw, cli::cli_client_name(p.client));
-                    for w in cli::cli_compatibility_warnings(p.client, p.version) {
+                    for w in cli::cli_compatibility_warnings(p.client, p.version.map(Into::into)) {
                         log::warn!("[startup] {}", w);
                     }
                 }

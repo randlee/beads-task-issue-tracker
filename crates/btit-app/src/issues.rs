@@ -1,4 +1,4 @@
-use crate::types::{BdRawIssue, ChildIssue, Comment, Issue, ParentIssue, Relation};
+use btit_types::{BdRawIssue, ChildIssue, Comment, Issue, ParentIssue, Relation};
 
 pub(crate) fn priority_to_string(priority: i32) -> String {
     let p = if (0..=4).contains(&priority) { priority } else { 3 };
