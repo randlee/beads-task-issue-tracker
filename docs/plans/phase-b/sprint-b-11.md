@@ -104,8 +104,11 @@ pub(crate) fn is_real_external_ref(r: &str) -> bool {
 
 ```bash
 # test-preservation gate with all three replacement lists (plan "Test preservation")
-cargo test --manifest-path /tmp/btit-baseline/src-tauri/Cargo.toml -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/baseline-tests.txt
-cargo test --workspace --all-features -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/after-tests.txt
+: "${IMPLEMENTATION_BASELINE:?}"; : "${BASELINE_TEST_COUNT:?}"; BASE=/tmp/btit-baseline-$IMPLEMENTATION_BASELINE
+[ -d "$BASE" ] || git worktree add "$BASE" "$IMPLEMENTATION_BASELINE"
+cargo test --manifest-path "$BASE/src-tauri/Cargo.toml" -- --list | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/baseline-tests.txt
+cargo test --workspace --all-features -- --list | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/after-tests.txt
+test -s /tmp/baseline-tests.txt && test "$(wc -l < /tmp/baseline-tests.txt)" -eq "$BASELINE_TEST_COUNT" && test -s /tmp/after-tests.txt
 cat /tmp/replaced-b9.txt /tmp/replaced-b10.txt /tmp/replaced-b11.txt | sort -u > /tmp/replaced.txt
 comm -23 <(grep -vxFf /tmp/replaced.txt /tmp/baseline-tests.txt) /tmp/after-tests.txt   # must print nothing
 ```

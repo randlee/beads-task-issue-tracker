@@ -89,7 +89,8 @@ Signatures are in the trait inventory below and, authoritatively, in `sprint-b-3
 #     at $IMPLEMENTATION_BASELINE (the develop@<sha> b-1 records) vs HEAD, must diff empty. Whitespace and the `( `/`, )` of wrapped
 #     headers are normalized so multi-line headers (watcher.rs:37-41) compare equal to single-line ones; subdirectories are included.
 sig() { find "$1" -name '*.rs' | sort | while read -r f; do awk '/#\[tauri::command\]/{c=1; buf=""; next} c{buf=buf " " $0; if ($0 ~ /\{/){gsub(/[[:space:]]+/," ",buf); sub(/ *\{.*$/,"",buf); gsub(/\( /,"(",buf); gsub(/, \)/,")",buf); gsub(/,\)/,")",buf); sub(/^ /,"",buf); print buf; c=0}}' "$f"; done | sort; }
-git worktree add -q /tmp/btit-baseline "$IMPLEMENTATION_BASELINE" 2>/dev/null; diff <(sig /tmp/btit-baseline/src-tauri/src) <(sig crates/btit-app/src)
+: "${IMPLEMENTATION_BASELINE:?}"; BASE=/tmp/btit-baseline-$IMPLEMENTATION_BASELINE; [ -d "$BASE" ] || git worktree add "$BASE" "$IMPLEMENTATION_BASELINE"   # same baseline worktree as the test-preservation gate
+diff <(sig "$BASE/src-tauri/src") <(sig crates/btit-app/src)
 # (2) Every name the frontend invokes exists in generate_handler!.
 comm -23 <(grep -oE "invoke[<(][^)]*'[a-z_]+'" app/utils/bd-api.ts | sed -E "s/.*'([a-z_]+)'/\1/" | sort -u) <(sed -n '/generate_handler!\[/,/\]/p' crates/btit-app/src/lib.rs | grep -oE '[a-z_]+::[a-z_]+' | sed 's/.*:://' | sort -u)   # must print nothing
 ```
@@ -466,12 +467,19 @@ Non-intersection proofs for the `parallel_safe` pairs read straight off this tab
 The baseline has 142 tests (`cargo test --manifest-path src-tauri/Cargo.toml`, `a18c724`; per module: cli 59, issues 31, attachments 23, updates 9, attachment_refs 6, logging 6, migration 5, config 2, polling 1). Each moving sprint carries its tests to the destination crate unchanged (module path prefix aside). Every sprint up to b-8 runs the gate below and it must print nothing; b-9, b-10 and b-11 each list, by name, the pinned tests they replace and their replacements, and b-11 runs the gate with the union of those lists removed from the baseline (`comm -23 <(grep -vxFf /tmp/replaced.txt /tmp/baseline-tests.txt) /tmp/after-tests.txt`).
 
 ```bash
-git worktree add -q /tmp/btit-baseline origin/integrate/phase-b   # or the b-1 base
-cargo test --manifest-path /tmp/btit-baseline/src-tauri/Cargo.toml -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/baseline-tests.txt
-cargo test --workspace -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/after-tests.txt
+# Baseline tree: the develop@<sha> b-1 records; one worktree per baseline sha, shared with the signature gate.
+: "${IMPLEMENTATION_BASELINE:?set from sprint-b-1.md Implementation Notes}"; : "${BASELINE_TEST_COUNT:?the test count b-1 recorded}"
+BASE=/tmp/btit-baseline-$IMPLEMENTATION_BASELINE
+[ -d "$BASE" ] || git worktree add "$BASE" "$IMPLEMENTATION_BASELINE"          # no 2>/dev/null: a failed checkout must fail the gate
+cargo test --manifest-path "$BASE/src-tauri/Cargo.toml" -- --list | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/baseline-tests.txt
+cargo test --workspace --all-features -- --list | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/after-tests.txt
 # the optional `(.*::)?` group keeps integration-test names that have no module path (e.g. the JSON tests b-2 moves to crates/btit-types/tests/)
+test -s /tmp/baseline-tests.txt && test "$(wc -l < /tmp/baseline-tests.txt)" -eq "$BASELINE_TEST_COUNT"   # non-vacuous: the baseline list is complete
+test -s /tmp/after-tests.txt                                                                             # and the workspace listed its tests
 comm -23 /tmp/baseline-tests.txt /tmp/after-tests.txt   # must print nothing (b-1..b-8); b-11 applies the replacement lists first
 ```
+
+The baseline is `$IMPLEMENTATION_BASELINE`, never `integrate/phase-b` (which has no `src-tauri/` from b-2 on). `BASELINE_TEST_COUNT` is the count b-1 records (142 at `a18c724`); a mismatch or an empty list fails the gate instead of passing it vacuously.
 
 ## Phase closure
 
