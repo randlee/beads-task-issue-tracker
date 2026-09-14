@@ -3,7 +3,7 @@
   "productName": "Beads Task-Issue Tracker",
   "identifier": "com.beads.manager",
   "build": {
-    "frontendDist": "../.output/public",
+    "frontendDist": "../../.output/public",
     "devUrl": "http://localhost:3133",
     "beforeDevCommand": "pnpm nuxt dev --port 3133",
     "beforeBuildCommand": "pnpm generate"
