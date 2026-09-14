@@ -103,8 +103,8 @@ pub use error::{DropCause, FlushError, InitError, InvalidInputReason, ShutdownEr
 #[doc(inline)]
 pub use health::{
     BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState, BridgeLifecycle,
-    FileSinkHealth, HealthDiagnostic, LoggerHealth, QueueHealth, SinkHealthSnapshot, SinkStatus,
-    WriterStatus,
+    FileSinkHealth, HealthDiagnostic, HelperHealth, LoggerHealth, QueueHealth, SinkHealthSnapshot,
+    SinkStatus, WriterStatus,
 };
 #[doc(inline)]
 pub use report::{

@@ -48,6 +48,19 @@
 //! any more. `dropped_events` stays readable; records logged after shutdown are
 //! filtered by the `log` facade level (`Off`) and the emit threshold before they
 //! reach the bridge, so they are neither written nor counted.
+//!
+//! # Helper threads
+//!
+//! `flush` and `shutdown` run their work on a helper thread and wait at most
+//! their timeout. [`HelperHealth`] (`helpers`) reports whether a flush helper is
+//! running (`flush_in_flight`) and how many helpers outlived their caller's
+//! timeout and are still running (`detached`, flush and shutdown together). A
+//! helper is counted from the moment its caller times out until its work
+//! returns or panics. At most one flush helper exists at a time: while
+//! `flush_in_flight` is true, `flush` returns `FlushError::InProgress` without
+//! starting a thread, so a sink stuck on a hung disk costs one thread, not one
+//! per retry. The bridge never logs these transitions itself (a record written
+//! from inside the bridge would be reentrant); health is the only channel.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -84,6 +97,23 @@ pub struct BridgeHealthReport {
     pub console_sink: SinkHealthSnapshot,
     /// Process-wide dropped-event counters, the same values as `dropped_events()`.
     pub dropped_events: DroppedEvents,
+    /// Flush and shutdown helper threads; see [`HelperHealth`].
+    pub helpers: HelperHealth,
+}
+
+/// Helper threads that bound `flush` and `shutdown`.
+///
+/// Each bounded call runs its work on a helper thread. When the caller's timeout
+/// elapses first, the helper is detached: it keeps running until its work
+/// returns. At most one flush helper exists at a time; while it runs, a new
+/// flush returns `FlushError::InProgress` without starting a thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HelperHealth {
+    /// A flush helper is running (before or after its caller's timeout).
+    pub flush_in_flight: bool,
+    /// Flush and shutdown helpers counted from their caller's timeout until their work finishes.
+    pub detached: u32,
 }
 
 /// Bridge lifecycle phase.
@@ -258,6 +288,7 @@ pub(crate) fn snapshot() -> BridgeHealthReport {
         report.as_ref(),
         SINK_CONFIG.get(),
         handle::dropped_events(),
+        handle::helper_health(),
     )
 }
 
@@ -267,6 +298,7 @@ fn project(
     report: Option<&LoggingHealthReport>,
     config: Option<&SinkConfig>,
     dropped_events: DroppedEvents,
+    helpers: HelperHealth,
 ) -> BridgeHealthReport {
     let running = lifecycle == BridgeLifecycle::Running;
     let state = match (running, report) {
@@ -294,6 +326,7 @@ fn project(
         },
         console_sink: sink_snapshot(console_enabled, running, report, CONSOLE_SINK_NAME),
         dropped_events,
+        helpers,
     }
 }
 
@@ -473,6 +506,7 @@ mod tests {
             Some(&report),
             Some(&config(true)),
             DroppedEvents::default(),
+            HelperHealth::default(),
         );
         assert_eq!(health.schema_version, BRIDGE_HEALTH_SCHEMA_VERSION);
         assert_eq!(health.state, BridgeHealthState::Degraded);
@@ -525,6 +559,7 @@ mod tests {
                 Some(&report),
                 Some(&config(true)),
                 DroppedEvents::default(),
+                HelperHealth::default(),
             );
             assert_eq!(health.state, BridgeHealthState::Unavailable);
             assert_eq!(health.file_sink.status, SinkStatus::Unavailable);
@@ -535,6 +570,7 @@ mod tests {
             None,
             Some(&config(false)),
             DroppedEvents::default(),
+            HelperHealth::default(),
         );
         assert_eq!(unreadable.state, BridgeHealthState::Unavailable);
         assert!(unreadable.logger.is_none());
@@ -566,6 +602,21 @@ mod tests {
             Some(&report),
             Some(&config(true)),
             DroppedEvents::default(),
+            HelperHealth::default(),
+        );
+        let detached = project(
+            BridgeLifecycle::Running,
+            Some(&report),
+            Some(&config(true)),
+            DroppedEvents::default(),
+            HelperHealth {
+                flush_in_flight: true,
+                detached: 2,
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(detached.helpers).unwrap(),
+            serde_json::json!({"flush_in_flight": true, "detached": 2})
         );
         let json = serde_json::to_value(&health).unwrap();
         assert_eq!(json["lifecycle"], "shutting_down");
@@ -573,6 +624,10 @@ mod tests {
         assert_eq!(json["logger"]["writer_state"], "degraded");
         assert_eq!(json["console_sink"]["status"], "disabled");
         assert_eq!(json["dropped_events"]["queue_full"], 0);
+        assert_eq!(
+            json["helpers"],
+            serde_json::json!({"flush_in_flight": false, "detached": 0})
+        );
         let writer_error = &json["logger"]["last_writer_error"];
         assert_eq!(
             writer_error["code"],

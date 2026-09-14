@@ -17,6 +17,9 @@
 //   `tests/ui/log_guard_not_clone.rs`, `tests/ui/log_control_not_owner.rs` and
 //   `tests/ui/log_control_not_constructible.rs` prove at
 //   compile time that neither type can become a second shutdown owner.
+// - a-5 QA-2 RSH-004 (single in-flight flush helper): `FlushError::InProgress`,
+//   `FlushFailure::InProgress`, the code `SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS`,
+//   and `BridgeHealthReport.helpers: HelperHealth { flush_in_flight, detached }`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -33,9 +36,10 @@
 use sc_observability_log::{
     BridgeHealthReport, BridgeHealthState, BridgeLifecycle, BridgeOptions, DropCause,
     DroppedEvents, Failure, FailureReport, FileSinkHealth, FlushError, FlushFailure,
-    HealthDiagnostic, InitError, InitFailure, InvalidInputReason, JsonMap, JsonValue, Level,
-    LogControl, LogGuard, LoggerConfig, LoggerHealth, QueueHealth, ShutdownError, ShutdownFailure,
-    SinkHealthSnapshot, SinkStatus, StructuredRecord, SubmitError, SubmitOutcome, WriterStatus,
+    HealthDiagnostic, HelperHealth, InitError, InitFailure, InvalidInputReason, JsonMap, JsonValue,
+    Level, LogControl, LogGuard, LoggerConfig, LoggerHealth, QueueHealth, ShutdownError,
+    ShutdownFailure, SinkHealthSnapshot, SinkStatus, StructuredRecord, SubmitError, SubmitOutcome,
+    WriterStatus,
 };
 use sc_observability_log::{ErrorCode, Remediation};
 use std::path::PathBuf;
@@ -78,7 +82,7 @@ fn a1_public_api_is_frozen() {
     let _ = |e: FlushError| match e {
         FlushError::TimedOut { timeout: _ } | FlushError::Logger { source: _ } => (),
         FlushError::HelperSpawn { source: _ } | FlushError::HelperLost => (),
-        FlushError::ShutDown => (),
+        FlushError::ShutDown | FlushError::InProgress => (),
     };
     let _ = |e: ShutdownError| match e {
         ShutdownError::TimedOut { timeout: _ } | ShutdownError::FinalFlush { source: _ } => (),
@@ -97,6 +101,8 @@ fn a5_health_api_is_frozen() {
     let _: fn(&LogGuard) -> BridgeHealthReport = LogGuard::health;
     let _: sc_observability_log::ErrorCode =
         sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN;
+    let _: sc_observability_log::ErrorCode =
+        sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS;
     let _: u32 = sc_observability_log::BRIDGE_HEALTH_SCHEMA_VERSION;
     fn serde_derives<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     fn snapshot_derives<T: std::fmt::Debug + Clone + PartialEq>() {}
@@ -109,6 +115,12 @@ fn a5_health_api_is_frozen() {
     snapshot_derives::<FileSinkHealth>();
     snapshot_derives::<SinkHealthSnapshot>();
     snapshot_derives::<HealthDiagnostic>();
+    fn helper_derives<
+        T: std::fmt::Debug + Clone + Copy + Default + PartialEq + Eq + std::hash::Hash,
+    >() {
+    }
+    serde_derives::<HelperHealth>();
+    helper_derives::<HelperHealth>();
     state_derives::<BridgeLifecycle>();
     state_derives::<BridgeHealthState>();
     state_derives::<WriterStatus>();
@@ -118,7 +130,9 @@ fn a5_health_api_is_frozen() {
         let _: (u32, BridgeLifecycle, BridgeHealthState) = (h.schema_version, h.lifecycle, h.state);
         let _: (Option<LoggerHealth>, FileSinkHealth) = (h.logger, h.file_sink);
         let _: (SinkHealthSnapshot, DroppedEvents) = (h.console_sink, h.dropped_events);
+        let _: HelperHealth = h.helpers;
     };
+    let _ = |h: HelperHealth| -> (bool, u32) { (h.flush_in_flight, h.detached) };
     let _ = |l: LoggerHealth| {
         let _: (WriterStatus, QueueHealth) = (l.writer_state, l.queue);
         let _: (Option<HealthDiagnostic>, Option<HealthDiagnostic>) =
@@ -263,6 +277,7 @@ fn a5_control_api_is_frozen() {
     let _ = |f: FlushFailure| match f {
         FlushFailure::TimedOut { timeout_ms: _ } | FlushFailure::Logger => (),
         FlushFailure::HelperSpawn | FlushFailure::HelperLost | FlushFailure::ShutDown => (),
+        FlushFailure::InProgress => (),
     };
     let _ = |f: ShutdownFailure| match f {
         ShutdownFailure::TimedOut { timeout_ms: _ } | ShutdownFailure::FinalFlush => (),

@@ -201,6 +201,14 @@ Verified by the coordinator and fixed in round 2 (commit titles `fix(a-5): QA-1 
 | RSH-003 | rust-service-hardening-agent | — | `log_frontend` message size cap. | deferred to issue #49 under the accepted no-size-cap policy. |
 | ATM-QA-002 | req-qa | Minor | The always-on `[logging] health at exit` record was undocumented. | fixed — documented below and on `OwnedGuard::report_before_shutdown` in `src-tauri/src/logging/lifecycle.rs`; the real-bridge lifecycle test pins its shape (`assert_health_at_exit_record`). |
 
+## QA-2 findings on the round-2 fixes (`b06a856`)
+
+Verified by the QA manager, who fixed the design; fixed in round 3 (commit title `fix(a-5): QA-2 …`).
+
+| id | reviewer | severity | finding | disposition |
+| --- | --- | --- | --- | --- |
+| RSH-004 | rust-service-hardening-agent | Important | `run_bounded` spawned a new helper thread per call and left it detached on timeout, and `flush_installed` ran `Logger::flush` there with no inner bound. With a stuck writer or sink (a hung disk), every retried `LogControl::flush` / `LogGuard::flush` (btit's "Clear logs" retries) leaked another never-returning thread. Shutdown adds at most one detached helper. | fixed — at most one flush helper per installed bridge: an atomic `FLUSH_IN_FLIGHT` claim (released by a drop guard, also on panic) makes a flush that finds a helper still running return `FlushError::InProgress` (`SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS`, recoverable; `FlushFailure::InProgress` in `FailureReport`) without spawning. `run_bounded` counts a helper as detached from its caller's timeout until its work finishes (flush and shutdown), exposed as `BridgeHealthReport.helpers: HelperHealth { flush_in_flight: bool, detached: u32 }`; no lock on the flush or emit path, no record emitted from inside the bridge. `BRIDGE_HEALTH_SCHEMA_VERSION` stays 1 (unreleased); runtime dependency graph unchanged. btit: `ClearError::Flush` keeps `BTIT_LOG_CLEAR_FLUSH_FAILED` (it does not split flush causes), its message carries the source code, and `InProgress` gets a wait-then-retry remediation. Tests: `tests/flush_single_flight.rs` `stuck_flush_keeps_one_detached_helper_and_rejects_retries` (a reader-less FIFO as the active JSONL file blocks the writer; timed-out flush → `detached == 1`, retries → `InProgress` with no new helper; opening the FIFO → counter back to 0 and flush succeeds), unit tests `run_bounded_counts_a_detached_helper_until_it_finishes`, `run_bounded_uncounts_a_detached_helper_that_panics`, `flight_claim_is_exclusive_and_released_on_drop_or_panic`, `flush_in_progress_report_round_trips`, `flush_error_codes_and_remediations`, and btit `clear_behind_a_flush_in_progress_reports_the_source_code`; `tests/api_freeze.rs` updated. |
+
 ### The `[logging] health at exit` record (ATM-QA-002)
 
 Written by BTIT's lifecycle owner immediately before the one final shutdown on

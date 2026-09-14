@@ -72,6 +72,10 @@ pub enum FlushError {
     /// Shutdown has started (or finished): there is no logger left to flush.
     #[error("the logger is shutting down or has shut down; nothing was flushed")]
     ShutDown,
+    /// A previous flush helper is still running (possibly detached after its caller's
+    /// timeout); no new helper was started and nothing new was flushed.
+    #[error("a previous flush is still running; no new flush was started")]
+    InProgress,
 }
 
 /// Error returned by [`LogGuard::shutdown`](crate::LogGuard::shutdown).
@@ -148,6 +152,7 @@ impl FlushError {
             Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
             Self::HelperLost => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
             Self::ShutDown => error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+            Self::InProgress => error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
         }
     }
 
@@ -169,6 +174,13 @@ impl FlushError {
             ),
             Self::ShutDown => Remediation::not_recoverable(
                 "the lifecycle owner has shut the logger down; the final shutdown flushed what was queued",
+            ),
+            Self::InProgress => Remediation::recoverable(
+                "wait for the previous flush to finish, then retry",
+                [
+                    "BridgeHealthReport.helpers.flush_in_flight turns false when it finishes",
+                    "a flush that never finishes points at a stuck sink or disk",
+                ],
             ),
         }
     }
@@ -527,6 +539,10 @@ mod tests {
             (
                 FlushError::ShutDown,
                 error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+            ),
+            (
+                FlushError::InProgress,
+                error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
             ),
         ];
         for (error, code) in cases {

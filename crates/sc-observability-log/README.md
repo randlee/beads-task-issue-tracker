@@ -96,6 +96,14 @@ would let any caller hang. Call `LogControl::flush(timeout)` (or
 `LogGuard::shutdown(timeout)` and `Drop for LogGuard` (with
 `DEFAULT_DROP_SHUTDOWN_TIMEOUT`) are bounded the same way.
 
+A flush runs on a helper thread. If the timeout elapses first, `flush` returns
+`FlushError::TimedOut` and the helper stays detached until sc-observability's
+flush returns. Only one flush helper exists at a time: while it is still
+running (for example behind a sink stuck on a hung disk), a further `flush`
+returns `FlushError::InProgress` (`SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS`)
+immediately and starts no thread, so retries cannot pile up helper threads.
+Wait until `health().helpers.flush_in_flight` is false, then retry.
+
 ### One lifecycle owner
 
 `LogGuard` is not `Clone`, and it has exactly one owner: the code that performs
@@ -133,8 +141,11 @@ process exit).
 state, queue depth, capacity and high-water mark, the last writer error and
 last error (each with its stable `ErrorCode` and a `Remediation`), file-sink
 status with the active JSONL path, console-sink status, and the dropped-event
-counters. It never blocks on I/O and never panics, and it can be called from
-any thread.
+counters, and the helper threads (`helpers.flush_in_flight`, and
+`helpers.detached`: flush and shutdown helpers still running after their
+caller's timeout). It never blocks on I/O and never panics, and it can be
+called from any thread. The bridge does not log helper timeouts itself;
+health is the channel.
 
 `LogControl::health()` keeps working after shutdown and then reports
 `lifecycle: stopped`, `state: unavailable` and the final health of the stopped

@@ -279,6 +279,10 @@ pub(crate) enum ClearError {
     /// Another clear still held the write slot after the timeout; no file was touched.
     WriteSlotTimedOut { timeout: Duration },
     /// The bounded flush before clearing failed; no file was touched.
+    ///
+    /// All flush causes share `BTIT_LOG_CLEAR_FLUSH_FAILED`; the message carries the
+    /// source's own code (for example `SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS` when an
+    /// earlier clear's flush is still stuck on its detached helper).
     Flush { source: FlushError },
     /// Truncating the active JSONL file failed.
     Truncate { source: std::io::Error },
@@ -318,6 +322,12 @@ impl ClearError {
             ),
             Self::WriteSlotTimedOut { .. } => Remediation::recoverable(
                 "wait for the other clear to finish, then clear again",
+                ["check that the log directory's disk is responsive"],
+            ),
+            Self::Flush {
+                source: FlushError::InProgress,
+            } => Remediation::recoverable(
+                "wait for the previous flush to finish, then retry the clear; no file was touched",
                 ["check that the log directory's disk is responsive"],
             ),
             Self::Flush { source } => Remediation::recoverable(
@@ -678,6 +688,29 @@ mod tests {
             ClearError::ShutdownStarted.command_message(),
             "BTIT_LOG_CLEAR_SHUTDOWN_STARTED: Logs were not cleared: logging is shutting down"
         );
+    }
+
+    /// QA-2 RSH-004: a clear retried behind a stuck flush keeps the clear code and names the cause.
+    #[test]
+    fn clear_behind_a_flush_in_progress_reports_the_source_code() -> Result<(), TestError> {
+        let error = ClearError::Flush {
+            source: FlushError::InProgress,
+        };
+        assert_eq!(error.code(), clear_error_codes::FLUSH_FAILED);
+        assert_eq!(
+            error.command_message(),
+            "BTIT_LOG_CLEAR_FLUSH_FAILED: Failed to flush logs \
+             [SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS]: a previous flush is still running; \
+             no new flush was started"
+        );
+        let Remediation::Recoverable { steps } = error.remediation() else {
+            return Err(TestError("expected a recoverable remediation".to_owned()));
+        };
+        assert!(steps
+            .steps()
+            .first()
+            .is_some_and(|step| step.contains("wait for the previous flush")));
+        Ok(())
     }
 
     /// RSH-001: the degraded exit is reported with its stable code.

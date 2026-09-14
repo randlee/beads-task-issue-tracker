@@ -29,6 +29,9 @@ pub const SC_OBSERVABILITY_LOG_HELPER_LOST: ErrorCode =
 /// `FlushError::ShutDown`: a flush was requested after shutdown had started.
 pub const SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN");
+/// `FlushError::InProgress`: a previous flush helper is still running; no new flush was started.
+pub const SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS");
 /// `SubmitError::QueueFull`: the writer queue was full.
 pub const SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL");
@@ -61,6 +64,7 @@ pub const ALL: &[ErrorCode] = &[
     SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
     SC_OBSERVABILITY_LOG_HELPER_LOST,
     SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+    SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
     SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL,
     SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT,
     SC_OBSERVABILITY_LOG_SUBMIT_STOPPED,
@@ -81,6 +85,6 @@ mod tests {
             assert!(code.as_str().starts_with("SC_OBSERVABILITY_LOG_"));
             assert!(seen.insert(code.as_str()), "duplicate code {code}");
         }
-        assert_eq!(ALL.len(), 15);
+        assert_eq!(ALL.len(), 16);
     }
 }

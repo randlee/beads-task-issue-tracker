@@ -96,6 +96,8 @@ pub enum FlushFailure {
     HelperLost,
     /// [`FlushError::ShutDown`].
     ShutDown,
+    /// [`FlushError::InProgress`]: a previous flush helper is still running.
+    InProgress,
 }
 
 /// Data-only discriminant of [`ShutdownError`]; tagged by `kind`.
@@ -166,6 +168,7 @@ impl FlushError {
             Self::HelperSpawn { .. } => FlushFailure::HelperSpawn,
             Self::HelperLost => FlushFailure::HelperLost,
             Self::ShutDown => FlushFailure::ShutDown,
+            Self::InProgress => FlushFailure::InProgress,
         };
         report(
             Failure::Flush(failure),
@@ -270,5 +273,30 @@ mod tests {
             error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT
         );
         assert_eq!(millis(Duration::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn flush_in_progress_report_round_trips() {
+        let error = FlushError::InProgress;
+        assert_eq!(
+            error.code(),
+            error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS
+        );
+        assert!(matches!(
+            error.remediation(),
+            Remediation::Recoverable { .. }
+        ));
+        let report = error.report();
+        assert_eq!(report.failure, Failure::Flush(FlushFailure::InProgress));
+        assert_eq!(report.code, error.code());
+        assert_eq!(report.remediation, error.remediation());
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["failure"],
+            json!({"operation": "flush", "kind": "in_progress"})
+        );
+        assert_eq!(json["code"], "SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS");
+        let decoded: FailureReport = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, report);
     }
 }

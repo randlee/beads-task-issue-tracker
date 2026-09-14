@@ -7,7 +7,7 @@
 
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
@@ -272,22 +272,122 @@ pub(crate) enum BoundedError {
     WorkerLost,
 }
 
+/// Helpers whose caller timed out and whose work has not finished (flush and shutdown).
+///
+/// Incremented by the caller when its timeout elapses, decremented by the helper
+/// when its work returns or unwinds. Read by health snapshots
+/// (`BridgeHealthReport.helpers.detached`).
+static DETACHED_HELPERS: AtomicU32 = AtomicU32::new(0);
+
+/// Set while a flush helper runs: at most one flush helper per installed bridge.
+static FLUSH_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Per-helper state shared by the caller and the helper of one [`run_bounded`] call.
+const HELPER_RUNNING: u8 = 0;
+/// The caller timed out and counted the helper in its detached counter.
+const HELPER_DETACHED: u8 = 1;
+/// The helper's work returned or unwound.
+const HELPER_DONE: u8 = 2;
+
+/// Marks the helper done when its work returns or unwinds, and uncounts it if detached.
+struct HelperExit {
+    state: Arc<AtomicU8>,
+    detached: &'static AtomicU32,
+}
+
+impl Drop for HelperExit {
+    fn drop(&mut self) {
+        // Also runs while a panic in the work unwinds.
+        if self.state.swap(HELPER_DONE, Ordering::SeqCst) == HELPER_DETACHED {
+            self.detached.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Exclusive claim on a single-flight flag; released on drop, including during unwinding.
+struct Flight {
+    flag: &'static AtomicBool,
+}
+
+impl Flight {
+    /// Claims `flag` without blocking, or returns `None` while another claim is alive.
+    fn claim(flag: &'static AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Health of the bounded-operation helper threads.
+pub(crate) fn helper_health() -> crate::HelperHealth {
+    crate::HelperHealth {
+        flush_in_flight: FLUSH_IN_FLIGHT.load(Ordering::SeqCst),
+        detached: DETACHED_HELPERS.load(Ordering::SeqCst),
+    }
+}
+
 /// Runs `work` on a named helper thread and waits at most `timeout` for its result.
+///
+/// A helper left running past `timeout` is counted in the process-wide detached
+/// counter until its work finishes.
 pub(crate) fn run_bounded<T: Send + 'static>(
     timeout: Duration,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, BoundedError> {
+    run_bounded_in(&DETACHED_HELPERS, timeout, work)
+}
+
+/// [`run_bounded`] against an explicit detached counter (unit tests use their own).
+fn run_bounded_in<T: Send + 'static>(
+    detached: &'static AtomicU32,
+    timeout: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, BoundedError> {
     let (tx, rx) = mpsc::sync_channel(1);
+    let state = Arc::new(AtomicU8::new(HELPER_RUNNING));
+    let exit = HelperExit {
+        state: Arc::clone(&state),
+        detached,
+    };
     std::thread::Builder::new()
         .name("sc-observability-log-helper".to_owned())
         .spawn(move || {
-            let _ = tx.send(work());
+            let exit = exit;
+            let value = work();
+            // Done before the result is observable, so a caller that received it never
+            // sees this helper as still running.
+            drop(exit);
+            let _ = tx.send(value);
         })
         .map_err(|source| BoundedError::Spawn { source })?;
     match rx.recv_timeout(timeout) {
         Ok(value) => Ok(value),
-        Err(RecvTimeoutError::Timeout) => Err(BoundedError::TimedOut),
         Err(RecvTimeoutError::Disconnected) => Err(BoundedError::WorkerLost),
+        Err(RecvTimeoutError::Timeout) => {
+            // Count first, then publish: the helper's decrement can never precede this increment.
+            detached.fetch_add(1, Ordering::SeqCst);
+            if state
+                .compare_exchange(
+                    HELPER_RUNNING,
+                    HELPER_DETACHED,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                return Err(BoundedError::TimedOut);
+            }
+            // The work finished at the deadline: its result is one non-blocking send away.
+            detached.fetch_sub(1, Ordering::SeqCst);
+            rx.recv()
+                .map_err(|mpsc::RecvError| BoundedError::WorkerLost)
+        }
     }
 }
 
@@ -399,11 +499,23 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
 /// An empty slot means shutdown has taken the logger: `FlushError::ShutDown`. A
 /// flush whose helper already holds its clone when shutdown starts is awaited by
 /// the shutdown's `take_sole`, within the shutdown's own timeout.
+///
+/// At most one flush helper runs at a time. While one is running (also after its
+/// caller timed out and detached it), a new flush spawns nothing and returns
+/// `FlushError::InProgress`, so a stuck sink cannot accumulate helper threads.
 pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
     let Some(installed) = current_installed() else {
         return Err(FlushError::ShutDown);
     };
-    match run_bounded(timeout, move || installed.logger.flush()) {
+    let Some(flight) = Flight::claim(&FLUSH_IN_FLIGHT) else {
+        return Err(FlushError::InProgress);
+    };
+    let flush = move || {
+        // Released when the flush returns or unwinds, before the result is sent.
+        let _flight = flight;
+        installed.logger.flush()
+    };
+    match run_bounded(timeout, flush) {
         Ok(Ok(())) => Ok(()),
         Ok(Err(source)) => Err(FlushError::Logger { source }),
         Err(BoundedError::TimedOut) => Err(FlushError::TimedOut { timeout }),
@@ -432,6 +544,82 @@ mod tests {
             panic!("worker panic (expected by this test)");
         });
         assert!(matches!(result, Err(BoundedError::WorkerLost)));
+    }
+
+    /// Signals its channel when dropped: the work closure has returned.
+    struct SignalOnDrop(mpsc::SyncSender<()>);
+
+    impl Drop for SignalOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    /// A helper is counted as detached from its caller's timeout until its work finishes.
+    #[test]
+    fn run_bounded_counts_a_detached_helper_until_it_finishes() {
+        static DETACHED: AtomicU32 = AtomicU32::new(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+        let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
+        let result = run_bounded_in(&DETACHED, Duration::from_millis(20), move || {
+            let _done = SignalOnDrop(done_tx);
+            release_rx.recv().unwrap();
+        });
+        assert!(matches!(result, Err(BoundedError::TimedOut)));
+        assert_eq!(DETACHED.load(Ordering::SeqCst), 1);
+        release_tx.send(()).unwrap();
+        done_rx.recv().unwrap();
+        // The work has returned; the helper's exit guard runs right after the closure.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while DETACHED.load(Ordering::SeqCst) != 0 {
+            assert!(Instant::now() < deadline, "detached helper never uncounted");
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            run_bounded_in(&DETACHED, Duration::from_secs(5), || 3).ok(),
+            Some(3)
+        );
+        assert_eq!(DETACHED.load(Ordering::SeqCst), 0);
+    }
+
+    /// A panicking detached helper is uncounted by its unwinding exit guard.
+    #[test]
+    fn run_bounded_uncounts_a_detached_helper_that_panics() {
+        static DETACHED: AtomicU32 = AtomicU32::new(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+        let result: Result<(), BoundedError> =
+            run_bounded_in(&DETACHED, Duration::from_millis(20), move || {
+                release_rx.recv().unwrap();
+                panic!("detached helper panic (expected by this test)");
+            });
+        assert!(matches!(result, Err(BoundedError::TimedOut)));
+        assert_eq!(DETACHED.load(Ordering::SeqCst), 1);
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while DETACHED.load(Ordering::SeqCst) != 0 {
+            assert!(
+                Instant::now() < deadline,
+                "panicking helper never uncounted"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn flight_claim_is_exclusive_and_released_on_drop_or_panic() {
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        let first = Flight::claim(&FLAG).unwrap();
+        assert!(Flight::claim(&FLAG).is_none());
+        drop(first);
+        let second = Flight::claim(&FLAG).unwrap();
+        let unwound = std::thread::spawn(move || {
+            let _held = second;
+            panic!("flight holder panic (expected by this test)");
+        })
+        .join();
+        assert!(unwound.is_err());
+        assert!(!FLAG.load(Ordering::SeqCst));
+        assert!(Flight::claim(&FLAG).is_some());
     }
 
     #[test]
