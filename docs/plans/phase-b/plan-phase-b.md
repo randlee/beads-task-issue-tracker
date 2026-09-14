@@ -397,7 +397,7 @@ Every row is verified against each sprint doc's Exact Targets.
 | Artifact | b-1 | b-2 | b-3 | b-4 | b-5 | b-6 | b-9 | b-7 | b-8 | b-10 | b-11 | b-12 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | root `Cargo.toml` | **creates** | adds member, deps | adds member | adds members `btit-cli`, `btit-bd`, `btit-br` | — | — | — | — | — | — | — | app `[lints]` |
-| root `Cargo.lock` | **creates** | refresh | refresh | refresh (incl. skeletons' full dependency sets) | — | — | — | refresh | refresh | — | refresh | refresh |
+| root `Cargo.lock` | **creates** | refresh | refresh | refresh (incl. skeletons' full dependency sets) | — | — | — | refresh (app deps `btit-bd`, `btit-br`) | — | — | refresh (only if `btit-cli` dev-deps change) | refresh |
 | `crates/btit-app/src/cli.rs` | (moved file) | removes `CliProbe`, `CompatibilityInfo`, orphan comment | removes pure logic; re-exports | removes transport; adds `AppInvoker`, `execute_bd` wrapper, `PROJECT_LOCKS` | — | — | — | **reduces to slot-delegating shims**; deletes statics, `AppInvoker`, `execute_bd`, wrappers, app `project_uses_dolt_for` copy | **deletes the file** | — | — | — |
 | `crates/btit-app/src/issue_commands.rs` | (moved) | `use` lines | `use` lines | **bodies → `ops` via `AppInvoker`** | — | — | — | **`backend::current()`** | — | — | — | lints, fmt |
 | `crates/btit-app/src/polling.rs` | (moved) | `use` | `use` | `bd_poll_data` → `ops::list`/`ready` | — | — | — | `bd_poll_data` → slot | `get_beads_mtime` → slot | — | B6 `_for` core | lints, fmt |
@@ -414,7 +414,7 @@ Every row is verified against each sprint doc's Exact Targets.
 | `crates/btit-beads/**` | — | — | **creates** (API frozen) | — | — | — | **fixes behind the frozen API** | — | — | — | — | — |
 | `crates/btit-cli/**` (incl. `testing`, `test-support` feature) | — | — | — | **creates** | — | — | — | — | — | — | B13 probe cache | — |
 | `crates/btit-bd/**` | — | — | — | skeleton (`Cargo.toml`, `clippy.toml`, doc-only `lib.rs`) | **implements** | — | — | — | — | **B3, B10, B13 rename** | — | — |
-| `crates/btit-br/**` | — | — | — | skeleton | — | **implements** | — | — | — | — | — | — |
+| `crates/btit-br/**` | — | — | — | skeleton | — | **implements** | — | — | — | — | OQ-4 follow-up in `src/backend.rs` tests (conditional: only if b-9 flips `supports_list_all_flag_for`) | — |
 | `crates/sc-observability-log*/**`, `crates/Cargo.toml`, `crates/Cargo.lock`, `crates/runtime-deps.txt`, `src-tauri/**` | **deletes/moves** | — | — | — | — | — | — | — | — | — | — | — |
 | `.github/workflows/ci.yml` | **backend job; removes `crates` job** | adds `rust-quality` | extends | extends for `btit-cli`, `btit-bd`, `btit-br` | — | — | — | — | — | — | — | workspace-wide fmt/clippy |
 | `.github/workflows/release.yml` | **artifact paths** | — | — | — | — | — | — | — | — | — | — | — |
@@ -423,7 +423,7 @@ Every row is verified against each sprint doc's Exact Targets.
 | `CHANGELOG.md`, `docs/crate-split-refactor-issues.md` disposition table | — | — | — | — | — | — | — | — | — | — | — | **owns** |
 | `docs/plans/phase-b/sprint-b-N.md` `status:` frontmatter | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc | own doc |
 
-Non-intersection proofs for the `parallel_safe` pairs read straight off this table: group A members own `crates/btit-bd/**`, `crates/btit-br/**`, `crates/btit-beads/**` respectively and nothing else; group B members own disjoint sets (`crates/btit-app/**` vs `crates/btit-bd/**`).
+Non-intersection proofs for the `parallel_safe` pairs read straight off this table: group A members own `crates/btit-bd/**`, `crates/btit-br/**`, `crates/btit-beads/**` respectively and nothing else; group B members own disjoint sets (`crates/btit-app/**` vs `crates/btit-bd/**`; neither touches `Cargo.lock`). b-11's conditional edit to `crates/btit-br/src/backend.rs` is sequential: b-11 is layer 8, after both parallel windows (group A at layer 5, group B at layer 7) have closed, so it intersects no `parallel_safe` pair.
 
 ## Cross-sprint document ownership
 

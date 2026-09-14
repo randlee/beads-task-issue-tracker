@@ -119,7 +119,7 @@ comm -23 <(grep -vxFf /tmp/replaced.txt /tmp/baseline-tests.txt) /tmp/after-test
 ## Acceptance Criteria
 
 1. Every replacement test in Required Work exists and passes; none of the removed names remains in the workspace.
-2. The test-preservation gate with the b-9, b-10 and b-11 lists prints nothing; b-8 and b-10 are merged in (`git branch --contains origin/<member>` lists this branch for the late finisher).
+2. The test-preservation gate with the b-9, b-10 and b-11 lists prints nothing; b-8 and b-10 are merged in (`git branch --contains origin/<member>` lists this branch for the late finisher). Join-layer file discipline: (a) `git diff --exit-code <layer-7 head>...HEAD -- crates/btit-types crates/btit-beads` is empty; (b) b-11's own commits touch only its targets: `git log --first-parent --no-merges --format=%H <layer-7 head>..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|crates/btit-cli/|crates/btit-br/src/backend.rs$|docs/attachments.md$|Cargo.lock$|docs/plans/phase-b/sprint-b-11.md$)'` prints nothing.
 3. `docs/attachments.md` contains `{short-id}` and the collision note; `grep -c '{issue-id}' docs/attachments.md` is `0`.
 4. `cargo test --workspace` passes; `cargo clippy -p btit-cli -p btit-br --all-targets --all-features -- -D warnings` and `cargo fmt --check -p btit-cli -p btit-br` pass.
 5. Implementation Notes record the B9 residual and the OQ-4 outcome.
@@ -136,4 +136,6 @@ comm -23 <(grep -vxFf /tmp/replaced.txt /tmp/baseline-tests.txt) /tmp/after-test
 - `python3 scripts/check_version_sync.py`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
+- `git diff --exit-code <layer-7 head>...HEAD -- crates/btit-types crates/btit-beads`
+- `git log --first-parent --no-merges --format=%H <layer-7 head>..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|crates/btit-cli/|crates/btit-br/src/backend.rs$|docs/attachments.md$|Cargo.lock$|docs/plans/phase-b/sprint-b-11.md$)'` prints nothing
 - test-preservation gate with the replaced-name lists (Acceptance Criterion 2)

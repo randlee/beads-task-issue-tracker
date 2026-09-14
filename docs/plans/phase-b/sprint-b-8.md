@@ -18,7 +18,7 @@ dependency_relations:
   - prerequisite: none
     parallel_pair: [b-8, b-10]
     relation: parallel_safe
-    rationale: "crates/btit-app/** (+ its Cargo.lock refresh) vs crates/btit-bd/**; project_uses_dolt_for's signature is pinned by crates/btit-bd/tests/api_freeze.rs, so b-8's callers are unaffected by b-10's body change"
+    rationale: "crates/btit-app/** vs crates/btit-bd/** (neither touches Cargo.lock); project_uses_dolt_for's signature is pinned by crates/btit-bd/tests/api_freeze.rs, so b-8's callers are unaffected by b-10's body change"
 ---
 
 # Sprint b-8 — Legacy-path and Dolt rewire
@@ -57,7 +57,7 @@ Line numbers are at `a18c724` (`crates/btit-app/src/` after b-1).
 - `crates/btit-app/src/polling.rs:95-160`: `get_beads_mtime` → `backend.project_uses_dolt(dir)` and `capabilities().uses_jsonl_files`
 - `crates/btit-app/src/watcher.rs:86`, `fs_commands.rs:50,73`: `project_uses_dolt` → slot
 - `crates/btit-app/src/updates.rs:1-3,271-319`: `check_bd_cli_update` selects `btit_br::BR_RELEASE_SOURCE` / `btit_bd::BD_RELEASE_SOURCE` by `detect_cli_client(&version_str)` (unchanged decision input); imports from `btit_beads::detect`
-- `Cargo.lock` (root): refresh only if the app's dependency edges change (none expected)
+- `Cargo.lock` (root): not touched (the app gains no dependency; `btit-bd`/`btit-br` were added in b-7)
 - `docs/plans/phase-b/sprint-b-8.md` (`status:` frontmatter and Implementation Notes)
 
 ## Deliverables
@@ -120,7 +120,7 @@ if backend.project_uses_dolt(&beads_dir) {
 ## Acceptance Criteria
 
 1. `crates/btit-app/src/cli.rs` does not exist; `! grep -rn 'mod cli\|crate::cli' crates/btit-app/src`; `! grep -rnE 'new_command|get_extended_path' crates/btit-app/src` (every spawn of a beads CLI goes through the backend; the `sqlite3` and `open`/`xdg-open`/`cmd` spawns use `std::process::Command` directly, as today).
-2. `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|Cargo.lock$|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing (group B non-intersection).
+2. `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing (group B non-intersection).
 3. `generate_handler!` still lists the same 65 names in order (gate from `sprint-b-7.md` Acceptance Criterion 2).
 4. Every row of the error-text table is covered by a unit test on the mapping closure, or by the `RecordingInvoker` tests of Deliverable 6.
 5. `ensure_refs_migrated_v3` has a `///` doc comment; `cargo rustdoc -p beads-issue-tracker` emits no `missing_docs` warning for it (the app does not deny missing docs; the check is `grep -B3 'fn ensure_refs_migrated_v3' crates/btit-app/src/migration.rs | grep -c '^///'` ≥ 1).
@@ -133,7 +133,7 @@ if backend.project_uses_dolt(&beads_dir) {
 - `cargo check --workspace --all-targets`
 - `cargo test --workspace`
 - `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets` (warnings allowed until b-12; no errors)
-- `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|Cargo.lock$|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing
+- `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing
 - `pnpm test`
 - `npx vue-tsc --noEmit`
 - `python3 scripts/check_version_sync.py`

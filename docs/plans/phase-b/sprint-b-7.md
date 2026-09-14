@@ -163,7 +163,7 @@ pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Is
 5. b-5, b-6 and b-9 are merged in (`git branch --contains origin/feature/sprint-b-9-beads-domain-fixes` lists this branch, likewise the other two); `cargo test --workspace` passes; the test-preservation gate with b-9's replacement list prints nothing.
 6. The factory tests (Deliverable 2) pass; a new test asserts `check_bd_compatibility`'s capability fields equal `capabilities_for(probe)` for a seeded probe.
 7. Manual verification (Deliverable 10) recorded in the PR; the deviation record (Deliverable 8) is in this doc's Implementation Notes.
-8. `git diff --exit-code <layer-5 branch>...HEAD -- crates/btit-types crates/btit-beads crates/btit-cli crates/btit-bd crates/btit-br` is empty apart from the merged group A commits (`git diff <layer-5>...HEAD --stat -- crates/btit-bd crates/btit-br crates/btit-beads` equals the diff those members' own PRs carried).
+8. Join-layer file discipline, two mechanical checks: (a) `git diff --exit-code <layer-5 head>...HEAD -- crates/btit-types crates/btit-cli` is empty (no group A member and no b-7 commit touches those crates; `crates/btit-beads`, `crates/btit-bd`, `crates/btit-br` legitimately change through the merged members and are covered by the members' own gates); (b) b-7's own commits touch only the app: `git log --first-parent --no-merges --format=%H <layer-5 head>..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|Cargo.lock$|docs/plans/phase-b/sprint-b-7.md$)'` prints nothing (`--first-parent` excludes the merged members' commits; `--no-merges` excludes the join merges themselves).
 9. QA-1 complete; CI green; every command in Required Validation passes.
 
 ## Required Validation
@@ -172,6 +172,8 @@ pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Is
 - `cargo test --workspace`
 - `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets` (warnings allowed until b-12; no errors)
 - `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br`
+- `git diff --exit-code <layer-5 head>...HEAD -- crates/btit-types crates/btit-cli`
+- `git log --first-parent --no-merges --format=%H <layer-5 head>..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|Cargo.lock$|docs/plans/phase-b/sprint-b-7.md$)'` prints nothing
 - `pnpm test`
 - `npx vue-tsc --noEmit`
 - `python3 scripts/check_version_sync.py`
