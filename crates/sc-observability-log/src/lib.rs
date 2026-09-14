@@ -344,8 +344,8 @@ impl Drop for LogGuard {
 /// - [`InitError::AlreadyInitialized`] when `init` already succeeded, is running
 ///   concurrently, or earlier returned `ForeignLoggerInstalled`.
 /// - [`InitError::ForeignLoggerInstalled`] when another `log::Log` is installed.
-/// - [`InitError::IdentityResolution`] when `ProcessIdentityPolicy::Resolver` fails
-///   (retry allowed).
+/// - [`InitError::IdentityResolution`] when the configured resolver fails or
+///   automatic hostname discovery cannot produce a hostname (retry allowed).
 /// - [`InitError::Logger`] when `Logger::new` fails (retry allowed).
 pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, InitError> {
     if INSTALLED

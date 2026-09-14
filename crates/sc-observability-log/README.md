@@ -192,6 +192,33 @@ error for literal macro keys, an omitted-and-counted field for runtime keys on
 the facade and macros, and an `InvalidInput` rejection for `submit`. See
 [`docs/mapping.md`](docs/mapping.md#field-keys).
 
+## Review hardening rationale
+
+The bridge is intended to become the shared Rust core for BTIT now and for
+future TypeScript and Python consumers after it moves into
+`sc-observability`. Three details therefore need an explicit, uniform contract
+rather than producer-specific implementation accidents:
+
+- **A timeout stays bounded.** The helper sends its result before it marks
+  itself complete. If a timeout and completion race, the caller performs only a
+  non-blocking receive; it never turns an elapsed timeout into an unbounded
+  wait for a descheduled helper. This keeps `flush`, `shutdown`, and application
+  exit honest about their supplied budget while preserving the late-completion
+  health accounting.
+- **A field has one wire name.** Literal macros, runtime macro keys, facade
+  key-values, and `LogControl::submit` all store `field_key_label`'s sanitized
+  key. Values that collide after normalization use the existing deterministic
+  last-write-wins rule. A field such as `a b` is consequently always emitted as
+  `a_b`, not as two different JSON shapes depending on which API produced it.
+  That stability is essential for generated binding types and downstream
+  queries.
+- **Automatic identity identifies the machine and process.** `Auto` resolves a
+  non-empty OS hostname and the current PID once at initialization; it reports
+  a typed `IdentityResolution` error if that cannot be done. Caching avoids a
+  per-event system lookup, while hostname-plus-PID lets consumers distinguish
+  otherwise identical services on different hosts without allowing producers
+  to spoof envelope identity.
+
 ## Lockstep and `__private` policy
 
 `sc-observability-log` depends on `sc-observability-log-macros` through an exact

@@ -127,7 +127,7 @@ fn expected() -> Vec<(
             "Info",
             d,
             a,
-            json!({"literal key": 7}),
+            json!({"literal_key": 7}),
         ),
         ("compat: raw key", "Info", d, a, json!({"type": "beads"})),
         (

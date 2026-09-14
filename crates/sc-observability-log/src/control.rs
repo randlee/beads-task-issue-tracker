@@ -189,7 +189,8 @@ pub struct StructuredRecord {
     /// Message text, stored as given.
     #[serde(default)]
     pub message: Option<String>,
-    /// Structured fields; keys are stored as written, empty or reserved keys are invalid.
+    /// Structured fields; keys are stored in canonical sanitized form, and empty or reserved
+    /// keys are invalid.
     #[serde(default)]
     pub fields: JsonMap,
 }

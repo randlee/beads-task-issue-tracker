@@ -12,8 +12,8 @@
 use std::borrow::Cow;
 
 use sc_observability_types::{
-    ActionName, IdentityError, Level, LogEvent, Observation, ProcessIdentity,
-    ProcessIdentityPolicy, ServiceName, TargetCategory,
+    ActionName, ErrorContext, IdentityError, Level, LogEvent, Observation, ProcessIdentity,
+    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory, error_codes,
 };
 use serde_json::{Map, Value};
 
@@ -169,10 +169,36 @@ pub(crate) fn resolve_identity(
     policy: &ProcessIdentityPolicy,
 ) -> Result<ProcessIdentity, IdentityError> {
     match policy {
-        ProcessIdentityPolicy::Auto => Ok(ProcessIdentity {
-            hostname: None,
-            pid: Some(std::process::id()),
-        }),
+        ProcessIdentityPolicy::Auto => {
+            let hostname = hostname::get().map_err(|source| {
+                IdentityError(Box::new(
+                    ErrorContext::new(
+                        error_codes::IDENTITY_RESOLUTION_FAILED,
+                        "automatic hostname resolution failed",
+                        Remediation::recoverable(
+                            "verify that the operating system can resolve its hostname",
+                            ["or configure ProcessIdentityPolicy::Fixed"],
+                        ),
+                    )
+                    .source(Box::new(source)),
+                ))
+            })?;
+            let hostname = hostname.to_string_lossy().into_owned();
+            if hostname.is_empty() {
+                return Err(IdentityError(Box::new(ErrorContext::new(
+                    error_codes::IDENTITY_RESOLUTION_FAILED,
+                    "automatic hostname resolution returned an empty hostname",
+                    Remediation::recoverable(
+                        "configure a non-empty operating-system hostname",
+                        ["or configure ProcessIdentityPolicy::Fixed"],
+                    ),
+                ))));
+            }
+            Ok(ProcessIdentity {
+                hostname: Some(hostname),
+                pid: Some(std::process::id()),
+            })
+        }
         ProcessIdentityPolicy::Fixed { hostname, pid } => Ok(ProcessIdentity {
             hostname: hostname.clone(),
             pid: *pid,
@@ -206,8 +232,8 @@ fn split_bracket_tag(message: &str) -> Option<(&str, &str)> {
 /// Collects `log` key-values into JSON fields.
 ///
 /// A key rejected by [`field_key_label`] (empty or reserved after sanitizing) is
-/// omitted and counted in `omitted`; accepted keys are stored as written, like
-/// literal event-macro keys.
+/// omitted and counted in `omitted`; accepted keys are stored in their canonical
+/// sanitized form, matching every other runtime producer.
 struct FieldCollector<'a> {
     fields: &'a mut Map<String, Value>,
     omitted: u64,
@@ -219,12 +245,12 @@ impl<'kvs> log::kv::VisitSource<'kvs> for FieldCollector<'_> {
         key: log::kv::Key<'kvs>,
         value: log::kv::Value<'kvs>,
     ) -> Result<(), log::kv::Error> {
-        if field_key_label(key.as_str()).is_err() {
+        let Ok(key) = field_key_label(key.as_str()) else {
             self.omitted = self.omitted.saturating_add(1);
             return Ok(());
-        }
+        };
         self.fields
-            .insert(key.as_str().to_owned(), kv_value_to_json(&value));
+            .insert(key.into_owned(), kv_value_to_json(&value));
         Ok(())
     }
 }
@@ -316,7 +342,8 @@ pub(crate) fn record_to_parts(
 /// Uses the same sanitizer as every other producer. Because `LogControl::submit`
 /// has a result channel, input the facade or the macros would repair and count
 /// (an empty action, an empty or reserved field key) rejects the whole request
-/// instead; nothing is written. Accepted field keys are stored as written.
+/// instead; nothing is written. Accepted field keys are stored in their
+/// canonical sanitized form.
 pub(crate) fn structured_to_parts(
     record: StructuredRecord,
 ) -> Result<EventParts, InvalidInputReason> {
@@ -338,16 +365,20 @@ pub(crate) fn structured_to_parts(
             })
         })
         .transpose()?;
-    for key in fields.keys() {
-        match field_key_label(key) {
-            Ok(_) => {}
+    let mut canonical_fields = Map::new();
+    for (raw_key, value) in fields {
+        let key = match field_key_label(&raw_key) {
+            Ok(key) => key.into_owned(),
             Err(LabelError::ReservedPrefix { .. }) => {
-                return Err(InvalidInputReason::ReservedFieldKey { key: key.clone() });
+                return Err(InvalidInputReason::ReservedFieldKey { key: raw_key });
             }
             Err(LabelError::Empty { .. } | LabelError::Rejected { .. }) => {
                 return Err(InvalidInputReason::EmptyFieldKey);
             }
-        }
+        };
+        // `serde_json::Map` already gives every producer a deterministic
+        // last-write-wins rule; apply it after normalization too.
+        canonical_fields.insert(key, value);
     }
     Ok(EventParts {
         level: level.into(),
@@ -355,7 +386,7 @@ pub(crate) fn structured_to_parts(
         action,
         message,
         outcome: None,
-        fields,
+        fields: canonical_fields,
     })
 }
 
@@ -688,9 +719,9 @@ mod tests {
             serde_json::json!({"code.line": "user line"})
         );
         assert_eq!(
-            fields["a b"],
+            fields["a_b"],
             Value::from(4),
-            "accepted keys are stored as written"
+            "accepted keys are stored in canonical form"
         );
         assert_eq!(fields.len(), 3);
     }
@@ -707,7 +738,7 @@ mod tests {
         assert_eq!(parts.target.as_str(), "app.ui");
         assert_eq!(parts.action.unwrap().as_str(), "ui.click");
         assert_eq!(parts.message.as_deref(), Some("clicked"));
-        assert_eq!(parts.fields["a b"], Value::from(1));
+        assert_eq!(parts.fields["a_b"], Value::from(1));
 
         let empty_action = StructuredRecord::new(TracingLevel::INFO, "t").with_action("");
         assert_eq!(
@@ -755,13 +786,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_auto_uses_current_pid() {
-        assert_eq!(
-            resolve_identity(&ProcessIdentityPolicy::Auto).unwrap(),
-            ProcessIdentity {
-                hostname: None,
-                pid: Some(std::process::id())
-            }
+    fn identity_auto_uses_hostname_and_current_pid() {
+        let identity = resolve_identity(&ProcessIdentityPolicy::Auto).unwrap();
+        assert_eq!(identity.pid, Some(std::process::id()));
+        assert!(
+            identity
+                .hostname
+                .is_some_and(|hostname| !hostname.is_empty())
         );
     }
 

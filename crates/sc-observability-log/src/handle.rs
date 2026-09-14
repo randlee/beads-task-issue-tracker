@@ -8,7 +8,7 @@
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
@@ -358,11 +358,11 @@ fn run_bounded_in<T: Send + 'static>(
     std::thread::Builder::new()
         .name("sc-observability-log-helper".to_owned())
         .spawn(move || {
-            let exit = exit;
+            // Keep `exit` alive until the result is in the channel.  A caller
+            // that loses the timeout race can then observe a completed helper
+            // with `try_recv`, never with an unbounded second receive.
+            let _exit = exit;
             let value = work();
-            // Done before the result is observable, so a caller that received it never
-            // sees this helper as still running.
-            drop(exit);
             let _ = tx.send(value);
         })
         .map_err(|source| BoundedError::Spawn { source })?;
@@ -383,10 +383,15 @@ fn run_bounded_in<T: Send + 'static>(
             {
                 return Err(BoundedError::TimedOut);
             }
-            // The work finished at the deadline: its result is one non-blocking send away.
+            // A failed CAS means the helper has already published its result
+            // before changing state to done. Do not make the stated timeout
+            // conditional on scheduler progress after this point.
             detached.fetch_sub(1, Ordering::SeqCst);
-            rx.recv()
-                .map_err(|mpsc::RecvError| BoundedError::WorkerLost)
+            match rx.try_recv() {
+                Ok(value) => Ok(value),
+                Err(TryRecvError::Empty) => Err(BoundedError::TimedOut),
+                Err(TryRecvError::Disconnected) => Err(BoundedError::WorkerLost),
+            }
         }
     }
 }

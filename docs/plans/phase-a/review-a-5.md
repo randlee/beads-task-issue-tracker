@@ -209,6 +209,25 @@ Verified by the QA manager, who fixed the design; fixed in round 3 (commit title
 | --- | --- | --- | --- | --- |
 | RSH-004 | rust-service-hardening-agent | Important | `run_bounded` spawned a new helper thread per call and left it detached on timeout, and `flush_installed` ran `Logger::flush` there with no inner bound. With a stuck writer or sink (a hung disk), every retried `LogControl::flush` / `LogGuard::flush` (btit's "Clear logs" retries) leaked another never-returning thread. Shutdown adds at most one detached helper. | fixed — at most one flush helper per installed bridge: an atomic `FLUSH_IN_FLIGHT` claim (released by a drop guard, also on panic) makes a flush that finds a helper still running return `FlushError::InProgress` (`SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS`, recoverable; `FlushFailure::InProgress` in `FailureReport`) without spawning. `run_bounded` counts a helper as detached from its caller's timeout until its work finishes (flush and shutdown), exposed as `BridgeHealthReport.helpers: HelperHealth { flush_in_flight: bool, detached: u32 }`; no lock on the flush or emit path, no record emitted from inside the bridge. `BRIDGE_HEALTH_SCHEMA_VERSION` stays 1 (unreleased); runtime dependency graph unchanged. btit: `ClearError::Flush` keeps `BTIT_LOG_CLEAR_FLUSH_FAILED` (it does not split flush causes), its message carries the source code, and `InProgress` gets a wait-then-retry remediation. Tests: `tests/flush_single_flight.rs` `stuck_flush_keeps_one_detached_helper_and_rejects_retries` (a reader-less FIFO as the active JSONL file blocks the writer; timed-out flush → `detached == 1`, retries → `InProgress` with no new helper; opening the FIFO → counter back to 0 and flush succeeds), unit tests `run_bounded_counts_a_detached_helper_until_it_finishes`, `run_bounded_uncounts_a_detached_helper_that_panics`, `flight_claim_is_exclusive_and_released_on_drop_or_panic`, `flush_in_progress_report_round_trips`, `flush_error_codes_and_remediations`, and btit `clear_behind_a_flush_in_progress_reports_the_source_code`; `tests/api_freeze.rs` updated. |
 
+## Re-review hardening required before the crate is copied
+
+The a-5 branch closes R-A4-001 through R-A4-005, but re-review found three
+remaining contract gaps that must be corrected in the dependent hardening PR.
+They are changes now, while BTIT is still completing its initial design, rather
+than compatibility work after `sc-observability-log` is copied into its target
+repository.
+
+| id | severity | issue | change and why it is better |
+| --- | --- | --- | --- |
+| R-A5-006 | Blocking | `run_bounded` dropped `HelperExit` before sending the result. On the deadline race, the caller could see `DONE`, fail its detached-state CAS, then take an unconditional `recv()`. A helper descheduled between the state change and `send` could make an API with a timeout block indefinitely. | Send the result while the helper is still `RUNNING`, then publish completion by dropping `HelperExit`. A losing timeout race reads with `try_recv` only. The caller either receives the already-published value or returns the timeout; scheduler progress after the deadline cannot extend the public time budget. Detached-helper accounting remains accurate until the send is observable. |
+| R-A5-007 | Blocking for bindings | Facade `kv` and `LogControl::submit` validated a field key with `field_key_label` but stored the raw key, whereas dynamic macro keys stored the sanitized key. For example, the same logical field was `a_b` through macros and `a b` through the facade or control API. | Store the canonical sanitized key on every producer path and document collision semantics after normalization: later value wins. The JSON wire shape is now independent of producer, so frontend TypeScript and maturin/Python bindings can describe one stable object instead of encoding API-specific exceptions. |
+| R-A5-008 | Important public contract gap | `ProcessIdentityPolicy::Auto` emitted PID only despite the intended hostname-plus-PID identity. Logs from the same service on multiple hosts therefore could not be distinguished without an application-supplied resolver. | Resolve a non-empty OS hostname and PID once at init with the small cross-platform `hostname` dependency. Failure becomes the existing typed, retryable `InitError::IdentityResolution`; identity lookup is not repeated per event. This provides useful host/process attribution without exposing a producer-controlled envelope field. |
+
+The three changes are deliberately paired with executable mapping and identity
+tests and with public documentation. They settle the observable behavior BTIT
+uses today and the crate copy will retain, instead of letting a future language
+binding or migration discover an incompatible shape after consumers exist.
+
 ### The `[logging] health at exit` record (ATM-QA-002)
 
 Written by BTIT's lifecycle owner immediately before the one final shutdown on

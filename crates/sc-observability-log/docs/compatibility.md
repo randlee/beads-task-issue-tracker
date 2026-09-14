@@ -40,7 +40,7 @@ Nothing else changes for any form in the grammar table. The shared fixture
 | `info!(name: "n", ...)`, `info!(name: NAME, ...)`, `info!(name: concat!(..), ...)` | `action` = the value, sanitized at runtime on first use, same rules as `target:` |
 | `info!(name: "n", target: "t", ...)` | both; **`name:` must precede `target:`**, as in tracing |
 | `info!(k = v, ...)` / `info!(a.b = v, ...)` | `fields["k"]` / `fields["a.b"]` from the bare-field dispatch (Serialize JSON, else Debug string) |
-| `info!("literal key" = v, ...)` | `fields["literal key"]`, same dispatch |
+| `info!("literal key" = v, ...)` | `fields["literal_key"]`, same dispatch |
 | `info!(r#type = v, ...)` | `fields["type"]`: the `r#` prefix is stripped, as tracing does |
 | `info!({ KEY } = v, ...)` / `info!({ KEY } = ?v, ...)` / `info!({ KEY } = %v, ...)` | `fields[field_key_label(KEY)]` with the bare/`?`/`%` rule of the other rows; an empty or reserved key is omitted and counted (see "Runtime labels and keys"). `KEY` must be a constant `&'static str`, as in tracing |
 | `info!(?v)` / `info!(k = ?v)` | `fields["v"\|"k"] = format!("{:?}", v)` |
@@ -96,9 +96,10 @@ Field keys starting with `sc_observability_log.` are reserved for the crate
 itself (for example `sc_observability_log.serialize_errors`). Literal
 (`"sc_observability_log.x" = v`) and dotted (`sc_observability_log.x = v`) keys
 with that prefix, and the empty literal key, are rejected at compile time.
-Literal and dotted keys are otherwise stored exactly as written (after removing
-`r#`). The same prefix is reserved at runtime for `{ KEY } = v` keys, `log`
-key-values and `LogControl::submit` fields (`mapping.md`, "Field keys").
+Literal and dotted keys are otherwise stored in their canonical sanitized form
+(after removing `r#`). The same prefix is reserved at runtime for every field
+key, including `{ KEY } = v` keys, `log` key-values and
+`LogControl::submit` fields (`mapping.md`, "Field keys").
 
 ### Runtime labels and keys
 

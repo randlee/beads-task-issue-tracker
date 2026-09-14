@@ -41,7 +41,7 @@ Implemented in `src/mapping.rs`.
 | leading `[tag]` of `args()` when `options.parse_bracket_action` and `tag` matches `[A-Za-z0-9._-]+` (`sanitize_label(tag)` borrows and is non-empty) | `action = action_label(tag)`; the tag and one following space are removed from `message` |
 | otherwise | `action = options.default_action` |
 | formatted `args()` | `message = Some(..)` |
-| `key_values()` (the `log` `kv` feature) | `fields[key] = serde_json::Value` (numbers, bools and strings typed; others `to_string()`); the key is stored as written. A key that `field_key_label` rejects (empty, or `sc_observability_log.` after sanitizing) is omitted and counted as `DropCause::InvalidEvent`; the record still emits |
+| `key_values()` (the `log` `kv` feature) | `fields[field_key_label(key)] = serde_json::Value` (numbers, bools and strings typed; others `to_string()`); the key is stored in canonical sanitized form. A key that `field_key_label` rejects (empty, or `sc_observability_log.` after sanitizing) is omitted and counted as `DropCause::InvalidEvent`; the record still emits |
 | `module_path()`, `file()`, `line()` | `fields["code.module"]`, `fields["code.file"]`, `fields["code.line"]` (omitted when `None`); authoritative: a `kv` value under the same key moves to `fields["sc_observability_log.shadowed_fields"][key]` |
 | none | `service` = `LoggerConfig.service_name`; `identity` = the value `init` resolved (resolved once from `LoggerConfig.process_identity`); `version` = envelope version; `timestamp` = `Timestamp::now_utc()` |
 | none | `trace` = the ambient `#[instrument]` context at emit time: `__private::emit` reads `current_trace()`, the innermost `TraceContext` entered on the emitting thread, for every event (`log` bridge records, event macros and `#[instrument]` completion events alike); `None` outside any instrumented call, or when the thread-local context stack is unavailable. Events inside an instrumented call carry that call's `trace_id` and `span_id` (and its parent's `span_id` as `parent_span_id`); the completion event carries the call's own `span_id`. See `compatibility.md`, "Context rules". |
@@ -74,7 +74,7 @@ Implemented in `src/control.rs` (`LogControl::submit`) and
 | `target: String` | `target_label(target)` (`::` → `.`, invalid chars → `_`, empty → `log`) |
 | `action: Option<String>` | `action_label(action)`; `None` → `BridgeOptions.default_action`; empty after sanitizing → `SubmitError::InvalidInput(EmptyAction)` |
 | `message: Option<String>` | `message`, as given |
-| `fields: JsonMap` | `fields`, keys stored as written; an empty or reserved key → `SubmitError::InvalidInput(EmptyFieldKey / ReservedFieldKey { key })` |
+| `fields: JsonMap` | `fields`, keys stored in canonical sanitized form; an empty or reserved key → `SubmitError::InvalidInput(EmptyFieldKey / ReservedFieldKey { key })` |
 | none | `version`, `timestamp`, `service`, `identity`, `trace` as for every other producer; `request_id`, `correlation_id`, `outcome`, `diagnostic`, `state_transition` = `None` |
 
 Order of checks: level threshold (a record below it is `Filtered` only while
@@ -106,16 +106,21 @@ the producer can report back:
 
 | Producer | Key source | Reserved or empty key | Duplicate user key | Collision with a crate-owned key |
 |---|---|---|---|---|
-| Event macros, literal / dotted / `r#` key | compile time, stored as written | compile error (`ui/event_reserved_key_*.rs`, `ui/event_empty_key.rs`) | the later field wins | — (no crate-owned keys) |
+| Event macros, literal / dotted / `r#` key | compile time plus canonical runtime form | compile error for raw empty/reserved forms (`ui/event_reserved_key_*.rs`, `ui/event_empty_key.rs`); a defensive runtime sanitizer rejects a key that becomes reserved after normalization | the later field wins after normalization | — (no crate-owned keys) |
 | Event macros and `#[instrument] fields(..)`, `{ KEY } = v` | runtime, stored sanitized | field omitted, event emitted, counted `InvalidEvent` | the later field wins | — |
 | `#[instrument]` completion event | argument names and `fields(..)` | as the two rows above | a `fields(..)` entry replaces the argument of the same name | `duration_ms`, `return`, `error` win; the user value moves to `fields["sc_observability_log.shadowed_fields"][key]` |
-| `log` facade `kv` | runtime, stored as written | field omitted, record emitted, counted `InvalidEvent` | the later pair wins | `code.module`, `code.file`, `code.line` win; the user value moves to `fields["sc_observability_log.shadowed_fields"][key]` |
-| `LogControl::submit` | runtime `JsonMap`, stored as written | whole request rejected: `SubmitError::InvalidInput`, nothing written, counted `InvalidEvent` | impossible (a JSON object has unique keys) | — (no crate-owned keys are added) |
+| `log` facade `kv` | runtime, canonical sanitized form | field omitted, record emitted, counted `InvalidEvent` | the later pair wins after normalization | `code.module`, `code.file`, `code.line` win; the user value moves to `fields["sc_observability_log.shadowed_fields"][key]` |
+| `LogControl::submit` | runtime `JsonMap`, canonical sanitized form | whole request rejected: `SubmitError::InvalidInput`, nothing written, counted `InvalidEvent` | the later value wins after normalization | — (no crate-owned keys are added) |
 
 Rules common to all rows:
 
 - A key is reserved when its *sanitized* form starts with the prefix, so
   `sc_observability_log::x` is reserved too.
+- The emitted key is always the sanitized key, including facade key-values and
+  `LogControl::submit` JSON fields. If distinct input keys normalize to the
+  same key, the producer's later value wins. This makes the emitted event shape
+  independent of the producer and safe to represent in generated TypeScript
+  and Python bindings.
 - Only the crate writes reserved keys: `sc_observability_log.serialize_errors`
   (a field value's `Serialize` failed) and `sc_observability_log.shadowed_fields`
   (a user value displaced by a crate-owned key).

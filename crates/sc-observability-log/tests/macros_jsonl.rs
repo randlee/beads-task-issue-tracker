@@ -247,7 +247,7 @@ fn grammar_rows(path: &Path, guard: &LogGuard) {
         &events,
         "row literal key",
         info(m, d),
-        &json!({"literal key": true}),
+        &json!({"literal_key": true}),
     );
     assert_event(
         &events,
