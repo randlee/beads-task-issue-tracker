@@ -127,7 +127,7 @@ pub fn project_uses_dolt_for(info: Option<(CliClient, u32, u32, u32)>, beads_dir
 
 1. `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-bd/|docs/plans/phase-b/sprint-b-10.md$)'` prints nothing (group B non-intersection); `git diff --exit-code feature/sprint-b-7-backend-slot...HEAD -- crates/btit-bd/tests/api_freeze.rs` is empty.
 2. Every row of the verification table is a test case and passes on all three CI OSes; the replacement tests in Required Work exist and the removed names do not (`! grep -rn 'project_uses_dolt_for_nested_layout\|project_uses_dolt_for_sqlite_metadata\|project_uses_dolt_false_without_beads_dir\|never_true' crates/`).
-3. `PATH=/usr/bin:/bin cargo test -p btit-bd` passes (no `bd` on `PATH`), and `grep -rn 'BdCli::new(' crates/btit-bd/src` matches no `#[cfg(test)]` code.
+3. No test in `btit-bd` spawns a CLI, checked mechanically on every OS: `! grep -rnE 'BdCli::new\(|BdCli::with_seeded_probe\(|Command::new|probe_cli_binary|probe_version_output' crates/btit-bd/tests` and, for in-file `#[cfg(test)]` modules, `awk '/#\[cfg\(test\)\]/{t=1} t&&/(BdCli::new\(|Command::new|probe_cli_binary|probe_version_output)/{print FILENAME":"FNR": "$0}' crates/btit-bd/src/*.rs` prints nothing. On Linux and macOS only, additionally `SAFE_PATH="$(dirname "$(command -v cargo)"):/usr/bin:/bin"; ! PATH="$SAFE_PATH" command -v bd && PATH="$SAFE_PATH" cargo test -p btit-bd` passes with no `bd` reachable (skipped on Windows, where the greps are the gate).
 4. `cargo clippy -p btit-bd --all-targets -- -D warnings`, `cargo fmt --check -p btit-bd`, `cargo rustdoc -p btit-bd -- -D missing-docs` pass.
 5. Implementation Notes record the postgres/mysql limitation.
 6. QA-1 complete; CI green; every command in Required Validation passes.
@@ -138,7 +138,7 @@ pub fn project_uses_dolt_for(info: Option<(CliClient, u32, u32, u32)>, beads_dir
 - `cargo clippy -p btit-bd --all-targets -- -D warnings`
 - `cargo rustdoc -p btit-bd -- -D missing-docs`
 - `cargo test --workspace`
-- `PATH=/usr/bin:/bin cargo test -p btit-bd`
+- the no-spawn greps from Acceptance Criterion 3 (all OSes) and, on Linux/macOS, `SAFE_PATH="$(dirname "$(command -v cargo)"):/usr/bin:/bin"; ! PATH="$SAFE_PATH" command -v bd && PATH="$SAFE_PATH" cargo test -p btit-bd`
 - `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-bd/|docs/plans/phase-b/sprint-b-10.md$)'` prints nothing
 - `python3 scripts/check_version_sync.py`
 - `git diff --check`

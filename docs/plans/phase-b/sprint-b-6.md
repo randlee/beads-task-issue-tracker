@@ -70,7 +70,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 3. **`CliBackend`** (CLI-only facts): `binary()`, `probe()` (via `inv.probe()`), `client()`, `version()`, `capabilities()`, `run_raw()`, `release_source()` → `BR_RELEASE_SOURCE` (`https://api.github.com/repos/Dicklesworthstone/beads_rust/releases/latest`, `https://github.com/Dicklesworthstone/beads_rust/releases`, `updates.rs:286,290`), exported `pub const`.
 4. **`CloseSuggestions`.** `close_suggesting_next` → `ops::close(self.inv.as_ref(), p, id, true)`.
 5. **Full-method parity tests** (`tests/parity.rs`, through `BrCli::with_invoker(Box::new(RecordingInvoker::new(Some(probe))))` for `Br 0.1.33` and `RecordingInvoker::new(None)` for the no-probe case): every `BeadsBackend` method is called once and the recorded full argv equals the b-4 Required Work table's `Br 0.1.33` column (`close` records `close <id> --suggest-next --json`; `list(include_all)` records `--all` or the two-call form according to `capabilities_for(Br, Some(0.1.33)).supports_list_all_flag`, computed in the test, not a literal — so a b-9 flip of B7/OQ-4 changes no file in this crate). **No-probe column for `BrCli`:** `list(include_all)` → the two calls `list --limit=0 --json`, `list --limit=0 --status=closed --json` (`capabilities_for(Unknown, None)` is all `false`); `close` → `close <id> --suggest-next --json` (the flag is br's, not version-gated); every other row as `Br 0.1.33`. `project_uses_dolt` is `false` even when `<dir>/.beads/.dolt` exists; `relation_types()` is exactly the seven common entries in order; `release_source()`; `dolt().is_none()`; `cli().is_some()`; `close_suggestions().is_some()`; `capabilities()` equals `capabilities_for(Br, Some(0.1.33))` (whose fields at `a18c724` are `{ supports_daemon_flag: false, uses_jsonl_files: true, uses_dolt_backend: false, supports_list_all_flag: true, supports_delete_hard_flag: false }`, `cli.rs:374,394,416,437,455`).
-6. **API freeze.** `crates/btit-br/tests/api_freeze.rs` pins `BrCli::new`, `BrCli::with_invoker` (with `--features test-support`), `BR_RELEASE_SOURCE`, `fn _obj(b: &BrCli) -> &dyn BeadsBackend { b }` and `fn _cli(b: &BrCli) -> &dyn CliBackend { b }`.
+6. **API freeze.** `crates/btit-br/tests/api_freeze.rs` pins `BrCli::new`, `BrCli::with_seeded_probe`, `BrCli::with_invoker` (with `--features test-support`), `BR_RELEASE_SOURCE`, `fn _obj(b: &BrCli) -> &dyn BeadsBackend { b }` and `fn _cli(b: &BrCli) -> &dyn CliBackend { b }`.
 
 ## Required Work
 
@@ -91,6 +91,8 @@ pub struct BrCli { inv: Box<dyn CliInvoker> }
 
 impl BrCli {
     pub fn new(binary: impl Into<String>, locks: Arc<ProjectLocks>) -> Self { Self { inv: Box::new(CliRunner::new(binary, locks)) } }
+    /// `new` with the probe cache pre-seeded (b-7's factory and `check_bd_compatibility` rebuild; no second `--version` spawn).
+    pub fn with_seeded_probe(binary: impl Into<String>, locks: Arc<ProjectLocks>, probe: CliProbe) -> Self { Self { inv: Box::new(CliRunner::with_probe(binary, locks, probe)) } }
     #[cfg(feature = "test-support")]
     pub fn with_invoker(inv: Box<dyn CliInvoker>) -> Self { Self { inv } }
 }
@@ -129,7 +131,7 @@ impl CloseSuggestions for BrCli {
 ## Acceptance Criteria
 
 1. `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-br/|docs/plans/phase-b/sprint-b-6.md$)'` prints nothing (group A non-intersection).
-2. `cargo tree -e normal -p btit-br --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rn 'btit_bd\|btit-bd' crates/btit-br`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-br/src`; the struct field is `Box<dyn CliInvoker>`.
+2. `cargo tree -e normal -p btit-br --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rn 'btit_bd\|btit-bd' crates/btit-br`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-br/src`; `grep -nE '^pub struct BrCli \{ inv: Box<dyn CliInvoker> \}' crates/btit-br/src/backend.rs` matches and `! grep -nE ':\s*CliRunner\b|<CliRunner>' crates/btit-br/src`.
 3. `BrCli` implements `BeadsBackend`, `CliBackend`, `CloseSuggestions` (pinned by `tests/api_freeze.rs`); it does not implement `DoltOperations`; `with_invoker` exists only with `--features test-support`.
 4. The Deliverable 5 parity tests pass; `cargo test -p btit-br --features test-support` and `cargo test -p btit-br` both pass.
 5. `cargo test --workspace` passes; test-preservation gate prints nothing.

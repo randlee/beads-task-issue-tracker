@@ -77,7 +77,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 4. **`DoltOperations`** returning `DoltOpResult`. Each method is `inv.run_raw` with a fixed argument vector built by a pure `pub(crate) fn` in `dolt.rs` — `doctor_fix_args() = ["doctor", "--fix", "--yes"]` (`migration.rs:334`), `migrate_to_dolt_args() = ["migrate", "--to-dolt", "--yes"]` (`:624`), `init_args(prefix) = ["init", "--prefix", prefix]` (`:666,772`), `import_args(file) = ["import", "-i", file]` (`:880`) — mapped by `pub(crate) fn to_dolt_result(out: CliOutput) -> DoltOpResult { success: out.success, message: out.stdout.trim().to_owned(), detail: out.stderr.trim().to_owned() }`. Unit tests assert the vectors and the mapping.
 5. **`project_uses_dolt_for` copied verbatim** (`cli.rs:482-515`) with its seven tests moved. `project_uses_dolt_false_without_beads_dir` (`cli.rs:1239-1248`) calls the wrapper today; here it calls `BdCli::new("bd", locks).project_uses_dolt(&ProjectRef::local(Some(dir)))`, which still spawns `bd --version` (B10 is fixed in b-10, not here).
 6. **Full-method parity tests** (`tests/parity.rs`, through `BdCli::with_invoker(Box::new(RecordingInvoker::new(Some(probe))))` and `RecordingInvoker::new(None)` for the no-probe case): for each seeded probe `Bd 1.0.4`, `Bd 0.54.0`, `Bd 0.49.6`, `Unknown 9.9.9` and no probe, every `BeadsBackend` method and every `DoltOperations` method is called once and the recorded full argv (`RecordingInvoker::calls()`, assembled by `run::json_argv` for JSON calls) equals the b-4 Required Work table column (bd rows) plus the `DoltOperations` rows, with the `--all`/`--hard`/`--no-daemon` expectations computed from `btit_beads::gates::capabilities_for(client, version)` for that probe rather than written as literals; `capabilities()` equals `capabilities_for` for that probe; `relation_types()` is the ten-entry list in order; `release_source()`; `dolt().is_some()`, `cli().is_some()`, `close_suggestions().is_none()`; `to_dolt_result` maps a scripted `CliOutput` field by field.
-7. **API freeze.** `crates/btit-bd/tests/api_freeze.rs` pins `BdCli::new`, `BdCli::with_invoker` (compiled only with `--features test-support`), `BD_RELEASE_SOURCE`, `project_uses_dolt_for`, `to_dolt_result`, `fn _obj(b: &BdCli) -> &dyn BeadsBackend { b }` and `fn _cli(b: &BdCli) -> &dyn CliBackend { b }`.
+7. **API freeze.** `crates/btit-bd/tests/api_freeze.rs` pins `BdCli::new`, `BdCli::with_seeded_probe`, `BdCli::with_invoker` (compiled only with `--features test-support`), `BD_RELEASE_SOURCE`, `project_uses_dolt_for`, `to_dolt_result`, `fn _obj(b: &BdCli) -> &dyn BeadsBackend { b }` and `fn _cli(b: &BdCli) -> &dyn CliBackend { b }`.
 
 ## Required Work
 
@@ -106,6 +106,8 @@ pub struct BdCli { inv: Box<dyn CliInvoker> }
 
 impl BdCli {
     pub fn new(binary: impl Into<String>, locks: Arc<ProjectLocks>) -> Self { Self { inv: Box::new(CliRunner::new(binary, locks)) } }
+    /// `new` with the probe cache pre-seeded (b-7's factory and `check_bd_compatibility` rebuild; no second `--version` spawn).
+    pub fn with_seeded_probe(binary: impl Into<String>, locks: Arc<ProjectLocks>, probe: CliProbe) -> Self { Self { inv: Box::new(CliRunner::with_probe(binary, locks, probe)) } }
     #[cfg(feature = "test-support")]
     pub fn with_invoker(inv: Box<dyn CliInvoker>) -> Self { Self { inv } }
     fn info_tuple(&self) -> Option<(CliClient, u32, u32, u32)> {
@@ -156,7 +158,7 @@ impl DoltOperations for BdCli {
 ## Acceptance Criteria
 
 1. `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-bd/|docs/plans/phase-b/sprint-b-5.md$)'` prints nothing (group A non-intersection).
-2. `cargo tree -e normal -p btit-bd --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-bd/src` (instances only; two `BdCli` for two projects may coexist); `! grep -rn 'CliRunner' crates/btit-bd/src/backend.rs | grep -v 'CliRunner::new'` (the struct field is `Box<dyn CliInvoker>`).
+2. `cargo tree -e normal -p btit-bd --depth 1` lists exactly `btit-beads`, `btit-cli`, `btit-types`, `log`, `serde_json`; `! grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-bd/src` (instances only; two `BdCli` for two projects may coexist); `grep -nE '^pub struct BdCli \{ inv: Box<dyn CliInvoker> \}' crates/btit-bd/src/backend.rs` matches and `! grep -nE ':\s*CliRunner\b|<CliRunner>' crates/btit-bd/src` (no field or generic holds the concrete runner; constructors may call `CliRunner::new`/`CliRunner::with_probe`).
 3. `BdCli` implements `BeadsBackend`, `CliBackend`, `DoltOperations` (pinned by `tests/api_freeze.rs`); it does not implement `CloseSuggestions`; `with_invoker` exists only with `--features test-support`.
 4. `project_uses_dolt_for` and its seven tests exist in `crates/btit-bd`; the seven tests no longer exist in `crates/btit-app/src/cli.rs` (the function body there is unchanged).
 5. The argument-vector and mapping tests (Deliverable 4) and the parity tests (Deliverable 6) pass; `cargo test -p btit-bd --features test-support` and `cargo test -p btit-bd` both pass.
