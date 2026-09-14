@@ -87,6 +87,42 @@ jobs:
       - name: Cargo test
         run: cargo test --workspace
 
+  rust-quality:
+    name: rust quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Keep in sync with rust-toolchain.toml (enforced by the version-sync job).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check -p btit-types
+
+      - name: Clippy
+        run: cargo clippy -p btit-types --all-targets -- -D warnings
+
+      - name: Rustdoc missing-docs
+        run: cargo rustdoc -p btit-types -- -D missing-docs
+
+      # Data-only crate: dependency graph gate, host-independent so it runs once, on Linux.
+      - name: Dependency graph
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')
+
   crates:
     name: crates (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
