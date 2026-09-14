@@ -97,6 +97,8 @@ comm -23 <(grep -oE "invoke[<(][^)]*'[a-z_]+'" app/utils/bd-api.ts | sed -E "s/.
 
 Every "prints nothing" gate in this plan and the sprint docs is executed as `test -z "$(…)"`; every "is empty" diff gate as the command's exit status.
 
+Gate (1) compares header text, so parameter and return types keep their `a18c724` spelling: a type that moves to `btit-types` (`CompatibilityInfo`, `ListOptions`, `CliOutput`, …) is imported with `use` in the file that declares the command and named bare in the header, never path-qualified (`btit_types::CompatibilityInfo`) there. Attributes and doc comments added to a command (`#[allow(..)]`, `///`) go above `#[tauri::command]`, never between it and `fn`, because the awk collects every line from the attribute to the first `{`.
+
 ### Behaviour preserved (maintainer requirement 6)
 
 - **bd first, br secondary, fallback bd:** `CLI_CANDIDATES = ["bd","br"]`, `CLI_FALLBACK = "bd"`, `MIN_SUPPORTED_BD_MAJOR = 1`, `rank_cli_candidate`, `select_default_binary` (`cli.rs:76-84,130-163`) move unchanged (pure parts to `btit-beads`, the spawning `probe_cli_binary`/`default_cli_binary` to `btit-cli`).
@@ -411,7 +413,7 @@ Trigger definitions (referenced by every sprint doc): `must_follow` merge-forwar
 | `b-12 must_follow b-11` | lint rollout touches every app module after the last behaviour fix; collates every sprint's changelog lines. |
 | `b-5 parallel_safe b-6` | `crates/btit-bd/**` + `sprint-b-5.md` vs `crates/btit-br/**` + `sprint-b-6.md`. The files both would otherwise touch (root `Cargo.toml` members, root `Cargo.lock`, `ci.yml` `rust-quality` rows, a cross-crate recording invoker) are written by b-4 (skeleton crates with final dependency sets; `btit_cli::testing` behind the `test-support` feature). Each has a `git diff --name-only` gate. |
 | `b-5 parallel_safe b-9`, `b-6 parallel_safe b-9` | `crates/btit-beads/**` (behind the API frozen by `tests/api_freeze.rs`) vs `crates/btit-bd/**` / `crates/btit-br/**`; b-9 edits no manifest or workflow. b-6's capability and `--all` expectations are derived from `btit_beads::gates::capabilities_for(client, version)` rather than literals, so a b-9 flip of B7 (OQ-4) changes no b-6 file and needs no follow-up edit. |
-| `b-8 parallel_safe b-10` | `crates/btit-app/**` (migration, polling mtime, watcher, fs_commands, updates, cli.rs deletion, lib.rs) vs `crates/btit-bd/**`; `crates/btit-bd/tests/api_freeze.rs` pins `project_uses_dolt_for`'s signature so b-8's callers are unaffected. |
+| `b-8 parallel_safe b-10` | `crates/btit-app/**` (migration, polling mtime, watcher, fs_commands, updates, cli.rs deletion, lib.rs) vs `crates/btit-bd/**`; `crates/btit-bd/tests/api_freeze.rs` pins `project_uses_dolt_for`'s signature so b-8's callers are unaffected. b-8's app tests use only fixtures whose `project_uses_dolt` answer is the same under the `a18c724` rule and b-10's (`.beads/.dolt/` without `metadata.json` → Dolt; `.beads/beads.db` without `metadata.json`/`.dolt` → SQLite; probes `Bd 1.0.4`/`Bd 0.49.6` only; b-8 Deliverable 6), so b-10 edits no test owned by b-8 or b-11. |
 
 ### Ownership table
 

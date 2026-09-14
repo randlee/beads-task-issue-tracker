@@ -125,7 +125,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 use btit_beads::{backend::{BeadsBackend, CliBackend}, error::BeadsError};
 use btit_cli::{locks::ProjectLocks, probe::probe_cli_binary};
-use btit_types::{CliClient, CliProbe};
+use btit_types::{CliClient, CliProbe, CompatibilityInfo};
 
 static PROJECT_LOCKS: LazyLock<Arc<ProjectLocks>> = LazyLock::new(|| Arc::new(ProjectLocks::default()));
 static SLOT: RwLock<Option<Arc<dyn BeadsBackend>>> = RwLock::new(None);
@@ -154,7 +154,7 @@ pub(crate) fn with_cli<T>(operation: &'static str, f: impl FnOnce(&dyn CliBacken
 }
 
 #[tauri::command]
-pub(crate) async fn check_bd_compatibility() -> btit_types::CompatibilityInfo { /* Deliverable 4 */ }
+pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo { /* Deliverable 4; header spelling identical to cli.rs:622 */ }
 ```
 
 ```rust
