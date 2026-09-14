@@ -207,9 +207,9 @@ pub enum DropCause {
     ShutdownTimedOut,
     /// No logger was installed (before `init` or after shutdown).
     NotInstalled,
-    /// A panic inside sc-observability `try_log`, caught by the emit path.
+    /// A panic inside the emit guard: sc-observability `try_log` or a `log` record's formatting.
     LoggerPanicked,
-    /// `emit` was called on a thread already inside `emit` (panic hook, sink, redactor).
+    /// A record was emitted while the emit guard was active on the thread (formatter, hook, sink).
     ReentrantEmit,
 }
 

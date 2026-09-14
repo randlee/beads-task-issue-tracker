@@ -91,10 +91,16 @@ dropped event is counted under exactly one `DropCause`, readable with
 - `QueueFull`, `InvalidEvent`, `WriterDegraded`, `ShutdownTimedOut`: the matching
   sc-observability `TryLogError`.
 - `NotInstalled`: a record before `init` or after shutdown.
-- `LoggerPanicked`: a panic inside sc-observability `try_log`, contained with
-  `std::panic::catch_unwind`.
-- `ReentrantEmit`: a record logged from a panic hook, sink or redactor that runs
-  inside the logger.
+- `LoggerPanicked`: a panic inside the emit guard, contained with
+  `std::panic::catch_unwind`: in sc-observability `try_log`, or in a `log`
+  record's own `Display`/`Debug` formatting (message arguments or a key-value).
+- `ReentrantEmit`: a record logged while the emit guard is active on the same
+  thread: from a formatter of the record being emitted, a panic hook, a sink or
+  a redactor.
+
+For a `log` record, the guard is entered exactly once and covers the slot read,
+target/action labelling, message and key-value rendering, event assembly,
+redaction and `try_log`; only the lock-free level check runs before it.
 
 ### Residual: `panic = "abort"`
 

@@ -12,8 +12,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
+use sc_observability::TryLogError;
 use sc_observability_types::LevelFilter;
 
+use crate::__private::EventParts;
 use crate::{DropCause, DroppedEvents, FlushError, ShutdownError};
 
 /// Everything the emit path needs, shared behind one `Arc`.
@@ -131,7 +133,13 @@ impl Drop for EmitScope {
     }
 }
 
-/// Emit core: reentrancy guard plus panic containment. Every dropped event is counted exactly once.
+/// Emit guard: reentrancy guard plus panic containment. Every dropped event is counted exactly once.
+///
+/// This is the single outermost boundary of every emission: exactly one call per
+/// record. The closure must reach the logger only through the unguarded cores
+/// [`submit_installed`] / [`submit_to`]; calling `__private::emit` (which is
+/// itself guarded) from inside the closure would classify the record as
+/// `DropCause::ReentrantEmit`.
 pub(crate) fn submit_guarded(submit: impl FnOnce() -> Result<(), DropCause>) {
     let Some(_scope) = EmitScope::enter() else {
         record_drop(DropCause::ReentrantEmit);
@@ -146,6 +154,38 @@ pub(crate) fn submit_guarded(submit: impl FnOnce() -> Result<(), DropCause>) {
         Ok(Err(cause)) => record_drop(cause),
         Err(_payload) => record_drop(DropCause::LoggerPanicked),
     }
+}
+
+/// Unguarded submit core: event assembly, ambient trace context and `Logger::try_log`.
+///
+/// Never call it outside a [`submit_guarded`] closure: it neither contains panics
+/// nor detects reentrancy.
+pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), DropCause> {
+    let mut event = crate::mapping::assemble_event(
+        parts,
+        &installed.service,
+        &installed.identity,
+        &installed.options.default_action,
+    );
+    // Ambient `#[instrument]` context of the emitting thread; bridge records included.
+    event.trace = crate::context::current_trace();
+    installed
+        .logger
+        .try_log(event)
+        .map_err(|error| match error {
+            TryLogError::QueueFull(_) => DropCause::QueueFull,
+            TryLogError::InvalidEvent(_) => DropCause::InvalidEvent,
+            TryLogError::WriterDegraded(_) => DropCause::WriterDegraded,
+            TryLogError::ShutdownTimedOut(_) => DropCause::ShutdownTimedOut,
+        })
+}
+
+/// Unguarded submit core for pre-built parts: slot read, then [`submit_to`].
+///
+/// Same contract as [`submit_to`]: call it only inside a [`submit_guarded`] closure.
+pub(crate) fn submit_installed(parts: EventParts) -> Result<(), DropCause> {
+    let installed = current_installed().ok_or(DropCause::NotInstalled)?;
+    submit_to(&installed, parts)
 }
 
 /// Crate-private failure of [`run_bounded`], mapped 1:1 into `FlushError` / `ShutdownError`.

@@ -315,11 +315,7 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
 /// `=` version so expansions and this module always move in lockstep.
 #[doc(hidden)]
 pub mod __private {
-    use std::sync::PoisonError;
-
-    use sc_observability::TryLogError;
-
-    use crate::{DropCause, handle, mapping};
+    use crate::{DropCause, handle};
 
     pub use serde_json::{Map, Value};
 
@@ -371,38 +367,13 @@ pub mod __private {
     /// calling thread (`current_trace()`), or `None` outside any instrumented call.
     ///
     /// Never blocks on I/O or queue capacity and never panics: the slot read, event
-    /// assembly and `try_log` run inside a `catch_unwind` guard. It is not
-    /// reentrant: a call on a thread already inside `emit` (a panic hook, sink or
-    /// redactor that logs) returns at once and is counted as
+    /// assembly and `try_log` run inside one `catch_unwind` guard. It is not
+    /// reentrant: a call on a thread already inside an emission (a panic hook, sink
+    /// or redactor that logs) returns at once and is counted as
     /// `DropCause::ReentrantEmit`. Every dropped event is counted under exactly one
     /// [`DropCause`]. Nothing is flushed; use `LogGuard::flush(timeout)`.
     pub fn emit(parts: EventParts) {
-        handle::submit_guarded(|| {
-            let Some(installed) = handle::SLOT
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-            else {
-                return Err(DropCause::NotInstalled);
-            };
-            let mut event = mapping::assemble_event(
-                parts,
-                &installed.service,
-                &installed.identity,
-                &installed.options.default_action,
-            );
-            // Ambient `#[instrument]` context of the emitting thread; bridge records included.
-            event.trace = crate::context::current_trace();
-            installed
-                .logger
-                .try_log(event)
-                .map_err(|error| match error {
-                    TryLogError::QueueFull(_) => DropCause::QueueFull,
-                    TryLogError::InvalidEvent(_) => DropCause::InvalidEvent,
-                    TryLogError::WriterDegraded(_) => DropCause::WriterDegraded,
-                    TryLogError::ShutdownTimedOut(_) => DropCause::ShutdownTimedOut,
-                })
-        });
+        handle::submit_guarded(|| handle::submit_installed(parts));
     }
 
     /// Counts one dropped event; a-2/a-3 call it for `DropCause::InvalidEvent` label failures.
