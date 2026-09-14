@@ -9,14 +9,17 @@ process-wide `sc_observability::Logger`. Existing `log::info!` (and friends) cal
 sites keep working unchanged, including `target:` and the `kv` syntax
 `key = value; "msg"`.
 
-Tracing-compatible event macros (sprint a-2) and `#[instrument]` (sprint a-3)
-build on the same emit path.
+Tracing-compatible event macros (sprint a-2), `#[instrument]` (sprint a-3) and
+nonblocking structured submission through `LogControl` (a-5) use the same
+guarded submission core and the same writer.
 
 ## Quick start
 
 ```rust,no_run
 use std::time::Duration;
-use sc_observability_log::{ActionName, BridgeOptions, LevelFilter, LoggerConfig, ServiceName};
+use sc_observability_log::{
+    ActionName, BridgeOptions, Level, LevelFilter, LoggerConfig, ServiceName, StructuredRecord,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = LoggerConfig::default_for(ServiceName::new("my-app")?, "/var/log/my-app".into());
@@ -26,29 +29,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         parse_bracket_action: true, // "[sync.start] msg" -> action "sync.start"
     };
 
-    // Keep the guard alive for the whole process.
+    // The single lifecycle owner: keep it for the whole process.
     let guard = sc_observability_log::init(config, options)?;
-    println!("logging to {:?}", guard.active_log_path());
+    // Cloneable, non-owning control for everything else.
+    let control = guard.control();
+    println!("logging to {:?}", control.active_log_path());
 
     log::info!(target: "my_app::sync", "[sync.start] syncing {} items", 3);
     log::warn!(count = 3, retry = true; "kv fields become LogEvent.fields");
+    control.submit(
+        StructuredRecord::new(Level::INFO, "my_app.ui")
+            .with_action("ui.click")
+            .with_field("button", "save"),
+    )?;
 
-    guard.flush(Duration::from_secs(1))?;     // bounded flush
-    guard.shutdown(Duration::from_secs(5))?;  // bounded shutdown
+    control.flush(Duration::from_secs(1))?;   // bounded flush
+    guard.shutdown(Duration::from_secs(5))?;  // the one bounded final shutdown
     Ok(())
 }
 ```
 
-The record mapping, the label sanitizer, the emit semantics and the full error
-inventory are documented in [`docs/mapping.md`](docs/mapping.md).
+The record mapping, the label sanitizer, the field-key rules, the submission
+semantics, the lifecycle/control contract and the full error inventory are
+documented in [`docs/mapping.md`](docs/mapping.md).
+
+## Public contract
+
+This is the contract `sc-observability` adopts without a second public-API
+redesign (review finding R-A4-005):
+
+| Type | Role |
+|---|---|
+| `LogGuard` | Sole lifecycle owner. Not `Clone`. `shutdown(timeout)` is the one final shutdown; `Drop` is a fallback. |
+| `LogControl` | `Clone`, `Send + Sync`, non-owning: `flush(timeout)`, `health()`, `active_log_path() -> Option<PathBuf>`, `submit(StructuredRecord)`. Cannot shut down, cannot become a `LogGuard`. |
+| `StructuredRecord` | What a producer controls: `level`, `target`, `action`, `message`, `fields`. |
+| `SubmitOutcome` / `SubmitError` | `accepted` / `filtered`, or one tagged rejection (queue full, invalid input, stopped lifecycle, reentrancy, writer degraded, backend shutdown timeout, contained panic) with `code()`, `remediation()` and `drop_cause()`. |
+| `BridgeHealthReport` | Versioned, serializable health snapshot (lifecycle, writer, queue, sinks, last errors, drop counters). |
+| `FailureReport` | Versioned, serializable projection of any error (`report()` on `InitError`, `FlushError`, `ShutdownError`, `SubmitError`). |
+
+Compile-time proofs that neither `LogGuard` nor `LogControl` can become a second
+shutdown owner live in `tests/ui/log_guard_not_clone.rs`,
+`tests/ui/log_control_not_owner.rs` and `tests/ui/log_control_not_constructible.rs`;
+every exported signature is pinned by `tests/api_freeze.rs`.
 
 ## Install once
 
-`log::set_boxed_logger` can succeed once per process and the `log` crate has no
-uninstall API. A second `init` returns `InitError::AlreadyInitialized`, whether
-the first guard is alive or already shut down. If another `log::Log` (for example
-`tauri-plugin-log`) is installed first, `init` returns
-`InitError::ForeignLoggerInstalled`.
+`init` installs a **process-global** logger. `log::set_boxed_logger` can succeed
+once per process and the `log` crate has no uninstall API. A second `init`
+returns `InitError::AlreadyInitialized`, whether the first guard is alive or
+already shut down, and after shutdown no other `log::Log` can be installed
+either: a stopped bridge stays stopped until the process exits
+(`tests/reinstall_subprocess.rs` proves this in a child process). If another
+`log::Log` (for example `tauri-plugin-log`) is installed first, `init` returns
+`InitError::ForeignLoggerInstalled`. Every `LogControl` refers to this one
+installation.
 
 In tests, each integration test file that calls `init` is its own process and
 contains exactly one `#[test]` fn.
@@ -57,9 +91,40 @@ contains exactly one `#[test]` fn.
 
 `log::logger().flush()` does nothing. `log::Log::flush` has no timeout and no
 error channel, and sc-observability's flush is unbounded, so delegating to it
-would let any caller hang. Call `LogGuard::flush(timeout)` instead.
+would let any caller hang. Call `LogControl::flush(timeout)` (or
+`LogGuard::flush(timeout)`) instead.
 `LogGuard::shutdown(timeout)` and `Drop for LogGuard` (with
 `DEFAULT_DROP_SHUTDOWN_TIMEOUT`) are bounded the same way.
+
+A flush runs on a helper thread. If the timeout elapses first, `flush` returns
+`FlushError::TimedOut` and the helper stays detached until sc-observability's
+flush returns. Only one flush helper exists at a time: while it is still
+running (for example behind a sink stuck on a hung disk), a further `flush`
+returns `FlushError::InProgress` (`SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS`)
+immediately and starts no thread, so retries cannot pile up helper threads.
+Wait until `health().helpers.flush_in_flight` is false, then retry.
+
+### One lifecycle owner
+
+`LogGuard` is not `Clone`, and it has exactly one owner: the code that performs
+the final `shutdown` and records its `Result`. Do not share the guard (for
+example through an `Arc`) with code that only needs to flush, read health or
+submit: a clone that outlives the owner turns shutdown into `Drop` on whichever
+thread releases the last clone, with the outcome discarded. Hand such code a
+`LogControl` (`LogGuard::control()`) instead. `LogControl::flush(timeout)` is
+bounded like `LogGuard::flush`; if the owner shuts down concurrently, a flush
+already in progress completes and shutdown waits for it within its own timeout,
+and a flush requested after shutdown started returns `FlushError::ShutDown`.
+
+### Timeout versus final stop
+
+`shutdown(timeout)` waits at most `timeout`. If the logger is still in use at
+the deadline (a detached flush, or a submission blocked in a sink or redactor),
+it returns `ShutdownError::TimedOut` and the health lifecycle is
+`shutdown_timed_out`: records are no longer accepted, but the shutdown is not
+final. A detached helper completes it as soon as the logger is free, stores the
+final health report and sets the lifecycle to `stopped`. `stopped` is final.
+`tests/shutdown_timeout.rs` observes that transition.
 
 `Drop for LogGuard` has no `Result` to hand back to a caller, so it discards
 the outcome of its flush-and-shutdown sequence (`let _ = ..`). An implicit
@@ -67,6 +132,92 @@ teardown failure (timeout, final-flush error or a lost helper thread) is
 therefore silent. Call `LogGuard::shutdown(timeout)` explicitly, and act on
 its `Result`, whenever the outcome matters (for example at a controlled
 process exit).
+
+## Health
+
+`LogControl::health()` (and `LogGuard::health()`) returns a read-only
+`BridgeHealthReport`: bridge lifecycle (`running` / `shutting_down` /
+`shutdown_timed_out` / `stopped`), aggregate state, writer
+state, queue depth, capacity and high-water mark, the last writer error and
+last error (each with its stable `ErrorCode` and a `Remediation`), file-sink
+status with the active JSONL path, console-sink status, and the dropped-event
+counters, and the helper threads (`helpers.flush_in_flight`, and
+`helpers.detached`: flush and shutdown helpers still running after their
+caller's timeout). It never blocks on I/O and never panics, and it can be
+called from any thread. The bridge does not log helper timeouts itself;
+health is the channel.
+
+`LogControl::health()` keeps working after shutdown and then reports
+`lifecycle: stopped`, `state: unavailable` and the final health of the stopped
+logger.
+
+Every health type is `serde`-serializable. States are `snake_case` string
+enums and the shape is versioned by `BRIDGE_HEALTH_SCHEMA_VERSION` (carried as
+`schema_version`), so generated bindings never parse free-form text. Field
+semantics and the code-to-remediation table are in
+[`docs/mapping.md`](docs/mapping.md#health).
+
+## Structured submission
+
+`LogControl::submit(StructuredRecord)` writes one record through the installed
+writer without blocking. The producer supplies only `level`, `target`,
+`action`, `message` and `fields`; the bridge owns the envelope version,
+timestamp, service name, process identity, trace context, redaction and sink
+routing, and a deserialized request naming any other key is rejected. It
+returns `Ok(SubmitOutcome::Accepted)`, `Ok(SubmitOutcome::Filtered)` (below
+`LoggerConfig.level`, nothing counted) or a `SubmitError` that has already been
+counted under exactly one `DropCause`. Invalid input (an empty action, an empty
+or reserved field key) rejects the whole request instead of writing a repaired
+record.
+
+The `log` facade and the event macros keep their unit return: they run the
+same guarded core and discard the result after the same accounting.
+
+## Serializable contracts
+
+`BridgeHealthReport` (`BRIDGE_HEALTH_SCHEMA_VERSION`), `StructuredRecord`,
+`SubmitOutcome`, `SubmitError` and `FailureReport` (`CONTROL_SCHEMA_VERSION`)
+are plain serde data meant for generated TypeScript and Python bindings:
+`snake_case` tagged discriminants, stable `ErrorCode` strings and `Remediation`
+objects, no ownership handles, and nothing to parse out of a display string.
+
+## Field keys
+
+Every producer shares one sanitizer and the reserved prefix
+`sc_observability_log.`. Crate-owned keys (`code.*` on `log` records,
+`duration_ms` / `return` / `error` on `#[instrument]` completion events) always
+win, and a displaced user value is preserved under
+`sc_observability_log.shadowed_fields`. A reserved or empty key is a compile
+error for literal macro keys, an omitted-and-counted field for runtime keys on
+the facade and macros, and an `InvalidInput` rejection for `submit`. See
+[`docs/mapping.md`](docs/mapping.md#field-keys).
+
+## Review hardening rationale
+
+The bridge is intended to become the shared Rust core for BTIT now and for
+future TypeScript and Python consumers after it moves into
+`sc-observability`. Three details therefore need an explicit, uniform contract
+rather than producer-specific implementation accidents:
+
+- **A timeout stays bounded.** The helper sends its result before it marks
+  itself complete. If a timeout and completion race, the caller performs only a
+  non-blocking receive; it never turns an elapsed timeout into an unbounded
+  wait for a descheduled helper. This keeps `flush`, `shutdown`, and application
+  exit honest about their supplied budget while preserving the late-completion
+  health accounting.
+- **A field has one wire name.** Literal macros, runtime macro keys, facade
+  key-values, and `LogControl::submit` all store `field_key_label`'s sanitized
+  key. Values that collide after normalization use the existing deterministic
+  last-write-wins rule. A field such as `a b` is consequently always emitted as
+  `a_b`, not as two different JSON shapes depending on which API produced it.
+  That stability is essential for generated binding types and downstream
+  queries.
+- **Automatic identity identifies the machine and process.** `Auto` resolves a
+  non-empty OS hostname and the current PID once at initialization; it reports
+  a typed `IdentityResolution` error if that cannot be done. Caching avoids a
+  per-event system lookup, while hostname-plus-PID lets consumers distinguish
+  otherwise identical services on different hosts without allowing producers
+  to spoof envelope identity.
 
 ## Lockstep and `__private` policy
 
@@ -90,11 +241,18 @@ dropped event is counted under exactly one `DropCause`, readable with
 
 - `QueueFull`, `InvalidEvent`, `WriterDegraded`, `ShutdownTimedOut`: the matching
   sc-observability `TryLogError`.
-- `NotInstalled`: a record before `init` or after shutdown.
-- `LoggerPanicked`: a panic inside sc-observability `try_log`, contained with
-  `std::panic::catch_unwind`.
-- `ReentrantEmit`: a record logged from a panic hook, sink or redactor that runs
-  inside the logger.
+- `NotInstalled`: a record after shutdown took the logger, or a structured
+  submission once the lifecycle is no longer running.
+- `LoggerPanicked`: a panic inside the emit guard, contained with
+  `std::panic::catch_unwind`: in sc-observability `try_log`, or in a `log`
+  record's own `Display`/`Debug` formatting (message arguments or a key-value).
+- `ReentrantEmit`: a record logged or submitted while the guard is active on the
+  same thread: from a formatter of the record being emitted, a panic hook, a
+  sink or a redactor.
+
+For a `log` record, the guard is entered exactly once and covers the slot read,
+target/action labelling, message and key-value rendering, event assembly,
+redaction and `try_log`; only the lock-free level check runs before it.
 
 ### Residual: `panic = "abort"`
 
@@ -119,9 +277,12 @@ for a future sprint if event or field sizes prove to be a real-world problem.
 ## Process identity
 
 sc-observability 1.2.0 stores `LoggerConfig.process_identity` but never applies
-it, so `init` resolves it once: `Auto` records the current pid (no hostname),
-`Fixed` is used as given, and `Resolver` failures fail `init` with
-`InitError::IdentityResolution`.
+it, so `init` resolves it once: `Auto` resolves a non-empty OS hostname plus the
+current PID, `Fixed` is used as given, and `Resolver` runs the resolver. A
+failing resolver, or an `Auto` hostname lookup that fails or returns an empty
+hostname, fails `init` with the retryable `InitError::IdentityResolution`
+(`SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED`), whose remediation names the
+failing path.
 
 ## License
 

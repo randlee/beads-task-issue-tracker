@@ -10,23 +10,28 @@
 //! sc-observability-log bridge wiring: install, exit shutdown, and the log commands.
 //!
 //! The active log file is `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`
-//! (`LogGuard::active_log_path`, captured once at [`install_logging`]). Every
-//! entry point that touches the process-wide guard — [`install_logging`],
-//! [`on_run_event`] and [`clear_logs`] — takes or clones the `Arc` and releases
-//! the `LOG_GUARD` lock before doing any I/O, so no code path holds the lock
-//! across a flush or a shutdown.
+//! (`LogGuard::active_log_path`, captured once at [`install_logging`]). The guard
+//! has exactly one owner, the static [`LOGGING`] lifecycle (see
+//! [`lifecycle`]): [`install_logging`] hands the guard to it, [`clear_logs`]
+//! flushes through a non-owning `LogControl` and is serialized with exit, and
+//! [`on_run_event`] performs the single final shutdown on `RunEvent::Exit`. No
+//! code path holds the lifecycle lock across a flush, a shutdown or file I/O.
+
+mod lifecycle;
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use sc_observability_log::{
-    init, ActionName, BridgeOptions, DropCause, LevelFilter, LogGuard, LoggerConfig, ServiceName,
+    init, ActionName, BridgeOptions, ErrorCode, FlushError, LevelFilter, LogGuard, LoggerConfig,
+    Remediation, ServiceName,
 };
 use tauri::Manager;
+
+use lifecycle::{ExitOutcome, LogLifecycle};
 
 // Global flags for logging
 pub(crate) static LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -69,10 +74,14 @@ macro_rules! log_debug {
 // Bridge lifecycle
 // ============================================================================
 
-static LOG_GUARD: Mutex<Option<Arc<LogGuard>>> = Mutex::new(None);
+/// The single owner of the process-wide `LogGuard`.
+static LOGGING: LogLifecycle<LogGuard> = LogLifecycle::new();
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// Bound on every blocking bridge call this module makes (`flush`/`shutdown`).
+/// Bound on every blocking bridge call this module makes: one `flush` in
+/// `clear_logs`, the wait for another clear's write slot, and the whole exit
+/// sequence (waiting for an in-progress clear plus the final `shutdown`). Two seconds keeps quit responsive while leaving
+/// the writer time to drain a normal queue.
 const LOG_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Installs the sc-observability-log bridge as the process-wide `log` logger.
@@ -105,57 +114,57 @@ pub(crate) fn install_logging(app: &tauri::App) -> Result<(), Box<dyn std::error
     if let Some(path) = guard.active_log_path() {
         let _ = LOG_PATH.set(path.to_path_buf());
     }
-    *LOG_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(guard));
+    LOGGING.install(guard, LOG_IO_TIMEOUT)?;
     Ok(())
 }
 
 /// Runs on every Tauri run-loop event; only `RunEvent::Exit` does anything.
 ///
-/// Takes the guard out of `LOG_GUARD` and releases the lock in the same
-/// statement, so exit never waits behind a `clear_logs` flush. Logs one `warn`
-/// with the per-`DropCause` counts when any events were dropped, then makes
-/// exactly one bounded call: `shutdown` when this is the sole owner, otherwise
-/// `flush` on the still-shared clone (a `clear_logs` flush holds the other
-/// clone at that instant). Either branch is bounded by 1x `LOG_IO_TIMEOUT`.
+/// Delegates to [`LogLifecycle::exit`](lifecycle::LogLifecycle::exit): the
+/// guard's single final shutdown, bounded by 1x `LOG_IO_TIMEOUT` in total even
+/// while `clear_logs` is flushing or truncating. The shutdown result is
+/// reported here: a failure is written to stderr (the logger is gone, and
+/// `eprintln!` panics on a closed stream). A repeated `Exit` does nothing.
 pub(crate) fn on_run_event(_app: &tauri::AppHandle, event: &tauri::RunEvent) {
     if !matches!(event, tauri::RunEvent::Exit) {
         return;
     }
-    let taken = LOG_GUARD
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-    let Some(shared) = taken else {
-        return;
-    };
-    let dropped = shared.dropped_events();
-    if dropped.total() > 0 {
-        let summary: Vec<String> = DropCause::ALL
-            .iter()
-            .filter(|cause| dropped.get(**cause) > 0)
-            .map(|cause| format!("{cause:?}={}", dropped.get(*cause)))
-            .collect();
-        log::warn!("[logging] dropped events: {}", summary.join(", "));
-    }
-    match Arc::try_unwrap(shared) {
-        Ok(guard) => {
-            if let Err(e) = guard.shutdown(LOG_IO_TIMEOUT) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "beads-task-issue-tracker: log shutdown failed: {e:?}"
-                );
-            }
+    report_exit(&LOGGING.exit(LOG_IO_TIMEOUT));
+}
+
+/// Stable code written by [`report_exit`] for [`ExitOutcome::ShutDownWhileClearWriting`].
+const EXIT_CLEAR_STILL_WRITING: &str = "BTIT_LOG_EXIT_CLEAR_STILL_WRITING";
+
+/// Writes a failed or degraded final shutdown to stderr; a clean or no-op exit is silent.
+///
+/// The logger is gone by now, so stderr is the only channel (`writeln!` is used
+/// because `eprintln!` panics on a closed stream).
+fn report_exit(outcome: &ExitOutcome) {
+    let _ = write_exit_report(&mut std::io::stderr(), outcome);
+}
+
+fn write_exit_report(out: &mut impl std::io::Write, outcome: &ExitOutcome) -> std::io::Result<()> {
+    match outcome {
+        ExitOutcome::ShutDown { result: Err(e) } => writeln!(
+            out,
+            "beads-task-issue-tracker: log shutdown failed [{}]: {e}",
+            e.code()
+        ),
+        ExitOutcome::ShutDownWhileClearWriting { result } => {
+            let shutdown = match result {
+                Ok(()) => "ok".to_owned(),
+                Err(e) => format!("failed [{}]: {e}", e.code()),
+            };
+            writeln!(
+                out,
+                "beads-task-issue-tracker: [{EXIT_CLEAR_STILL_WRITING}] exit budget ran out while \
+                 clear_logs was still writing; the at-exit health records were skipped and the \
+                 final log records may be truncated (shutdown {shutdown})"
+            )
         }
-        // A clear_logs flush holds the other clone: flush once instead (still
-        // bounded by 1x LOG_IO_TIMEOUT). Shutdown cannot consume a shared guard.
-        Err(shared) => {
-            if let Err(e) = shared.flush(LOG_IO_TIMEOUT) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "beads-task-issue-tracker: log flush at exit failed: {e:?}"
-                );
-            }
-        }
+        ExitOutcome::ShutDown { result: Ok(()) }
+        | ExitOutcome::NotInstalled
+        | ExitOutcome::AlreadyShutDown => Ok(()),
     }
 }
 
@@ -192,53 +201,269 @@ pub(crate) async fn set_verbose_logging(enabled: bool) {
 
 #[tauri::command]
 pub(crate) async fn clear_logs() -> Result<(), String> {
-    // Clone the Arc and release the lock before flushing: an exit that arrives
-    // during the flush takes the guard at once and stays bounded by
-    // 1x LOG_IO_TIMEOUT. The clone (not the lock) is moved into the blocking
-    // closure, so LOG_GUARD is never held across the flush or the file I/O
-    // below.
-    let shared = LOG_GUARD
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
+    // The lifecycle hands out a non-owning control, never the guard, and rejects
+    // the clear once exit has begun; see `lifecycle` for the serialization.
     let log_path = get_log_path();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(guard) = shared {
-            guard
-                .flush(LOG_IO_TIMEOUT)
-                .map_err(|e| format!("Failed to flush logs: {e}"))?;
-        } // None: logger not installed (before setup) or already taken at exit — no flush.
-        if log_path.as_os_str().is_empty() || !log_path.exists() {
-            return Ok(());
-        }
-        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {e}"))?;
-        remove_rotated_logs(&log_path)?;
+        LOGGING
+            .clear(
+                &log_path,
+                LOG_IO_TIMEOUT,
+                |control| control.flush(LOG_IO_TIMEOUT),
+                read_log_dir,
+            )
+            .map_err(|e| report_clear_error(&e))?;
         log_info!("[debug] Logs cleared");
         Ok(())
     })
     .await
-    .map_err(|e| format!("Failed to clear logs: {e}"))?
+    .map_err(|e| {
+        report_clear_error(&ClearError::TaskFailed {
+            reason: e.to_string(),
+        })
+    })?
+}
+
+/// Logs a failed clear with its code and remediation, and returns the command's error string.
+///
+/// After `ShutdownStarted` the record is filtered by the stopping logger, which is fine:
+/// the frontend still receives the coded string.
+fn report_clear_error(error: &ClearError) -> String {
+    let code = error.code();
+    let remediation = serde_json::to_string(&error.remediation()).unwrap_or_default();
+    log_warn!(
+        code = code.as_str(), remediation = remediation.as_str();
+        "[debug] Logs not cleared: {error}"
+    );
+    error.command_message()
+}
+
+/// Stable `ClearError` codes; the `clear_logs` command's `Err(String)` starts with one.
+pub(crate) mod clear_error_codes {
+    use sc_observability_log::ErrorCode;
+
+    /// `ClearError::ShutdownStarted`.
+    pub(crate) const SHUTDOWN_STARTED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_SHUTDOWN_STARTED");
+    /// `ClearError::WriteSlotTimedOut`.
+    pub(crate) const WRITE_SLOT_TIMED_OUT: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_WRITE_SLOT_TIMED_OUT");
+    /// `ClearError::Flush`.
+    pub(crate) const FLUSH_FAILED: ErrorCode = ErrorCode::new_static("BTIT_LOG_CLEAR_FLUSH_FAILED");
+    /// `ClearError::Truncate`.
+    pub(crate) const TRUNCATE_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_TRUNCATE_FAILED");
+    /// `ClearError::ListDir`.
+    pub(crate) const LIST_DIR_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_LIST_DIR_FAILED");
+    /// `ClearError::ReadDirEntry`.
+    pub(crate) const READ_DIR_ENTRY_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_READ_DIR_ENTRY_FAILED");
+    /// `ClearError::RemoveRotated`.
+    pub(crate) const REMOVE_ROTATED_FAILED: ErrorCode =
+        ErrorCode::new_static("BTIT_LOG_CLEAR_REMOVE_ROTATED_FAILED");
+    /// `ClearError::TaskFailed`.
+    pub(crate) const TASK_FAILED: ErrorCode = ErrorCode::new_static("BTIT_LOG_CLEAR_TASK_FAILED");
+}
+
+/// Why `clear_logs` failed.
+///
+/// Each variant has a stable [`ClearError::code`] and a [`ClearError::remediation`],
+/// mirroring the `sc-observability-log` error enums. The command returns
+/// [`ClearError::command_message`], `"<CODE>: <message>"`, so the frontend can
+/// match on the code prefix without parsing the message.
+#[derive(Debug)]
+pub(crate) enum ClearError {
+    /// Exit has begun: nothing was flushed or removed, so the final records survive.
+    ShutdownStarted,
+    /// Another clear still held the write slot after the timeout; no file was touched.
+    WriteSlotTimedOut { timeout: Duration },
+    /// The bounded flush before clearing failed; no file was touched.
+    ///
+    /// All flush causes share `BTIT_LOG_CLEAR_FLUSH_FAILED`; the message carries the
+    /// source's own code (for example `SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS` when an
+    /// earlier clear's flush is still stuck on its detached helper).
+    Flush { source: FlushError },
+    /// Truncating the active JSONL file failed.
+    Truncate { source: std::io::Error },
+    /// The log directory could not be opened for listing.
+    ListDir { source: std::io::Error },
+    /// One directory entry could not be read while listing.
+    ReadDirEntry { source: std::io::Error },
+    /// A rotated `<active>.<N>` file could not be removed.
+    RemoveRotated {
+        file_name: String,
+        source: std::io::Error,
+    },
+    /// The blocking clear task could not run to completion (it panicked or was cancelled).
+    TaskFailed { reason: String },
+}
+
+impl ClearError {
+    /// Stable code per variant (`BTIT_LOG_CLEAR_*`).
+    pub(crate) fn code(&self) -> ErrorCode {
+        match self {
+            Self::ShutdownStarted => clear_error_codes::SHUTDOWN_STARTED,
+            Self::WriteSlotTimedOut { .. } => clear_error_codes::WRITE_SLOT_TIMED_OUT,
+            Self::Flush { .. } => clear_error_codes::FLUSH_FAILED,
+            Self::Truncate { .. } => clear_error_codes::TRUNCATE_FAILED,
+            Self::ListDir { .. } => clear_error_codes::LIST_DIR_FAILED,
+            Self::ReadDirEntry { .. } => clear_error_codes::READ_DIR_ENTRY_FAILED,
+            Self::RemoveRotated { .. } => clear_error_codes::REMOVE_ROTATED_FAILED,
+            Self::TaskFailed { .. } => clear_error_codes::TASK_FAILED,
+        }
+    }
+
+    /// Mandatory remediation per variant.
+    pub(crate) fn remediation(&self) -> Remediation {
+        match self {
+            Self::ShutdownStarted => Remediation::not_recoverable(
+                "the app is quitting; the logs are kept so the final records survive",
+            ),
+            Self::WriteSlotTimedOut { .. } => Remediation::recoverable(
+                "wait for the other clear to finish, then clear again",
+                ["check that the log directory's disk is responsive"],
+            ),
+            Self::Flush {
+                source: FlushError::InProgress,
+            } => Remediation::recoverable(
+                "wait for the previous flush to finish, then retry the clear; no file was touched",
+                ["check that the log directory's disk is responsive"],
+            ),
+            Self::Flush { source } => Remediation::recoverable(
+                "retry the clear; no file was touched",
+                [format!(
+                    "inspect the logger health: flush failed with {}",
+                    source.code()
+                )],
+            ),
+            Self::Truncate { .. } => Remediation::recoverable(
+                "check that the active log file is writable and not locked by another process",
+                ["retry the clear"],
+            ),
+            Self::ListDir { .. } | Self::ReadDirEntry { .. } => Remediation::recoverable(
+                "check the permissions of the log directory",
+                ["retry the clear; rotated log files may remain until it succeeds"],
+            ),
+            Self::RemoveRotated { .. } => Remediation::recoverable(
+                "check that the rotated log file is not locked and its directory is writable",
+                ["retry the clear"],
+            ),
+            Self::TaskFailed { .. } => Remediation::recoverable(
+                "retry the clear",
+                ["report the failure with the app log if it repeats"],
+            ),
+        }
+    }
+
+    /// The command's error string: `"<CODE>: <message>"`.
+    pub(crate) fn command_message(&self) -> String {
+        format!("{}: {self}", self.code())
+    }
+}
+
+impl std::fmt::Display for ClearError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShutdownStarted => f.write_str("Logs were not cleared: logging is shutting down"),
+            Self::WriteSlotTimedOut { timeout } => write!(
+                f,
+                "Logs were not cleared: another clear was still writing after {timeout:?}"
+            ),
+            Self::Flush { source } => {
+                write!(f, "Failed to flush logs [{}]: {source}", source.code())
+            }
+            Self::Truncate { source } => write!(f, "Failed to clear logs: {source}"),
+            Self::ListDir { source } => write!(f, "Failed to list log dir: {source}"),
+            Self::ReadDirEntry { source } => write!(f, "Failed to read log dir entry: {source}"),
+            Self::RemoveRotated { file_name, source } => {
+                write!(f, "Failed to remove rotated log {file_name}: {source}")
+            }
+            Self::TaskFailed { reason } => write!(f, "Failed to clear logs: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for ClearError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ShutdownStarted | Self::WriteSlotTimedOut { .. } | Self::TaskFailed { .. } => {
+                None
+            }
+            Self::Flush { source } => Some(source),
+            Self::Truncate { source }
+            | Self::ListDir { source }
+            | Self::ReadDirEntry { source }
+            | Self::RemoveRotated { source, .. } => Some(source),
+        }
+    }
+}
+
+/// One directory entry, as `remove_rotated_logs` needs it.
+#[derive(Debug)]
+struct LogDirEntry {
+    file_name: std::ffi::OsString,
+    path: PathBuf,
+}
+
+/// Lists `dir` with `fs::read_dir`; the production reader for [`clear_log_files`].
+fn read_log_dir(dir: &Path) -> std::io::Result<impl Iterator<Item = std::io::Result<LogDirEntry>>> {
+    Ok(fs::read_dir(dir)?.map(|entry| {
+        entry.map(|entry| LogDirEntry {
+            file_name: entry.file_name(),
+            path: entry.path(),
+        })
+    }))
+}
+
+/// Truncates the active file and deletes its rotated siblings.
+///
+/// A missing or empty `log_path` is a no-op. `list_dir` is the directory reader
+/// (`read_log_dir` in production; tests inject entry errors).
+fn clear_log_files<I>(
+    log_path: &Path,
+    list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<(), ClearError>
+where
+    I: IntoIterator<Item = std::io::Result<LogDirEntry>>,
+{
+    if log_path.as_os_str().is_empty() || !log_path.exists() {
+        return Ok(());
+    }
+    fs::write(log_path, "").map_err(|source| ClearError::Truncate { source })?;
+    remove_rotated_logs(log_path, list_dir)
 }
 
 /// Deletes `<active file name>.<N>` siblings, the names sc-observability rotates to.
-fn remove_rotated_logs(active: &Path) -> Result<(), String> {
+///
+/// Every entry result is checked: an entry that cannot be read fails the clear
+/// with [`ClearError::ReadDirEntry`] instead of being skipped.
+fn remove_rotated_logs<I>(
+    active: &Path,
+    list_dir: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<(), ClearError>
+where
+    I: IntoIterator<Item = std::io::Result<LogDirEntry>>,
+{
     let (Some(dir), Some(name)) = (active.parent(), active.file_name().and_then(|n| n.to_str()))
     else {
         return Ok(());
     };
     let prefix = format!("{name}.");
-    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to list log dir: {e}"))?;
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(candidate) = file_name.to_str() else {
-            continue;
+    let entries = list_dir(dir).map_err(|source| ClearError::ListDir { source })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| ClearError::ReadDirEntry { source })?;
+        let Some(candidate) = entry.file_name.to_str() else {
+            continue; // rotated names are always UTF-8 (`<active>.<N>`)
         };
         let is_rotated = candidate
             .strip_prefix(prefix.as_str())
             .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()));
         if is_rotated {
-            fs::remove_file(entry.path())
-                .map_err(|e| format!("Failed to remove rotated log {candidate}: {e}"))?;
+            fs::remove_file(&entry.path).map_err(|source| ClearError::RemoveRotated {
+                file_name: candidate.to_owned(),
+                source,
+            })?;
         }
     }
     Ok(())
@@ -332,7 +557,7 @@ mod tests {
     /// (returning `Result` from a `#[test]` fn) rather than panicking, so this
     /// module stays clean under the repo's no-panic grep check.
     #[derive(Debug)]
-    struct TestError(String);
+    pub(super) struct TestError(pub(super) String);
 
     impl std::fmt::Display for TestError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -353,10 +578,10 @@ mod tests {
     }
 
     /// Unique scratch directory under `std::env::temp_dir()`, removed on drop.
-    struct ScratchDir(PathBuf);
+    pub(super) struct ScratchDir(PathBuf);
 
     impl ScratchDir {
-        fn new(label: &str) -> Result<Self, TestError> {
+        pub(super) fn new(label: &str) -> Result<Self, TestError> {
             // Path-safe on every OS: `Instant`'s Debug output contains `:` and
             // braces, which Windows rejects in directory names (os error 267).
             static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -370,7 +595,7 @@ mod tests {
             Ok(Self(dir))
         }
 
-        fn path(&self) -> &Path {
+        pub(super) fn path(&self) -> &Path {
             &self.0
         }
     }
@@ -396,7 +621,7 @@ mod tests {
 
     #[tokio::test]
     async fn clear_logs_is_a_noop_when_no_guard_and_no_existing_file() {
-        // LOG_GUARD is None (install_logging never ran) and get_log_path() is
+        // LOGGING is Uninstalled (install_logging never ran) and get_log_path() is
         // empty, so clear_logs must return Ok(()) without touching the filesystem.
         assert_eq!(clear_logs().await, Ok(()));
     }
@@ -404,6 +629,110 @@ mod tests {
     #[tokio::test]
     async fn export_logs_reports_an_error_when_no_path_is_set() {
         assert!(export_logs().await.is_err());
+    }
+
+    fn every_clear_error() -> Vec<ClearError> {
+        vec![
+            ClearError::ShutdownStarted,
+            ClearError::WriteSlotTimedOut {
+                timeout: LOG_IO_TIMEOUT,
+            },
+            ClearError::Flush {
+                source: FlushError::ShutDown,
+            },
+            ClearError::Truncate {
+                source: std::io::Error::other("truncate"),
+            },
+            ClearError::ListDir {
+                source: std::io::Error::other("list"),
+            },
+            ClearError::ReadDirEntry {
+                source: std::io::Error::other("entry"),
+            },
+            ClearError::RemoveRotated {
+                file_name: "app.log.jsonl.1".to_owned(),
+                source: std::io::Error::other("remove"),
+            },
+            ClearError::TaskFailed {
+                reason: "cancelled".to_owned(),
+            },
+        ]
+    }
+
+    /// RBP-F001: every variant has a unique stable code and a non-empty remediation.
+    #[test]
+    fn clear_error_codes_are_stable_and_remediations_non_empty() {
+        let errors = every_clear_error();
+        let mut codes = std::collections::HashSet::new();
+        for error in &errors {
+            let code = error.code();
+            assert!(code.as_str().starts_with("BTIT_LOG_CLEAR_"), "{code}");
+            assert!(codes.insert(code.as_str().to_owned()), "duplicate {code}");
+            match error.remediation() {
+                Remediation::Recoverable { steps } => {
+                    assert!(!steps.steps().is_empty());
+                    assert!(steps.steps().iter().all(|step| !step.is_empty()));
+                }
+                Remediation::NotRecoverable { justification } => {
+                    assert!(!justification.is_empty());
+                }
+            }
+            let message = error.command_message();
+            assert!(
+                message.starts_with(&format!("{code}: ")),
+                "the command string leads with the code: {message}"
+            );
+        }
+        assert_eq!(codes.len(), errors.len());
+        assert_eq!(
+            ClearError::ShutdownStarted.command_message(),
+            "BTIT_LOG_CLEAR_SHUTDOWN_STARTED: Logs were not cleared: logging is shutting down"
+        );
+    }
+
+    /// QA-2 RSH-004: a clear retried behind a stuck flush keeps the clear code and names the cause.
+    #[test]
+    fn clear_behind_a_flush_in_progress_reports_the_source_code() -> Result<(), TestError> {
+        let error = ClearError::Flush {
+            source: FlushError::InProgress,
+        };
+        assert_eq!(error.code(), clear_error_codes::FLUSH_FAILED);
+        assert_eq!(
+            error.command_message(),
+            "BTIT_LOG_CLEAR_FLUSH_FAILED: Failed to flush logs \
+             [SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS]: a previous flush is still running; \
+             no new flush was started"
+        );
+        let Remediation::Recoverable { steps } = error.remediation() else {
+            return Err(TestError("expected a recoverable remediation".to_owned()));
+        };
+        assert!(steps
+            .steps()
+            .first()
+            .is_some_and(|step| step.contains("wait for the previous flush")));
+        Ok(())
+    }
+
+    /// RSH-001: the degraded exit is reported with its stable code.
+    #[test]
+    fn exit_report_names_the_degraded_clear_case() -> Result<(), TestError> {
+        let mut out = Vec::new();
+        write_exit_report(
+            &mut out,
+            &ExitOutcome::ShutDownWhileClearWriting { result: Ok(()) },
+        )?;
+        let text = String::from_utf8(out).map_err(|e| TestError(e.to_string()))?;
+        assert!(
+            text.contains("[BTIT_LOG_EXIT_CLEAR_STILL_WRITING]"),
+            "{text}"
+        );
+        assert!(text.contains("(shutdown ok)"), "{text}");
+
+        let mut silent = Vec::new();
+        write_exit_report(&mut silent, &ExitOutcome::ShutDown { result: Ok(()) })?;
+        write_exit_report(&mut silent, &ExitOutcome::AlreadyShutDown)?;
+        assert!(silent.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -420,7 +749,7 @@ mod tests {
             .join("beads-task-issue-tracker.log.jsonl.bak");
         fs::write(&unrelated, "kept")?;
 
-        remove_rotated_logs(&active)?;
+        remove_rotated_logs(&active, read_log_dir).map_err(|e| e.to_string())?;
 
         assert!(active.exists(), "the active file must not be removed");
         assert!(!rotated_one.exists(), "rotated.1 must be removed");
@@ -438,8 +767,64 @@ mod tests {
         let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
         fs::write(&active, "active")?;
 
-        assert_eq!(remove_rotated_logs(&active), Ok(()));
+        remove_rotated_logs(&active, read_log_dir).map_err(|e| e.to_string())?;
         assert!(active.exists());
+        Ok(())
+    }
+
+    /// R-A4-002: an unreadable directory entry fails the clear instead of being skipped.
+    #[test]
+    fn clear_log_files_reports_a_directory_entry_error() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("entry-error")?;
+        let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
+        fs::write(&active, "active")?;
+        let rotated = scratch.path().join("beads-task-issue-tracker.log.jsonl.1");
+        fs::write(&rotated, "rotated")?;
+        let left_behind = scratch.path().join("beads-task-issue-tracker.log.jsonl.2");
+        fs::write(&left_behind, "rotated")?;
+        let rotated_entry = LogDirEntry {
+            file_name: "beads-task-issue-tracker.log.jsonl.1".into(),
+            path: rotated.clone(),
+        };
+        let failing_reader = move |_: &Path| -> std::io::Result<Vec<std::io::Result<LogDirEntry>>> {
+            Ok(vec![
+                Ok(rotated_entry),
+                Err(std::io::Error::other("injected entry failure")),
+            ])
+        };
+
+        let result = clear_log_files(&active, failing_reader);
+
+        let Err(ClearError::ReadDirEntry { source }) = result else {
+            return Err(TestError(format!("expected ReadDirEntry, got {result:?}")));
+        };
+        assert_eq!(source.to_string(), "injected entry failure");
+        // The command's Err(String) carries the stable code and the failure to the frontend.
+        let rendered = ClearError::ReadDirEntry { source }.command_message();
+        assert_eq!(
+            rendered,
+            "BTIT_LOG_CLEAR_READ_DIR_ENTRY_FAILED: Failed to read log dir entry: injected entry failure"
+        );
+        assert!(
+            !rotated.exists(),
+            "entries before the failure are processed"
+        );
+        assert!(
+            left_behind.exists(),
+            "the clear stopped at the failing entry"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clear_log_files_reports_a_listing_error() -> Result<(), TestError> {
+        let scratch = ScratchDir::new("list-error")?;
+        let active = scratch.path().join("beads-task-issue-tracker.log.jsonl");
+        fs::write(&active, "active")?;
+        let result = clear_log_files(&active, |_: &Path| {
+            Err::<Vec<std::io::Result<LogDirEntry>>, _>(std::io::Error::other("no listing"))
+        });
+        assert!(matches!(result, Err(ClearError::ListDir { .. })));
         Ok(())
     }
 }

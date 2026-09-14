@@ -157,9 +157,12 @@ pub enum FieldRecord {
     SerializeFailed(serde_json::Error),
 }
 
-/// Inserts `record` under `key`; failures go to `null` + `sc_observability_log.serialize_errors`.
+/// Inserts `record` under the canonical `field_key_label(key)`; failures are counted and omitted.
 pub fn record_field(fields: &mut Map<String, Value>, key: &'static str, record: FieldRecord) {
-    insert_record(fields, key.to_owned(), record);
+    match field_key_label(key) {
+        Ok(clean) => insert_record(fields, clean.into_owned(), record),
+        Err(_) => record_drop(DropCause::InvalidEvent),
+    }
 }
 
 fn insert_record(fields: &mut Map<String, Value>, key: String, record: FieldRecord) {
@@ -309,6 +312,14 @@ mod tests {
         let mut fields = Map::new();
         record_dynamic_field(&mut fields, &SPACED, FieldRecord::Value(Value::from(4)));
         assert_eq!(fields.get("a_b"), Some(&Value::from(4)));
+    }
+
+    #[test]
+    fn static_fields_use_the_same_canonical_key_as_dynamic_fields() {
+        let mut fields = Map::new();
+        record_field(&mut fields, "a b", FieldRecord::Value(Value::from(4)));
+        assert_eq!(fields.get("a_b"), Some(&Value::from(4)));
+        assert!(!fields.contains_key("a b"));
     }
 
     #[test]

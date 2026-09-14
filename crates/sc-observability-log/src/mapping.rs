@@ -1,25 +1,53 @@
 //! Pure record mapping and the single phase-a label sanitizer.
 //!
 //! Nothing in this module touches global state: `record_to_parts` turns a
-//! `log::Record` into [`EventParts`], `assemble_event` completes the envelope,
-//! and the sanitizer functions turn arbitrary strings into valid
-//! `TargetCategory` / `ActionName` values and field keys. The sanitizer items are
+//! `log::Record` into [`EventParts`], `structured_to_parts` does the same for a
+//! [`StructuredRecord`], `assemble_event` completes the envelope, and the
+//! sanitizer functions turn arbitrary strings into valid `TargetCategory` /
+//! `ActionName` values and field keys. The unified field-key and collision rules
+//! shared by every producer are documented in `docs/mapping.md`, "Field keys". The sanitizer items are
 //! `pub` inside this private module so `__private` can re-export them; they are
 //! reachable from outside the crate only through `__private`.
 
 use std::borrow::Cow;
 
 use sc_observability_types::{
-    ActionName, IdentityError, Level, LogEvent, Observation, ProcessIdentity,
-    ProcessIdentityPolicy, ServiceName, TargetCategory,
+    ActionName, ErrorContext, IdentityError, Level, LogEvent, Observation, ProcessIdentity,
+    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory,
 };
 use serde_json::{Map, Value};
 
 use crate::__private::EventParts;
 use crate::BridgeOptions;
+use crate::control::StructuredRecord;
+use crate::error::InvalidInputReason;
 
 /// Field keys starting with this prefix are reserved for the bridge itself.
 pub const RESERVED_FIELD_PREFIX: &str = "sc_observability_log.";
+
+/// Reserved field holding user values displaced by a crate-owned key.
+///
+/// Crate-owned keys (`code.module` / `code.file` / `code.line` on `log`
+/// records; `duration_ms` / `return` / `error` on `#[instrument]` completion
+/// events) are always authoritative: a user field already occupying one is
+/// moved here under its original key instead of being silently overwritten.
+pub(crate) const SHADOWED_FIELDS_KEY: &str = "sc_observability_log.shadowed_fields";
+
+/// Inserts `value` at the crate-owned key `key`, which always wins.
+///
+/// Uses [`Map::insert`]'s returned `Option<Value>` to detect a collision with
+/// an existing user field; the displaced value is preserved under
+/// `fields[SHADOWED_FIELDS_KEY][key]` rather than dropped. Never panics.
+pub(crate) fn insert_authoritative(fields: &mut Map<String, Value>, key: &str, value: Value) {
+    if let Some(previous) = fields.insert(key.to_owned(), value) {
+        let shadowed = fields
+            .entry(SHADOWED_FIELDS_KEY)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(shadowed) = shadowed {
+            shadowed.insert(key.to_owned(), previous);
+        }
+    }
+}
 
 /// Which kind of label failed validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,21 +164,76 @@ pub fn field_key_label(raw: &str) -> Result<Cow<'_, str>, LabelError> {
 /// Resolves `LoggerConfig.process_identity` once, at `init`.
 ///
 /// sc-observability 1.2.0 stores the policy but never applies it, so the bridge
-/// resolves it and stamps every `LogEvent.identity` with the cached value.
+/// resolves it and stamps every `LogEvent.identity` with the cached value. Every
+/// failure carries the stable code `SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED`
+/// and a remediation for its own path; a resolver's error is kept as the source.
 pub(crate) fn resolve_identity(
     policy: &ProcessIdentityPolicy,
 ) -> Result<ProcessIdentity, IdentityError> {
     match policy {
-        ProcessIdentityPolicy::Auto => Ok(ProcessIdentity {
-            hostname: None,
-            pid: Some(std::process::id()),
-        }),
+        ProcessIdentityPolicy::Auto => resolve_auto_identity(hostname::get),
         ProcessIdentityPolicy::Fixed { hostname, pid } => Ok(ProcessIdentity {
             hostname: hostname.clone(),
             pid: *pid,
         }),
-        ProcessIdentityPolicy::Resolver(resolver) => resolver.resolve(),
+        ProcessIdentityPolicy::Resolver(resolver) => resolver.resolve().map_err(|source| {
+            IdentityError(Box::new(
+                ErrorContext::new(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+                    "the configured ProcessIdentityResolver failed",
+                    Remediation::recoverable(
+                        "fix the ProcessIdentityResolver",
+                        [
+                            "or use ProcessIdentityPolicy::Auto or Fixed",
+                            "call sc_observability_log::init again",
+                        ],
+                    ),
+                )
+                .source(Box::new(source)),
+            ))
+        }),
     }
+}
+
+/// Resolves `ProcessIdentityPolicy::Auto` with `hostname_of` (production: `hostname::get`).
+///
+/// A failed or empty hostname lookup is an error; the pid is the current process id.
+fn resolve_auto_identity(
+    hostname_of: impl FnOnce() -> std::io::Result<std::ffi::OsString>,
+) -> Result<ProcessIdentity, IdentityError> {
+    let hostname = hostname_of().map_err(|source| {
+        IdentityError(Box::new(
+            ErrorContext::new(
+                crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+                "automatic hostname resolution failed",
+                auto_hostname_remediation(),
+            )
+            .source(Box::new(source)),
+        ))
+    })?;
+    let hostname = hostname.to_string_lossy().into_owned();
+    if hostname.is_empty() {
+        return Err(IdentityError(Box::new(ErrorContext::new(
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
+            "automatic hostname resolution returned an empty hostname",
+            auto_hostname_remediation(),
+        ))));
+    }
+    Ok(ProcessIdentity {
+        hostname: Some(hostname),
+        pid: Some(std::process::id()),
+    })
+}
+
+/// Remediation for an `Auto` hostname lookup that failed or returned an empty hostname.
+fn auto_hostname_remediation() -> Remediation {
+    Remediation::recoverable(
+        "ensure the operating system resolves a non-empty hostname",
+        [
+            "or use ProcessIdentityPolicy::Fixed",
+            "call sc_observability_log::init again",
+        ],
+    )
 }
 
 pub(crate) fn map_level(level: log::Level) -> Level {
@@ -176,8 +259,13 @@ fn split_bracket_tag(message: &str) -> Option<(&str, &str)> {
 }
 
 /// Collects `log` key-values into JSON fields.
+///
+/// A key rejected by [`field_key_label`] (empty or reserved after sanitizing) is
+/// omitted and counted in `omitted`; accepted keys are stored in their canonical
+/// sanitized form, matching every other runtime producer.
 struct FieldCollector<'a> {
     fields: &'a mut Map<String, Value>,
+    omitted: u64,
 }
 
 impl<'kvs> log::kv::VisitSource<'kvs> for FieldCollector<'_> {
@@ -186,10 +274,23 @@ impl<'kvs> log::kv::VisitSource<'kvs> for FieldCollector<'_> {
         key: log::kv::Key<'kvs>,
         value: log::kv::Value<'kvs>,
     ) -> Result<(), log::kv::Error> {
+        let Ok(key) = field_key_label(key.as_str()) else {
+            self.omitted = self.omitted.saturating_add(1);
+            return Ok(());
+        };
         self.fields
-            .insert(key.as_str().to_owned(), kv_value_to_json(&value));
+            .insert(key.into_owned(), kv_value_to_json(&value));
         Ok(())
     }
+}
+
+/// A mapped `log` record plus the number of key-values omitted by the key rules.
+#[derive(Debug)]
+pub(crate) struct MappedRecord {
+    /// The call-site-controlled parts of the event.
+    pub(crate) parts: EventParts,
+    /// Key-values with an empty or reserved key; each is counted as `DropCause::InvalidEvent`.
+    pub(crate) omitted_fields: u64,
 }
 
 /// Numbers, bools and strings stay typed; everything else is rendered with `to_string()`.
@@ -219,7 +320,7 @@ fn kv_value_to_json(value: &log::kv::Value<'_>) -> Value {
 pub(crate) fn record_to_parts(
     record: &log::Record<'_>,
     options: &BridgeOptions,
-) -> Result<EventParts, LabelError> {
+) -> Result<MappedRecord, LabelError> {
     let target = target_label(record.target())?;
     let formatted = record
         .args()
@@ -236,26 +337,85 @@ pub(crate) fn record_to_parts(
     };
 
     let mut fields = Map::new();
-    let _ = record.key_values().visit(&mut FieldCollector {
+    let mut collector = FieldCollector {
         fields: &mut fields,
-    });
+        omitted: 0,
+    };
+    let _ = record.key_values().visit(&mut collector);
+    let omitted_fields = collector.omitted;
     if let Some(module) = record.module_path() {
-        fields.insert("code.module".to_owned(), Value::from(module));
+        insert_authoritative(&mut fields, "code.module", Value::from(module));
     }
     if let Some(file) = record.file() {
-        fields.insert("code.file".to_owned(), Value::from(file));
+        insert_authoritative(&mut fields, "code.file", Value::from(file));
     }
     if let Some(line) = record.line() {
-        fields.insert("code.line".to_owned(), Value::from(line));
+        insert_authoritative(&mut fields, "code.line", Value::from(line));
     }
 
-    Ok(EventParts {
-        level: map_level(record.level()),
+    Ok(MappedRecord {
+        parts: EventParts {
+            level: map_level(record.level()),
+            target,
+            action,
+            message: Some(message),
+            outcome: None,
+            fields,
+        },
+        omitted_fields,
+    })
+}
+
+/// Maps a [`StructuredRecord`] to event parts, or the reason it is invalid.
+///
+/// Uses the same sanitizer as every other producer. Because `LogControl::submit`
+/// has a result channel, input the facade or the macros would repair and count
+/// (an empty action, an empty or reserved field key) rejects the whole request
+/// instead; nothing is written. Accepted field keys are stored in their
+/// canonical sanitized form.
+pub(crate) fn structured_to_parts(
+    record: StructuredRecord,
+) -> Result<EventParts, InvalidInputReason> {
+    let StructuredRecord {
+        level,
         target,
         action,
-        message: Some(message),
-        outcome: None,
+        message,
         fields,
+    } = record;
+    let target = target_label(&target).map_err(|_| InvalidInputReason::RejectedTarget)?;
+    let action = action
+        .map(|raw| {
+            action_label(&raw).map_err(|error| match error {
+                LabelError::Empty { .. } => InvalidInputReason::EmptyAction,
+                LabelError::ReservedPrefix { .. } | LabelError::Rejected { .. } => {
+                    InvalidInputReason::RejectedAction
+                }
+            })
+        })
+        .transpose()?;
+    let mut canonical_fields = Map::new();
+    for (raw_key, value) in fields {
+        let key = match field_key_label(&raw_key) {
+            Ok(key) => key.into_owned(),
+            Err(LabelError::ReservedPrefix { .. }) => {
+                return Err(InvalidInputReason::ReservedFieldKey { key: raw_key });
+            }
+            Err(LabelError::Empty { .. } | LabelError::Rejected { .. }) => {
+                return Err(InvalidInputReason::EmptyFieldKey);
+            }
+        };
+        // `serde_json::Map` already gives every producer a deterministic
+        // last-write-wins rule; apply it after normalization too.
+        canonical_fields.insert(key, value);
+    }
+    Ok(EventParts {
+        level: level.into(),
+        target,
+        action,
+        message,
+        outcome: None,
+        fields: canonical_fields,
     })
 }
 
@@ -313,7 +473,7 @@ mod tests {
             .target(target)
             .args(args)
             .build();
-        record_to_parts(&record, &options(parse)).unwrap()
+        record_to_parts(&record, &options(parse)).unwrap().parts
     }
 
     // ---- sanitizer ----
@@ -388,7 +548,13 @@ mod tests {
                 .target("t")
                 .args(format_args!("m"))
                 .build();
-            assert_eq!(record_to_parts(&record, &options(true)).unwrap().level, to);
+            assert_eq!(
+                record_to_parts(&record, &options(true))
+                    .unwrap()
+                    .parts
+                    .level,
+                to
+            );
         }
     }
 
@@ -490,7 +656,9 @@ mod tests {
             .args(format_args!("m"))
             .key_values(&kvs)
             .build();
-        let fields = record_to_parts(&record, &options(true)).unwrap().fields;
+        let mapped = record_to_parts(&record, &options(true)).unwrap();
+        assert_eq!(mapped.omitted_fields, 0);
+        let fields = mapped.parts.fields;
         assert_eq!(fields["int"], Value::from(-7));
         assert_eq!(fields["uint"], Value::from(u64::MAX));
         assert_eq!(fields["float"], Value::from(1.5));
@@ -511,7 +679,10 @@ mod tests {
             .file(Some("src/sync.rs"))
             .line(Some(12))
             .build();
-        let fields = record_to_parts(&record, &options(true)).unwrap().fields;
+        let fields = record_to_parts(&record, &options(true))
+            .unwrap()
+            .parts
+            .fields;
         assert_eq!(fields["code.module"], Value::from("app_lib::sync"));
         assert_eq!(fields["code.file"], Value::from("src/sync.rs"));
         assert_eq!(fields["code.line"], Value::from(12));
@@ -549,6 +720,77 @@ mod tests {
         assert!(age.is_positive() || age.is_zero());
     }
 
+    #[test]
+    fn kv_key_rules_omit_reserved_and_empty_keys_and_shadow_code_keys() {
+        let kvs: [(&str, log::kv::Value<'_>); 5] = [
+            (
+                "sc_observability_log.shadowed_fields",
+                log::kv::Value::from(1),
+            ),
+            ("sc_observability_log::x", log::kv::Value::from(2)),
+            ("", log::kv::Value::from(3)),
+            ("code.line", log::kv::Value::from("user line")),
+            ("a b", log::kv::Value::from(4)),
+        ];
+        let record = log::Record::builder()
+            .level(log::Level::Info)
+            .target("t")
+            .args(format_args!("m"))
+            .line(Some(7))
+            .key_values(&kvs)
+            .build();
+        let mapped = record_to_parts(&record, &options(true)).unwrap();
+        assert_eq!(mapped.omitted_fields, 3);
+        let fields = mapped.parts.fields;
+        assert_eq!(fields["code.line"], Value::from(7));
+        assert_eq!(
+            fields[SHADOWED_FIELDS_KEY],
+            serde_json::json!({"code.line": "user line"})
+        );
+        assert_eq!(
+            fields["a_b"],
+            Value::from(4),
+            "accepted keys are stored in canonical form"
+        );
+        assert_eq!(fields.len(), 3);
+    }
+
+    #[test]
+    fn structured_record_rules() {
+        use crate::Level as TracingLevel;
+        let ok = StructuredRecord::new(TracingLevel::WARN, "app::ui")
+            .with_action("ui.click")
+            .with_message("clicked")
+            .with_field("a b", 1);
+        let parts = structured_to_parts(ok).unwrap();
+        assert_eq!(parts.level, Level::Warn);
+        assert_eq!(parts.target.as_str(), "app.ui");
+        assert_eq!(parts.action.unwrap().as_str(), "ui.click");
+        assert_eq!(parts.message.as_deref(), Some("clicked"));
+        assert_eq!(parts.fields["a_b"], Value::from(1));
+
+        let empty_action = StructuredRecord::new(TracingLevel::INFO, "t").with_action("");
+        assert_eq!(
+            structured_to_parts(empty_action).unwrap_err(),
+            InvalidInputReason::EmptyAction
+        );
+        let reserved = StructuredRecord::new(TracingLevel::INFO, "t")
+            .with_field("sc_observability_log::x", true);
+        assert_eq!(
+            structured_to_parts(reserved).unwrap_err(),
+            InvalidInputReason::ReservedFieldKey {
+                key: "sc_observability_log::x".to_owned()
+            }
+        );
+        let empty_key = StructuredRecord::new(TracingLevel::INFO, "t").with_field("", true);
+        assert_eq!(
+            structured_to_parts(empty_key).unwrap_err(),
+            InvalidInputReason::EmptyFieldKey
+        );
+        let default_target = structured_to_parts(StructuredRecord::new(TracingLevel::INFO, ""));
+        assert_eq!(default_target.unwrap().target.as_str(), "log");
+    }
+
     // ---- process identity ----
 
     struct OkResolver;
@@ -573,13 +815,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_auto_uses_current_pid() {
-        assert_eq!(
-            resolve_identity(&ProcessIdentityPolicy::Auto).unwrap(),
-            ProcessIdentity {
-                hostname: None,
-                pid: Some(std::process::id())
-            }
+    fn identity_auto_uses_hostname_and_current_pid() {
+        let identity = resolve_identity(&ProcessIdentityPolicy::Auto).unwrap();
+        assert_eq!(identity.pid, Some(std::process::id()));
+        assert!(
+            identity
+                .hostname
+                .is_some_and(|hostname| !hostname.is_empty())
         );
     }
 
@@ -607,6 +849,49 @@ mod tests {
         );
         let failing = ProcessIdentityPolicy::Resolver(Arc::new(FailingResolver));
         let error = resolve_identity(&failing).unwrap_err();
-        assert_eq!(error.0.diagnostic().code.as_str(), "TEST_RESOLVER_FAILED");
+        assert_eq!(
+            error.0.diagnostic().code,
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED
+        );
+        assert_eq!(
+            error.0.diagnostic().remediation,
+            Remediation::recoverable(
+                "fix the ProcessIdentityResolver",
+                [
+                    "or use ProcessIdentityPolicy::Auto or Fixed",
+                    "call sc_observability_log::init again",
+                ],
+            )
+        );
+        // The resolver's own error is kept as the source.
+        let source = std::error::Error::source(&*error.0)
+            .and_then(|source| source.downcast_ref::<IdentityError>())
+            .unwrap();
+        assert_eq!(source.0.diagnostic().code.as_str(), "TEST_RESOLVER_FAILED");
+    }
+
+    fn assert_auto_hostname_failure(error: &IdentityError) {
+        assert_eq!(
+            error.0.diagnostic().code,
+            crate::error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED
+        );
+        assert_eq!(
+            error.0.diagnostic().remediation,
+            auto_hostname_remediation()
+        );
+    }
+
+    #[test]
+    fn identity_auto_fails_when_the_hostname_lookup_fails() {
+        let error =
+            resolve_auto_identity(|| Err(std::io::Error::other("no hostname"))).unwrap_err();
+        assert_auto_hostname_failure(&error);
+        assert!(std::error::Error::source(&*error.0).is_some());
+    }
+
+    #[test]
+    fn identity_auto_fails_on_an_empty_hostname() {
+        let error = resolve_auto_identity(|| Ok(std::ffi::OsString::new())).unwrap_err();
+        assert_auto_hostname_failure(&error);
     }
 }

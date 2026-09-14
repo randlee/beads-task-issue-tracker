@@ -14,6 +14,7 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+hostname.workspace = true
 # Exact `=` pin (lockstep): macro expansions target the `#[doc(hidden)] __private`
 # module, which is outside semver. Same policy as serde -> serde_core.
 sc-observability-log-macros.workspace = true

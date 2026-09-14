@@ -3,13 +3,14 @@
 //! [`init`] installs a `log::Log` implementation that maps every `log` record to
 //! a `sc_observability_types::LogEvent` and writes it through one process-wide
 //! `sc_observability::Logger`. Existing `log::info!` (and friends) call sites keep
-//! working unchanged.
+//! working unchanged; the tracing-compatible event macros, `#[instrument]` and
+//! [`LogControl::submit`] write through the same logger.
 //!
 //! # Quick start
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use sc_observability_log::{ActionName, BridgeOptions, LoggerConfig, ServiceName};
+//! use sc_observability_log::{ActionName, BridgeOptions, Level, LoggerConfig, ServiceName, StructuredRecord};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = LoggerConfig::default_for(
@@ -20,20 +21,62 @@
 //!     default_action: ActionName::new("log.record")?,
 //!     parse_bracket_action: true,
 //! };
+//! // The single lifecycle owner.
 //! let guard = sc_observability_log::init(config, options)?;
+//! // Cloneable, non-owning control for everyone else.
+//! let control = guard.control();
+//!
 //! log::info!(target: "my_app::sync", "[sync.start] syncing {} items", 3);
-//! guard.flush(Duration::from_secs(1))?;
+//! control.submit(StructuredRecord::new(Level::INFO, "my_app.ui").with_message("clicked"))?;
+//! control.flush(Duration::from_secs(1))?;
+//! println!("{}", serde_json::to_string(&control.health())?);
+//!
 //! guard.shutdown(Duration::from_secs(5))?;
 //! # Ok(())
 //! # }
 //! ```
 //!
+//! # Public contract
+//!
+//! - **Install once, process-global.** [`init`] succeeds at most once per
+//!   process. The `log` facade has no uninstall API, so after shutdown the
+//!   bridge can be neither reinstalled ([`InitError::AlreadyInitialized`]) nor
+//!   replaced by another `log::Log`.
+//! - **One lifecycle owner.** [`LogGuard`] is not `Clone`; only
+//!   [`LogGuard::shutdown`] (or, as a fallback, `Drop for LogGuard`) stops the
+//!   logger, and it does so once.
+//! - **Control is not ownership.** [`LogGuard::control`] returns a cloneable
+//!   [`LogControl`] with bounded flush, health, the active path and nonblocking
+//!   structured submission. No control operation can shut the logger down,
+//!   keep it alive, or yield a `LogGuard` or the mutable `Logger`.
+//! - **One submission core, one writer.** The facade, the macros and
+//!   [`LogControl::submit`] enter the same guarded core (panic containment and
+//!   reentrancy detection, entered once per record) and reach the same
+//!   `Logger`. Every rejection is counted under exactly one [`DropCause`]; the
+//!   facade and macros keep their unit return and discard the result only after
+//!   that accounting.
+//! - **Identity is bridge-owned.** Envelope version, timestamp, service name,
+//!   process identity (resolved once at `init`), trace context, redaction and
+//!   sink routing are filled by the bridge; no producer can supply them.
+//! - **Timeout versus final stop.** A shutdown that returns
+//!   [`ShutdownError::TimedOut`] leaves [`BridgeLifecycle::ShutdownTimedOut`]
+//!   while a detached helper finishes; late completion is observable as
+//!   [`BridgeLifecycle::Stopped`]. `Stopped` is final.
+//! - **Serializable contracts.** [`BridgeHealthReport`] (versioned by
+//!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`StructuredRecord`], [`SubmitOutcome`],
+//!   [`SubmitError`] and [`FailureReport`] (versioned by
+//!   [`CONTROL_SCHEMA_VERSION`]) are plain serde data with `snake_case` tagged
+//!   discriminants and stable code / remediation fields.
+//! - **Field keys.** One sanitizer and one reserved prefix
+//!   (`sc_observability_log.`) for every producer; see `docs/mapping.md`,
+//!   "Field keys", for the per-producer and collision rules.
+//!
 //! # Guarantees
 //!
-//! - The emit path never blocks on I/O or queue capacity and never panics; every
-//!   dropped event is counted under one [`DropCause`].
-//! - `log::logger().flush()` does nothing. Call [`LogGuard::flush`] for a flush
-//!   bounded by a timeout.
+//! - The submission path never blocks on I/O or queue capacity and never panics;
+//!   every dropped event is counted under one [`DropCause`].
+//! - `log::logger().flush()` does nothing. Call [`LogControl::flush`] or
+//!   [`LogGuard::flush`] for a flush bounded by a timeout.
 //! - [`LogGuard::shutdown`] and `Drop for LogGuard` are bounded by a timeout.
 
 pub mod error_codes;
@@ -41,9 +84,12 @@ pub mod error_codes;
 mod bridge;
 mod callsite;
 mod context;
+mod control;
 mod error;
 mod handle;
+mod health;
 mod mapping;
+mod report;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -51,14 +97,26 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 #[doc(inline)]
-pub use error::{DropCause, FlushError, InitError, ShutdownError};
+pub use control::{JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome};
+#[doc(inline)]
+pub use error::{DropCause, FlushError, InitError, InvalidInputReason, ShutdownError, SubmitError};
+#[doc(inline)]
+pub use health::{
+    BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState, BridgeLifecycle,
+    FileSinkHealth, HealthDiagnostic, HelperHealth, LoggerHealth, QueueHealth, SinkHealthSnapshot,
+    SinkStatus, WriterStatus,
+};
+#[doc(inline)]
+pub use report::{
+    CONTROL_SCHEMA_VERSION, Failure, FailureReport, FlushFailure, InitFailure, ShutdownFailure,
+};
 #[doc(inline)]
 pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
 #[doc(inline)]
 pub use sc_observability_types::{
     ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
-    TargetCategory,
+    TargetCategory, Timestamp,
 };
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
@@ -71,11 +129,13 @@ pub use sc_observability_log_macros::{debug, error, event, info, instrument, tra
 ///
 /// It has no `PartialOrd`/`Ord`: tracing orders by verbosity, which would
 /// surprise here. Its associated consts make `const LVL: Level = Level::WARN;
-/// event!(LVL, ..)` work as in tracing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// event!(LVL, ..)` work as in tracing. It serializes with the `LogEvent.level`
+/// spelling: `"Trace"`, `"Debug"`, `"Info"`, `"Warn"`, `"Error"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct Level(LevelInner);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 enum LevelInner {
     Trace,
     Debug,
@@ -122,8 +182,9 @@ pub struct BridgeOptions {
 
 /// Snapshot of dropped-event counters, keyed by [`DropCause`].
 ///
-/// The derives are pinned by `tests/api_freeze.rs`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The derives are pinned by `tests/api_freeze.rs`. It serializes as an object
+/// with one `u64` per cause, keyed by the `snake_case` cause name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DroppedEvents {
     queue_full: u64,
     invalid_event: u64,
@@ -180,7 +241,14 @@ impl DroppedEvents {
 /// that `Result` matters, for example to log or retry on failure.
 pub const DEFAULT_DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Keeps the bridge installed; dropping it shuts the logger down.
+/// The sole lifecycle owner of the installed bridge; dropping it shuts the logger down.
+///
+/// Returned once per process by [`init`]. It is deliberately not `Clone` (a
+/// compile-fail test pins this): the code that owns it performs the one final
+/// [`shutdown`](Self::shutdown) and records its `Result`. Hand every other
+/// component a [`LogControl`] from [`control`](Self::control) instead of sharing
+/// the guard, for example through an `Arc`: a shared guard turns the final
+/// shutdown into `Drop` on whichever thread releases the last clone.
 #[must_use = "dropping the guard shuts the logger down"]
 #[derive(Debug)]
 pub struct LogGuard {
@@ -189,7 +257,16 @@ pub struct LogGuard {
 }
 
 impl LogGuard {
-    /// Flushes on a helper thread, bounded by `timeout`.
+    /// A cloneable, non-owning [`LogControl`] for this bridge.
+    ///
+    /// The control cannot shut the logger down or keep it alive, so it may be
+    /// cloned freely and may outlive the guard.
+    #[must_use]
+    pub fn control(&self) -> LogControl {
+        LogControl::new()
+    }
+
+    /// Flushes on a helper thread, bounded by `timeout`; same as [`LogControl::flush`].
     ///
     /// # Errors
     ///
@@ -197,19 +274,24 @@ impl LogGuard {
     /// `timeout` (the helper is detached), [`FlushError::Logger`] when a sink flush
     /// fails, and [`FlushError::HelperSpawn`] / [`FlushError::HelperLost`] when the
     /// helper thread cannot start or ends without a result.
+    /// [`FlushError::ShutDown`] cannot occur while the guard is alive.
     pub fn flush(&self, timeout: Duration) -> Result<(), FlushError> {
         handle::flush_installed(timeout)
     }
 
-    /// Threshold → Off, empty the slot, flush, `Logger::shutdown`; bounded by `timeout`.
+    /// The final shutdown: threshold → Off, empty the slot, flush, `Logger::shutdown`.
+    ///
+    /// Bounded by `timeout`. Consumes the guard, so it runs at most once. See
+    /// [`BridgeLifecycle`] for the lifecycle each result leaves behind.
     ///
     /// # Errors
     ///
     /// Returns [`ShutdownError::TimedOut`] when sole ownership, the final flush and
-    /// the writer join do not finish within `timeout`, [`ShutdownError::FinalFlush`]
-    /// when the final flush fails (the logger is still shut down), and
-    /// [`ShutdownError::HelperSpawn`] / [`ShutdownError::HelperLost`] for helper
-    /// thread failures.
+    /// the writer join do not finish within `timeout` (a detached helper keeps
+    /// going; the lifecycle is `ShutdownTimedOut` until it completes and publishes
+    /// `Stopped`), [`ShutdownError::FinalFlush`] when the final flush fails (the
+    /// logger is still shut down), and [`ShutdownError::HelperSpawn`] /
+    /// [`ShutdownError::HelperLost`] for helper thread failures.
     pub fn shutdown(mut self, timeout: Duration) -> Result<(), ShutdownError> {
         self.shut_down = true;
         handle::shutdown_sequence(timeout)
@@ -227,6 +309,12 @@ impl LogGuard {
     pub fn active_log_path(&self) -> Option<&Path> {
         self.active_log_path.as_deref()
     }
+
+    /// Read-only health snapshot; same as [`LogControl::health`].
+    #[must_use]
+    pub fn health(&self) -> BridgeHealthReport {
+        health::snapshot()
+    }
 }
 
 impl Drop for LogGuard {
@@ -242,19 +330,22 @@ impl Drop for LogGuard {
     }
 }
 
-/// Installs the bridge as the process-wide `log` logger.
+/// Installs the bridge as the process-wide `log` logger; succeeds at most once per process.
 ///
 /// Resolves `config.process_identity` once, builds the `sc_observability::Logger`,
 /// installs the bridge with `log::set_boxed_logger`, and derives the `log` facade
-/// level and the emit threshold from `config.level`.
+/// level and the emit threshold from `config.level`. The returned [`LogGuard`] is
+/// the sole lifecycle owner. After it shuts down, the process keeps the stopped
+/// bridge installed in the `log` facade: neither this crate nor another `log::Log`
+/// can take its place.
 ///
 /// # Errors
 ///
 /// - [`InitError::AlreadyInitialized`] when `init` already succeeded, is running
 ///   concurrently, or earlier returned `ForeignLoggerInstalled`.
 /// - [`InitError::ForeignLoggerInstalled`] when another `log::Log` is installed.
-/// - [`InitError::IdentityResolution`] when `ProcessIdentityPolicy::Resolver` fails
-///   (retry allowed).
+/// - [`InitError::IdentityResolution`] when the configured resolver fails or
+///   automatic hostname discovery cannot produce a hostname (retry allowed).
 /// - [`InitError::Logger`] when `Logger::new` fails (retry allowed).
 pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, InitError> {
     if INSTALLED
@@ -272,10 +363,11 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             return Err(InitError::IdentityResolution { source });
         }
     };
-    let (level, service, enable_file_sink) = (
+    let (level, service, enable_file_sink, enable_console_sink) = (
         config.level,
         config.service_name.clone(),
         config.enable_file_sink,
+        config.enable_console_sink,
     );
     let logger = match sc_observability::Logger::new(config) {
         Ok(logger) => logger,
@@ -300,7 +392,13 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
     }
     // Install order: slot, then threshold, then the facade level. Records arriving
     // before the last step are filtered by the facade's initial `Off` level.
+    health::set_sink_config(health::SinkConfig {
+        file_enabled: enable_file_sink,
+        console_enabled: enable_console_sink,
+        active_log_path: active_log_path.clone(),
+    });
     *SLOT.write().unwrap_or_else(PoisonError::into_inner) = Some(installed);
+    handle::set_lifecycle(BridgeLifecycle::Running);
     THRESHOLD.store(handle::encode_threshold(level), Ordering::SeqCst);
     log::set_max_level(handle::to_log_level_filter(level));
     Ok(LogGuard {
@@ -315,11 +413,7 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
 /// `=` version so expansions and this module always move in lockstep.
 #[doc(hidden)]
 pub mod __private {
-    use std::sync::PoisonError;
-
-    use sc_observability::TryLogError;
-
-    use crate::{DropCause, handle, mapping};
+    use crate::{DropCause, handle};
 
     pub use serde_json::{Map, Value};
 
@@ -371,38 +465,14 @@ pub mod __private {
     /// calling thread (`current_trace()`), or `None` outside any instrumented call.
     ///
     /// Never blocks on I/O or queue capacity and never panics: the slot read, event
-    /// assembly and `try_log` run inside a `catch_unwind` guard. It is not
-    /// reentrant: a call on a thread already inside `emit` (a panic hook, sink or
-    /// redactor that logs) returns at once and is counted as
+    /// assembly and `try_log` run inside the shared guarded submission core. It is
+    /// not reentrant: a call on a thread already inside a submission (a panic hook,
+    /// sink or redactor that logs) returns at once and is counted as
     /// `DropCause::ReentrantEmit`. Every dropped event is counted under exactly one
-    /// [`DropCause`]. Nothing is flushed; use `LogGuard::flush(timeout)`.
+    /// [`DropCause`] before the result is discarded. Nothing is flushed; use
+    /// `LogControl::flush(timeout)`.
     pub fn emit(parts: EventParts) {
-        handle::submit_guarded(|| {
-            let Some(installed) = handle::SLOT
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-            else {
-                return Err(DropCause::NotInstalled);
-            };
-            let mut event = mapping::assemble_event(
-                parts,
-                &installed.service,
-                &installed.identity,
-                &installed.options.default_action,
-            );
-            // Ambient `#[instrument]` context of the emitting thread; bridge records included.
-            event.trace = crate::context::current_trace();
-            installed
-                .logger
-                .try_log(event)
-                .map_err(|error| match error {
-                    TryLogError::QueueFull(_) => DropCause::QueueFull,
-                    TryLogError::InvalidEvent(_) => DropCause::InvalidEvent,
-                    TryLogError::WriterDegraded(_) => DropCause::WriterDegraded,
-                    TryLogError::ShutdownTimedOut(_) => DropCause::ShutdownTimedOut,
-                })
-        });
+        let _ = handle::submit_guarded(|| handle::submit_installed(parts));
     }
 
     /// Counts one dropped event; a-2/a-3 call it for `DropCause::InvalidEvent` label failures.
@@ -416,6 +486,24 @@ pub mod __private {
 #[cfg(test)]
 mod tests {
     use super::Level;
+
+    #[test]
+    fn level_serializes_with_the_log_event_spelling() {
+        for (level, text) in [
+            (Level::TRACE, "\"Trace\""),
+            (Level::DEBUG, "\"Debug\""),
+            (Level::INFO, "\"Info\""),
+            (Level::WARN, "\"Warn\""),
+            (Level::ERROR, "\"Error\""),
+        ] {
+            assert_eq!(serde_json::to_string(&level).unwrap(), text);
+            assert_eq!(
+                serde_json::to_string(&sc_observability_types::Level::from(level)).unwrap(),
+                text
+            );
+            assert_eq!(serde_json::from_str::<Level>(text).unwrap(), level);
+        }
+    }
 
     #[test]
     fn level_converts_one_to_one() {

@@ -1,5 +1,8 @@
+cfg-if v1.0.4
 deranged v0.5.8
+hostname v0.4.2
 itoa v1.0.18
+libc v0.2.189
 log v0.4.34
 memchr v2.8.3
 num-conv v0.2.2
