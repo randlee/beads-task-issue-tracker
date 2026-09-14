@@ -315,6 +315,8 @@ impl CliInvoker for AppInvoker {
 - `impl BeadsBackend`/`CliBackend` (b-5, b-6); the app's backend slot and deletion of the statics (b-7).
 - `migration.rs` Dolt operations and raw invocations other than `sync` (b-8 via `DoltOperations`/`run_raw`).
 - Caching of failed probes (B13, b-11).
+- Subprocess timeouts. `run_json`, `run_raw` and `probe_version_output` keep today's `Command::output()` with no timeout (`cli.rs:190,338,560`); this sprint is a behaviour-preserving move of `cli.rs:533-591`, and the `migration.rs` raw calls stay as they are until b-8 moves them onto `run_raw`, also without a timeout. Later fix location: `btit_cli::run`; tracked in issue #55 (plan QA RSH-001). Do not add timeout logic in this sprint.
+- Size limits on frontend-supplied strings that become argv elements (`create`, `update`, `comment_add`, `label_add` in the argv table): none today, none added; issue #55 (related: #49 `log_frontend` size) (RSH-003).
 
 ## Acceptance Criteria
 

@@ -193,6 +193,7 @@ pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Is
 - `migration.rs` repair/check/migrate, `get_beads_mtime`, `watcher.rs`, `fs_commands.rs`, `updates.rs` on the slot, and the deletion of `cli.rs` (b-8).
 - B-item behaviour fixes (b-9, b-10, b-11); B13 probe-failure caching (b-11).
 - Workspace lints, formatting and clippy cleanliness for `btit-app` (b-12).
+- Moving the synchronous backend calls made from `#[tauri::command] async fn` bodies onto `spawn_blocking`: the commands keep today's blocking `Command::output()` on the async runtime (`cli.rs:555-560`); deferred to issue #55 (plan QA RSH-002). Command bodies are not changed for this.
 
 ## Acceptance Criteria
 

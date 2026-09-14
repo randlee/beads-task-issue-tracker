@@ -142,7 +142,7 @@ impl std::fmt::Debug for CliRunner {   // manual: Box<dyn Fn> is not Debug
 
 ## Required Validation
 
-- `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br`
+- `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br` (workspace-wide regression check; only `btit-cli` is edited by this sprint, per Acceptance Criterion 4)
 - `cargo clippy -p btit-cli --all-targets --all-features -- -D warnings`
 - `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` prints `0` (the `test-support` features stay dev-only; M4)
 - `cargo test --workspace`
