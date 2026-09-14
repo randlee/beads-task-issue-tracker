@@ -62,6 +62,7 @@ Line numbers are at `a18c724` (`crates/btit-app/src/` after b-1).
 - `crates/btit-app/src/cli.rs`: `pub(crate) use btit_beads::{detect::*, compat::*, gates::*};` at the top so `config.rs:1`, `updates.rs:1`, `migration.rs:4`, `issue_commands.rs:2`, `polling.rs:1`, `lib.rs:41-64` keep compiling unchanged; wrappers `supports_*()`/`uses_*()` call the moved `_for` cores
 - `crates/btit-app/src/issue_commands.rs:3`, `polling.rs:2`, `attachments.rs:3`: `use crate::issues::…` → `use btit_beads::{issues::…, parse::parse_issues_tolerant}`
 - `.github/workflows/ci.yml`: `rust-quality` job gains `btit-beads`
+- `docs/architecture.md`: ADR-008 appended (after b-1's ADR-009)
 - `docs/plans/phase-b/sprint-b-3.md` (`status:` frontmatter only)
 
 ## Deliverables
@@ -76,9 +77,10 @@ Every listed deliverable is expected to land at a production-ready level for the
 6. **Log gate.** `src/logging.rs`: `pub static LOGGING_ENABLED: AtomicBool`, `pub static VERBOSE_LOGGING: AtomicBool`, `pub use log;` and the four `#[macro_export]` macros expanding to `$crate::logging::log::info!(..)` etc. under the same conditions as `logging.rs:36-66`. The app's `logging.rs` re-exports the statics (`pub(crate) use btit_beads::logging::{LOGGING_ENABLED, VERBOSE_LOGGING};`) so `get_logging_enabled`/`set_logging_enabled`/`get_verbose_logging`/`set_verbose_logging` (`logging.rs:166-191`) are unchanged.
 7. **App consumes the crate.** `issues.rs`, `test_support.rs` deleted; `cli.rs` shrinks to the process-spawning and global-state parts (`get_extended_path`, `new_command`, `probe_cli_binary`, `extended_path_entries`, `default_cli_binary`, `get_cli_client_info`, the five wrappers, `project_uses_dolt(_for)`, `reset_bd_version_cache`, `execute_bd`, `check_bd_compatibility`, statics) plus re-exports. `cargo test --workspace` passes the full set.
 8. **API freeze.** `crates/btit-beads/tests/api_freeze.rs` pins every public function signature (as `let _: fn(..) -> .. = path;` items), every trait method (via a `struct Probe; impl BeadsBackend for Probe { .. }` with `todo!()`-free bodies returning fixed values, under the test allowances), every `BeadsError` variant and the `code()` strings. b-9 must leave this file byte-identical.
-9. **Contract doc.** `crates/btit-beads/docs/backend-contract.md`: the trait inventory (from the plan, with signatures), the error table, the `ProjectRef` headroom note, the "sync trait, blocking calls" note, the rule that only `btit-app` depends on `tauri` and `sc-observability-log`, the "no process-global client state in library crates" rule (backends are instances; two may coexist for two projects), and a "future backend-specific traits" paragraph naming issue #51 (Dolt commit log / `AS OF` snapshots / `dolt_diff`) as bd-only headroom behind an accessor like `dolt()`, with no method planned.
-11. **No global state.** `crates/btit-beads/src` declares no `static` other than `LOGGING_ENABLED` and `VERBOSE_LOGGING`; every function in `detect`, `compat`, `gates`, `issues`, `parse` is pure (inputs → outputs, plus `log_*!`).
-10. **CI.** `rust-quality` runs fmt/clippy/rustdoc/`cargo tree` gates for `btit-beads` too (`-p btit-types -p btit-beads`).
+9. **Contract doc.** `crates/btit-beads/docs/backend-contract.md`: the trait inventory (from the plan, with signatures) split into a **transport-neutral** list (`BeadsBackend`: `project_uses_dolt`, the issue operations, `relation_types`, `sync`, the three accessors; `DoltOperations` with `DoltOpResult`) and a **CLI-only** list (`CliBackend`: `binary`, `probe`, `client`, `version`, `capabilities`, `run_raw`, `release_source`; `CloseSuggestions`), the error table, the `ProjectRef` headroom note, the "sync trait, blocking calls" note, the rule that only `btit-app` depends on `tauri` and `sc-observability-log`, the "no process-global client state in library crates" rule (backends are instances; two may coexist for two projects), and a "future backend-specific traits" paragraph naming issue #51 (Dolt commit log / `AS OF` snapshots / `dolt_diff`) as bd-only headroom behind an accessor like `dolt()`, with no method planned; it states that a SQL transport can implement `dolt()` because `DoltOpResult` carries no process output.
+10. **No global state.** `crates/btit-beads/src` declares no `static` other than `LOGGING_ENABLED` and `VERBOSE_LOGGING`; every function in `detect`, `compat`, `gates`, `issues`, `parse` is pure (inputs → outputs, plus `log_*!`).
+11. **CI.** `rust-quality` runs fmt/clippy/rustdoc/`cargo tree` gates for `btit-beads` too (`-p btit-types -p btit-beads`).
+12. **ADR-008.** `docs/architecture.md` gains ADR-008 "Beads backend contract" (Status: Accepted by maintainer direction 2026-09-13; Context: one Tauri crate with process-global CLI state, `config.rs:8-13`, `cli.rs:14-20`, and maintainer requirements 2–5; Decision: the trait family `BeadsBackend` / `CliBackend` / `DoltOperations` / `CloseSuggestions`, the optional-accessor pattern including `cli()`, the `CliBackend` split of `client`/`version`/`capabilities`, transport-neutral `DoltOperations` returning `DoltOpResult`, library crates hold no process-global client state, the app owns the single slot; Alternatives considered: traits inside `btit-types`, one fat trait returning `Unsupported`, `Any` downcasting from `dyn BeadsBackend`; Consequences: a SQL/DoltHub transport implements `BeadsBackend` (+ optionally `dolt()`) with no caller change, per-project selection is a slot change (OQ-8), #51 is a further accessor; Links: this sprint doc, `backend-contract.md`). The ADR table gets its row.
 
 ## Required Work
 
@@ -126,21 +128,16 @@ workspace = true
 use std::path::Path;
 use btit_types::{
     BackendCapabilities, BdRawIssue, CliClient, CliOutput, CliProbe, CliVersion, CreatePayload,
-    ListQuery, ProjectRef, RelationType, ReleaseSource, UpdatePayload,
+    DoltOpResult, ListQuery, ProjectRef, RelationType, ReleaseSource, UpdatePayload,
 };
 use crate::error::BeadsError;
 
-/// Operations every beads backend supports. Implemented by `btit-bd` and `btit-br`;
-/// a future remote transport implements this trait alone (no CLI notion here).
+/// Transport-neutral operations every beads backend supports. Implemented by `btit-bd` and
+/// `btit-br`; a future SQL/DoltHub transport implements this trait alone (no CLI notion here).
 pub trait BeadsBackend: Send + Sync {
-    /// Detected client kind (today: `get_cli_client_info().0`, cli.rs:326-365).
-    fn client(&self) -> CliClient;
-    /// Detected version, `None` when `--version` failed or did not parse.
-    fn version(&self) -> Option<CliVersion>;
-    /// The five version gates (today: `supports_*`/`uses_*` wrappers, cli.rs:380-466).
-    fn capabilities(&self) -> BackendCapabilities;
-    /// Whether `beads_dir` is a Dolt project (today: `project_uses_dolt`, cli.rs:473-515). br: always `false`.
-    fn project_uses_dolt(&self, beads_dir: &Path) -> bool;
+    /// Whether the project's `.beads` is a Dolt project (today: `project_uses_dolt`, cli.rs:473-515,
+    /// called with `<working_dir>/.beads` by every caller). br: always `false`.
+    fn project_uses_dolt(&self, project: &ProjectRef) -> bool;
 
     fn list(&self, project: &ProjectRef, query: &ListQuery) -> Result<Vec<BdRawIssue>, BeadsError>;
     fn ready(&self, project: &ProjectRef) -> Result<Vec<BdRawIssue>, BeadsError>;
@@ -164,7 +161,9 @@ pub trait BeadsBackend: Send + Sync {
     /// A non-zero exit is `Err(CommandFailed)`; the caller keeps today's log/return text.
     fn sync(&self, project: &ProjectRef) -> Result<(), BeadsError>;
 
-    /// bd-only operations; `None` for backends without Dolt.
+    /// CLI-only facts and raw invocations; `None` for a non-CLI transport.
+    fn cli(&self) -> Option<&dyn CliBackend> { None }
+    /// Dolt operations; `None` for backends without Dolt (br today).
     fn dolt(&self) -> Option<&dyn DoltOperations> { None }
     /// br-only `--suggest-next`; `None` for other backends.
     fn close_suggestions(&self) -> Option<&dyn CloseSuggestions> { None }
@@ -176,6 +175,12 @@ pub trait CliBackend: BeadsBackend {
     fn binary(&self) -> &str;
     /// Fresh `<binary> --version` from the temp dir with the extended PATH (today `probe_cli_binary`, cli.rs:185-196).
     fn probe(&self) -> Option<CliProbe>;
+    /// Detected client kind (today: `get_cli_client_info().0`, cli.rs:326-365); `Unknown` after a failed probe.
+    fn client(&self) -> CliClient;
+    /// Detected version, `None` when `--version` failed or did not parse.
+    fn version(&self) -> Option<CliVersion>;
+    /// The five version gates (today: `supports_*`/`uses_*` wrappers, cli.rs:380-466).
+    fn capabilities(&self) -> BackendCapabilities;
     /// Raw invocation: `<binary> <args…>` in the project dir with `PATH` and `BEADS_PATH` set, no `--json`, no lock
     /// (the pattern at migration.rs:227-232, 282-288, 333-339, 403-408, 623-629, 665-671, 771-777, 879-885, 944-950, 1003-1009, 1081-1087).
     fn run_raw(&self, project: &ProjectRef, args: &[&str]) -> Result<CliOutput, BeadsError>;
@@ -183,16 +188,17 @@ pub trait CliBackend: BeadsBackend {
     fn release_source(&self) -> ReleaseSource;
 }
 
-/// bd-only Dolt operations (migration.rs). Each is `run_raw` with fixed arguments.
+/// Dolt operations (bd only today). Transport-neutral: returns what migration.rs reads
+/// (exit status, trimmed stdout, trimmed stderr), never raw process output.
 pub trait DoltOperations: Send + Sync {
     /// `doctor --fix --yes` (migration.rs:333-339)
-    fn doctor_fix(&self, project: &ProjectRef) -> Result<CliOutput, BeadsError>;
+    fn doctor_fix(&self, project: &ProjectRef) -> Result<DoltOpResult, BeadsError>;
     /// `migrate --to-dolt --yes` (migration.rs:623-629)
-    fn migrate_to_dolt(&self, project: &ProjectRef) -> Result<CliOutput, BeadsError>;
+    fn migrate_to_dolt(&self, project: &ProjectRef) -> Result<DoltOpResult, BeadsError>;
     /// `init --prefix <prefix>` (migration.rs:665-671, 771-777)
-    fn init(&self, project: &ProjectRef, prefix: &str) -> Result<CliOutput, BeadsError>;
+    fn init(&self, project: &ProjectRef, prefix: &str) -> Result<DoltOpResult, BeadsError>;
     /// `import -i <file>` (migration.rs:879-885)
-    fn import_jsonl(&self, project: &ProjectRef, file: &Path) -> Result<CliOutput, BeadsError>;
+    fn import_jsonl(&self, project: &ProjectRef, file: &Path) -> Result<DoltOpResult, BeadsError>;
 }
 
 /// br-only: `close <id> --suggest-next` (issue_commands.rs:410-413).
@@ -298,8 +304,9 @@ mod logging;
 5. `crates/btit-app/src/issues.rs` and `test_support.rs` do not exist; `cli.rs` contains no function from the Exact Targets "moved" list; the app's `logging.rs` defines no macro and no `AtomicBool`.
 6. `cargo test --workspace` passes; the test-preservation gate prints nothing.
 7. `cargo clippy -p btit-beads --all-targets -- -D warnings` and `cargo rustdoc -p btit-beads -- -D missing-docs` pass; `! grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-beads/src`.
-8. `crates/btit-beads/docs/backend-contract.md` exists with the sections in Deliverable 9.
-9. CI green; every command in Required Validation passes.
+8. `crates/btit-beads/docs/backend-contract.md` exists with the sections in Deliverable 9, including the transport-neutral vs CLI-only method lists.
+9. `grep -c '^### ADR-008' docs/architecture.md` is `1` and the ADR table lists ADR-008 (Deliverable 12); `tests/api_freeze.rs` pins `BeadsBackend::cli`, `dolt`, `close_suggestions` default bodies returning `None`.
+10. CI green; every command in Required Validation passes.
 
 ## Required Validation
 

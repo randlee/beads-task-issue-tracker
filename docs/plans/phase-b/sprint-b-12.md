@@ -118,7 +118,7 @@ pub(crate) fn base64_encode(data: &[u8]) -> String {
 1. `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --check --all` pass on all three CI OSes.
 2. No panicking call in app production code: verified by `cargo clippy` with the deny set (Acceptance Criterion 1) plus `! grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-app/src`.
 3. `RUSTFLAGS="-D warnings" PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` passes (A2).
-4. `cargo test --workspace` passes with the same test set as the b-11 head (no test removed or renamed).
+4. `cargo test --workspace` passes with the same test set as the b-11 head (no test removed or renamed); the plan's command-signature gate (1) diffs empty and the frontend invoke-subset gate (2) prints nothing (lint fixes changed no command header).
 5. `CHANGELOG.md` `[Unreleased]` contains every "Changelog lines" item from b-1..b-11 and this sprint; `CLAUDE.md` has no `src-tauri` reference and names `crates/btit-beads/src/gates.rs`; `.claude/codebase-map.md` `## Backend Structure` lists six crates and has no `backendMode` row; `docs/crate-split-refactor-issues.md` ends with the disposition table covering A1-A4 and B1-B13.
 6. The formatting commit touches only whitespace/layout (`git diff -w --stat <fmt-commit>^ <fmt-commit>` shows no non-whitespace change).
 7. QA-1 complete; CI green; every command in Required Validation passes.
@@ -134,4 +134,5 @@ pub(crate) fn base64_encode(data: &[u8]) -> String {
 - `npx vue-tsc --noEmit`
 - `python3 scripts/check_version_sync.py`
 - `pnpm tauri:build` (manual: the app launches, lists issues, and writes the JSONL log)
+- command-signature gate (1) and frontend invoke-subset gate (2) from `plan-phase-b.md` "Command contract gates"
 - `git diff --check`

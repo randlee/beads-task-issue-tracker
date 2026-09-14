@@ -72,6 +72,10 @@ Every listed deliverable is expected to land at a production-ready level for the
    | absent | no | `false` |
    | `not json` | no | `false` |
    | absent | yes | `true` |
+   | `{"backend":"dolt"}` with `info = None` (no probe) | no | `true` (deliberate deviation, see below) |
+   | `{"backend":"dolt"}` with `info = Some((Unknown, 9, 9, 9))` | no | `true` (same) |
+
+   **Deliberate deviation (recorded in Implementation Notes and the PR).** Today the `_ =>` arm (`cli.rs:489`) applies the filesystem probe to `Unknown` and `None` too, so those cases already follow the bd-≥-0.50 rule; this sprint keeps them on the bd-≥-0.51 metadata rule (the `_ =>` arm), widening it from "`.dolt` dir or `metadata.json` + `dolt/<name>/.dolt`" to "`.dolt` dir or `metadata.json` backend rule". The alternative (treat `Unknown`/`None` as non-Dolt) would flip today's behaviour for an unprobed bd 1.x project, which is worse for the common case; b-7's factory builds `BdCli` for `Unknown`/no-probe binaries precisely because they share bd's arms today.
 
 3. **Tests replaced.** `project_uses_dolt_for_nested_layout_needs_metadata_and_dolt_dir` → `project_uses_dolt_for_bd_1x_reads_metadata_backend` (the table above); `project_uses_dolt_for_sqlite_metadata_or_empty_dir_is_false` → `project_uses_dolt_for_bd_0_50_keeps_filesystem_probe` (today's nested-layout expectations for `(Bd, 0, 50, x)`); `project_uses_dolt_for_legacy_dolt_dir` kept.
 4. **B10 (btit-bd part).** `project_uses_dolt_false_without_beads_dir` → `project_uses_dolt_for_is_false_for_dir_without_beads_layout`, calling the `_for` core with `BD_1`; no `bd` spawn remains in `btit-bd` tests.

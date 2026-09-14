@@ -64,16 +64,17 @@ Line numbers are at `a18c724` (`src-tauri/src/` paths are `crates/btit-app/src/`
 Every listed deliverable is expected to land at a production-ready level for the scope this sprint claims. If that cannot be done cleanly in one sprint, the sprint must be split before implementation begins. No deliverable may be silently dropped or partially deferred.
 
 1. **Crate.** `crates/btit-types` with `[lints] workspace = true`, `clippy.toml` `allow-*-in-tests` (same four keys as `crates/sc-observability-log/clippy.toml` at the phase-a baseline), `publish = false`, inheriting `version`, `edition`, `rust-version`, `license` from the workspace. Dependencies: exactly `serde` (derive) and `serde_json`. `#![deny(missing_docs)]` with a one-line doc comment on every public item.
-2. **Moved types, unchanged shape.** `CliClient` (gains `Eq`, `Hash`), `BdRawDependency`, `BdRawDependent`, `BdRawIssue`, `BdRawComment`, `Issue`, `Comment`, `ChildIssue`, `ParentIssue`, `Relation`, `CountResult`, `DirectoryEntry`, `PurgeResult`, `FsListResult`, `ListOptions`, `CwdOptions`, `CreatePayload`, `UpdatePayload` (`types.rs:5-281`) and `CompatibilityInfo` (`cli.rs:597-619`) move with every `#[serde(...)]` attribute and derive intact. All fields become `pub`. Serialized JSON is byte-identical: pinned by moving `compatibility_info_serializes_camel_case`, `compatibility_info_arrays_and_null_tuple_serialize`, `compatibility_info_empty_arrays_serialize_as_empty_not_null` (`cli.rs:818,1169,1199`) into `crates/btit-types/tests/` (they construct `CompatibilityInfo` literals and check JSON; the `check_bd_compatibility` function they do not call).
+2. **Moved types, unchanged shape.** `CliClient` (gains `Eq`, `Hash`), `BdRawDependency`, `BdRawDependent`, `BdRawIssue`, `BdRawComment`, `Issue`, `Comment`, `ChildIssue`, `ParentIssue`, `Relation`, `CountResult`, `DirectoryEntry`, `PurgeResult`, `FsListResult`, `ListOptions`, `CwdOptions`, `CreatePayload`, `UpdatePayload` (`types.rs:5-281`) and `CompatibilityInfo` (`cli.rs:597-619`) move with every `#[serde(...)]` attribute and derive intact. All fields become `pub`. Serialized JSON is byte-identical: pinned by moving `compatibility_info_serializes_camel_case`, `compatibility_info_arrays_and_null_tuple_serialize`, `compatibility_info_empty_arrays_serialize_as_empty_not_null` (`cli.rs:818,1169,1199`) into `crates/btit-types/tests/` (they construct `CompatibilityInfo` literals and check JSON; the `check_bd_compatibility` function they do not call). As integration tests they are listed by `cargo test -- --list` without a module path, which the plan's test-preservation `sed` (`s/^(.*::)?([A-Za-z0-9_]+): test$/\2/p`) accepts, so the gate still matches them by name.
 3. **`CliProbe`** moves (`cli.rs:88-93`) with `pub` fields and `version: Option<CliVersion>`. `From<(u32, u32, u32)> for CliVersion` and `From<CliVersion> for (u32, u32, u32)` keep every `_for` core call site and the `test_support::probe` helper (`test_support.rs:4-11`) compiling with a `.into()`.
-4. **New value types** exactly as in the code samples: `CliVersion`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`. No methods beyond derives, `From` impls and `Display` for `CliVersion` (`"{major}.{minor}.{patch}"`, the format `get_cli_client_info` logs today, `cli.rs:358`).
+4. **New value types** exactly as in the code samples: `CliVersion`, `BackendCapabilities`, `ListQuery`, `ProjectRef`, `RelationType`, `ReleaseSource`, `CliOutput`, `DoltOpResult`. No methods beyond derives, `From` impls, `Display` for `CliVersion` (`"{major}.{minor}.{patch}"`, the format `get_cli_client_info` logs today, `cli.rs:358`) and `ProjectRef::local`. **`ListQuery` is the first six fields of today's `ListOptions` (`types.rs:215-223`) with the same `#[serde(rename)]` attributes and `Deserialize`; `ListOptions` becomes `{ #[serde(flatten)] query: ListQuery, cwd: Option<String> }`** (serde flattening of a struct field keeps the wire shape flat), so `bd_list`'s JSON contract is unchanged and pinned by a round-trip test in `api_freeze.rs` (`{"status":["open"],"type":["bug"],"priority":["p1"],"assignee":"a","includeAll":true,"cwd":"/p"}` deserializes into `ListOptions { query: ListQuery { .. include_all: Some(true) }, cwd: Some("/p") }`, and a payload without `includeAll` gives `include_all: None`). `DoltOpResult { success: bool, message: String, detail: String }` carries what `migration.rs` reads from a Dolt operation today: `status.success()`, `stdout.trim()`, `stderr.trim()` (`migration.rs:341-352,631-643,672-682,779-781,890-903`).
 5. **App consumes the crate.** `types.rs` deleted; every `use crate::types::…` replaced; `CompatibilityInfo` constructed in `check_bd_compatibility` with the same field values. `cargo test --workspace` passes the same test set (142 minus the three moved to `btit-types/tests`, which appear there).
 6. **API freeze.** `crates/btit-types/tests/api_freeze.rs` names every public type, field and derive it depends on (`let _: fn(CliProbe) -> Option<CliVersion> = |p| p.version;` style pins, plus `serde_json::to_string` round trips for each DTO), so b-3..b-8 cannot change the contract silently. b-9, b-10 and b-11 do not touch this crate.
 7. **CI.** `rust-quality` job (3 OSes): `cargo fmt --check -p btit-types`, `cargo clippy -p btit-types --all-targets -- -D warnings`, `cargo rustdoc -p btit-types -- -D missing-docs`, and the dependency gate `cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')`. Later sprints append their crates to the same job.
 
 ## Required Work
 
-- Module layout inside the crate: `cli.rs` (`CliClient`, `CliVersion`, `CliProbe`, `BackendCapabilities`, `CompatibilityInfo`, `ReleaseSource`, `CliOutput`), `issue.rs` (raw and normalized issue types), `fs.rs` (`DirectoryEntry`, `FsListResult`, `PurgeResult`), `payload.rs` (`ListOptions`, `CwdOptions`, `CreatePayload`, `UpdatePayload`, `ListQuery`), `backend.rs` (`ProjectRef`, `RelationType`). `lib.rs` re-exports every type at the crate root, so consumers write `btit_types::Issue`.
+- Module layout inside the crate: `cli.rs` (`CliClient`, `CliVersion`, `CliProbe`, `BackendCapabilities`, `CompatibilityInfo`, `ReleaseSource`, `CliOutput`), `issue.rs` (raw and normalized issue types), `fs.rs` (`DirectoryEntry`, `FsListResult`, `PurgeResult`), `payload.rs` (`ListOptions`, `ListQuery`, `CwdOptions`, `CreatePayload`, `UpdatePayload`), `backend.rs` (`ProjectRef`, `RelationType`, `DoltOpResult`).
+- App adaptation for the `ListOptions` split: `issue_commands.rs` `bd_list` reads `options.query.status` etc. where it read `options.status` (`issue_commands.rs:21,44-61`); the command signature `bd_list(options: ListOptions)` is unchanged. `lib.rs` re-exports every type at the crate root, so consumers write `btit_types::Issue`.
 - Item A4: the orphaned doc comment at `cli.rs:594-595` ("Auto-run refs migration v3 …") is deleted here, because the lines around it (`CompatibilityInfo`) move. b-8 adds the doc comment to `ensure_refs_migrated_v3`.
 - `CliSelection` (`cli.rs:97-111`) is **not** moved: it carries `is_legacy()` logic and goes to `btit-beads::detect` in b-3.
 - Changelog lines (collated by b-12): "New crate `btit-types`: the frontend data contract and CLI probe/capability value types, data only."
@@ -185,16 +186,40 @@ pub struct RelationType {
 ```
 
 ```rust
-// crates/btit-types/src/payload.rs (addition)
-/// Filters for `BeadsBackend::list`; built by the app from `ListOptions` (issue_commands.rs:41-62).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+// crates/btit-types/src/payload.rs (ListOptions moved from types.rs:215-224 and split)
+/// Filters for `BeadsBackend::list` (issue_commands.rs:41-62). Same wire names as today.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct ListQuery {
     pub status: Option<Vec<String>>,
+    #[serde(rename = "type")]
     pub issue_type: Option<Vec<String>>,
     /// Priority strings as the frontend sends them (`"p0"`..); the backend converts with `priority_to_number`.
     pub priority: Option<Vec<String>>,
     pub assignee: Option<String>,
-    pub include_all: bool,
+    #[serde(rename = "includeAll")]
+    pub include_all: Option<bool>,      // today `Option<bool>`, read with `unwrap_or(false)` (issue_commands.rs:21)
+}
+
+/// The `bd_list` payload: the query plus the project directory. Flattened, so the JSON is unchanged.
+#[derive(Debug, Deserialize, Default)]
+pub struct ListOptions {
+    #[serde(flatten)]
+    pub query: ListQuery,
+    pub cwd: Option<String>,
+}
+```
+
+```rust
+// crates/btit-types/src/backend.rs (addition)
+/// Transport-neutral result of a `DoltOperations` call: what `migration.rs` reads from the process
+/// today (`status.success()`, `stdout.trim()`, `stderr.trim()`; migration.rs:341-352,631-643,672-682,779-781,890-903).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoltOpResult {
+    pub success: bool,
+    /// Trimmed standard output (the success message today).
+    pub message: String,
+    /// Trimmed standard error (the failure detail today).
+    pub detail: String,
 }
 ```
 
@@ -220,7 +245,7 @@ pub struct ListQuery {
 
 ## Acceptance Criteria
 
-1. `cargo tree -e normal -p btit-types --depth 1` lists exactly `serde` and `serde_json`; `! grep -rnE 'std::(process|fs|env|io)|tauri|log::|impl .* fn .*\(' crates/btit-types/src` (no I/O modules, no Tauri, no logging; the regex for `impl` methods is refined in the PR to allow `From`/`Display`/`local()` only).
+1. Data-only crate, two runnable checks: (a) `cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')` is empty; (b) `! grep -rnE 'std::(process|fs|env|io|net)|tauri|log::' crates/btit-types/src`. Plus the enumerated impl list: `grep -rhoE '^impl(<[^>]*>)? [^{]+' crates/btit-types/src | sed -E 's/ *$//' | sort` equals exactly `impl From<(u32, u32, u32)> for CliVersion`, `impl From<CliVersion> for (u32, u32, u32)`, `impl ProjectRef`, `impl std::fmt::Display for CliVersion` (derives do not appear as `impl` lines).
 2. Every type in the plan's type-move inventory with destination `btit-types` exists at `btit_types::<Name>` with the listed derives and attributes; `crates/btit-app/src/types.rs` does not exist.
 3. `git diff origin/integrate/phase-b...HEAD -- crates/btit-app/src` shows only `use` line changes, the `mod types;` removal, the `CliProbe`/`CompatibilityInfo`/orphaned-comment removal from `cli.rs`, `.into()`/`CliVersion` adaptations at `_for` call sites, and `CompatibilityInfo { .. }` construction edits; no other line changes.
 4. `cargo test --workspace` passes; the three JSON tests from Deliverable 2 pass under `btit-types`; the test-preservation gate (plan "Test preservation") prints nothing.

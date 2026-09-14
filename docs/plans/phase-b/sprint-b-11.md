@@ -71,7 +71,7 @@ Every listed deliverable is expected to land at a production-ready level for the
 4. **B9 — pre-release compare.** `compare_versions` strips everything from the first `-` in each input before splitting, so `1.2.0-rc.1` parses as `[1, 2, 0]`. Test `compare_versions_with_prerelease_parses_numeric_parts_only` → replaced by `compare_versions_ignores_prerelease_suffix` (`("1.0.0-alpha","1.0.0-beta")` → false; `("1.0.0-alpha","1.1.0-beta")` → true; `("1.2.0-rc.1","1.2.0")` → false; `("1.2.0-rc.1","1.2.1")` → true) with a correct comment. Residual: an RC is still not offered its own final release (they compare equal); recorded in Implementation Notes as the direction the review chose.
 5. **B10 — tests that assert nothing off macOS.** `find_platform_asset_for(assets, suffix) -> Option<&GitHubAsset>` pure core and `platform_asset_suffix() -> &'static str`; `find_platform_asset` composes them. Tests `find_platform_asset_matches_macos_arm64`, `find_platform_asset_returns_none_for_no_match` → replaced by `find_platform_asset_for_matches_each_suffix` (all four suffixes) and `find_platform_asset_for_returns_none_without_match`, platform-independent.
 6. **B12 — extension sanitization.** `sanitize_filename` applies the stem rules (lowercase, diacritics, unsafe chars → `-`, collapse, trim) to the extension too, keeping the leading `.`. New test `sanitize_filename_sanitizes_extension`: `"a.b<c>"` → `"a.b-c"`, `"Report.MD"` → `"report.md"`, `"x.tar.gz"` → `"x-tar.gz"` (today's stem rule already turns the inner `.` into `-`, `attachments.rs:262`). Existing `sanitize_filename_*` tests kept; `sanitize_filename_fallback_for_empty_stem` asserts the exact output.
-7. **B13 — probe caching.** `CliRunner::client_info()` caches a failed probe (a `ProbeState::Failed` marker or `Some(CliProbe { version: None, .. })`) so gated calls do not re-spawn `--version`; `backend::replace` (via `set_cli_binary_path`) builds a fresh runner and `check_bd_compatibility` rebuilds the slot when its fresh probe differs (b-7 Deliverable 4), which is the reset path. Tests in `btit-cli` through a scripted `probe_version_output` seam: one spawn for two `capabilities()` calls after a failed probe; a fresh `CliRunner` probes again.
+7. **B13 — probe caching.** `CliRunner`'s cache becomes `Mutex<ProbeState>` with `pub enum ProbeState { Unprobed, Failed, Ok(CliProbe) }` (pinned in `crates/btit-cli/tests/api_freeze.rs`): `client_info()` probes once from `Unprobed`; a spawn failure, non-zero exit or unparsable version stores `Failed` (today's log lines `[cli_detect] Failed to get version from …` / `Could not parse version from: …`, `cli.rs:342,362`, are emitted once) and every later call returns `None` without spawning, so `client()` is `Unknown`, `version()` is `None` and `capabilities()` is all `false`; `Ok(p)` is returned as today. `backend::replace` (via `set_cli_binary_path`) builds a fresh runner and `check_bd_compatibility` rebuilds the slot when its fresh probe differs (b-7 Deliverable 4), which is the reset path. Tests in `btit-cli` through a scripted `probe_version_output` seam: `probe_failure_is_cached_and_reports_unknown` (two `capabilities()` calls after a failed probe spawn exactly once; `client() == Unknown`, `version() == None`), `fresh_runner_probes_again`, and `parsed_probe_is_cached_once`.
 8. **OQ-4 follow-up.** If b-9 flipped the br `supports_list_all_flag_for` arm, the `btit-br` `capabilities()` test expectation is updated here; otherwise no `btit-br` change.
 9. **Group B join and test gate.** b-8 and b-10 are merged into this branch; the test-preservation gate is run with the union of the b-9, b-10 and b-11 replacement lists removed from the baseline and prints nothing.
 
@@ -107,8 +107,17 @@ pub(crate) fn is_real_external_ref(r: &str) -> bool {
 
 ```bash
 # test-preservation gate with all three replacement lists (plan "Test preservation")
+cargo test --manifest-path /tmp/btit-baseline/src-tauri/Cargo.toml -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/baseline-tests.txt
+cargo test --workspace --all-features -- --list 2>/dev/null | sed -nE 's/^(.*::)?([A-Za-z0-9_]+): test$/\2/p' | sort -u > /tmp/after-tests.txt
 cat /tmp/replaced-b9.txt /tmp/replaced-b10.txt /tmp/replaced-b11.txt | sort -u > /tmp/replaced.txt
 comm -23 <(grep -vxFf /tmp/replaced.txt /tmp/baseline-tests.txt) /tmp/after-tests.txt   # must print nothing
+```
+
+```rust
+// crates/btit-cli/src/runner.rs (after B13)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeState { Unprobed, Failed, Ok(CliProbe) }
+// CliRunner { binary, locks, probe: Mutex<ProbeState> }; client_info(): Unprobed → probe once and store Failed|Ok; Failed → None; Ok(p) → Some(p)
 ```
 
 ## This Sprint Does Not Close
