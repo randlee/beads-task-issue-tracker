@@ -40,7 +40,7 @@ pub enum InitError {
     },
 }
 
-/// Error returned by [`LogGuard::flush`](crate::LogGuard::flush).
+/// Error returned by [`LogGuard::flush`](crate::LogGuard::flush) and [`LogHandle::flush`](crate::LogHandle::flush).
 #[derive(Debug, thiserror::Error)]
 pub enum FlushError {
     /// The writer did not acknowledge the flush within `timeout`.
@@ -66,6 +66,9 @@ pub enum FlushError {
     /// The flush helper thread ended without a result.
     #[error("the flush helper thread ended without a result")]
     HelperLost,
+    /// Shutdown has started (or finished): there is no logger left to flush.
+    #[error("the logger is shutting down or has shut down; nothing was flushed")]
+    ShutDown,
 }
 
 /// Error returned by [`LogGuard::shutdown`](crate::LogGuard::shutdown).
@@ -141,6 +144,7 @@ impl FlushError {
             Self::Logger { source } => source.diagnostic().code.clone(),
             Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
             Self::HelperLost => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+            Self::ShutDown => error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
         }
     }
 
@@ -159,6 +163,9 @@ impl FlushError {
             Self::HelperLost => Remediation::recoverable(
                 "shut the LogGuard down",
                 ["the logger may be degraded after a panic inside sc-observability"],
+            ),
+            Self::ShutDown => Remediation::not_recoverable(
+                "the lifecycle owner has shut the logger down; the final shutdown flushed what was queued",
             ),
         }
     }
@@ -332,6 +339,10 @@ mod tests {
             (
                 FlushError::HelperLost,
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+            ),
+            (
+                FlushError::ShutDown,
+                error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
             ),
         ];
         for (error, code) in cases {

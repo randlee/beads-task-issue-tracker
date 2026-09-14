@@ -69,6 +69,7 @@ fn health_snapshot_tracks_the_lifecycle() {
     log::info!(target: "health", "a record before the snapshot");
     guard.flush(Duration::from_secs(5)).unwrap();
 
+    handle.flush(Duration::from_secs(5)).unwrap();
     let from_guard = guard.health();
     assert_running(&from_guard, &path);
     assert_running(&handle.health(), &path);
@@ -89,6 +90,12 @@ fn health_snapshot_tracks_the_lifecycle() {
         stopped.file_sink.active_log_path.as_deref(),
         Some(path.as_path())
     );
+
+    // A handle outlives the guard without owning it: a late flush is rejected clearly.
+    assert!(matches!(
+        handle.flush(Duration::from_secs(1)),
+        Err(sc_observability_log::FlushError::ShutDown)
+    ));
 
     // A record after shutdown is filtered before the bridge: not written, not counted.
     let dropped = stopped.dropped_events;

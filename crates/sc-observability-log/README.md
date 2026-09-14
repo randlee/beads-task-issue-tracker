@@ -61,6 +61,18 @@ would let any caller hang. Call `LogGuard::flush(timeout)` instead.
 `LogGuard::shutdown(timeout)` and `Drop for LogGuard` (with
 `DEFAULT_DROP_SHUTDOWN_TIMEOUT`) are bounded the same way.
 
+### One lifecycle owner
+
+`LogGuard` is not `Clone`, and it should have exactly one owner: the code that
+performs the final `shutdown` and records its `Result`. Do not share the guard
+(for example through an `Arc`) with code that only needs to flush: a clone that
+outlives the owner turns shutdown into `Drop` on whichever thread releases the
+last clone, with the outcome discarded. Hand such code a `LogHandle`
+(`LogGuard::handle()`) instead. `LogHandle::flush(timeout)` is bounded like
+`LogGuard::flush`; if the owner shuts down concurrently, a flush already in
+progress completes and shutdown waits for it within its own timeout, and a
+flush requested after shutdown started returns `FlushError::ShutDown`.
+
 `Drop for LogGuard` has no `Result` to hand back to a caller, so it discards
 the outcome of its flush-and-shutdown sequence (`let _ = ..`). An implicit
 teardown failure (timeout, final-flush error or a lost helper thread) is

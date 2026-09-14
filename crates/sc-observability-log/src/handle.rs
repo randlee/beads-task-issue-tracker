@@ -333,10 +333,15 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
     SLOT.read().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
-/// `LogGuard::flush`: the helper owns an `Arc` clone until sc-observability's flush returns.
+/// `LogGuard::flush` / `LogHandle::flush`: the helper owns an `Arc` clone until
+/// sc-observability's flush returns.
+///
+/// An empty slot means shutdown has taken the logger: `FlushError::ShutDown`. A
+/// flush whose helper already holds its clone when shutdown starts is awaited by
+/// the shutdown's `take_sole`, within the shutdown's own timeout.
 pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
     let Some(installed) = current_installed() else {
-        return Ok(());
+        return Err(FlushError::ShutDown);
     };
     match run_bounded(timeout, move || installed.logger.flush()) {
         Ok(Ok(())) => Ok(()),

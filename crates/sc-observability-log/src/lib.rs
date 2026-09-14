@@ -204,6 +204,7 @@ impl LogGuard {
     /// `timeout` (the helper is detached), [`FlushError::Logger`] when a sink flush
     /// fails, and [`FlushError::HelperSpawn`] / [`FlushError::HelperLost`] when the
     /// helper thread cannot start or ends without a result.
+    /// [`FlushError::ShutDown`] cannot occur while the guard is alive.
     pub fn flush(&self, timeout: Duration) -> Result<(), FlushError> {
         handle::flush_installed(timeout)
     }
@@ -254,7 +255,7 @@ impl LogGuard {
     }
 }
 
-/// Cloneable, non-owning access to the installed bridge; it cannot shut it down.
+/// Cloneable, non-owning access to the installed bridge: bounded flush and health.
 ///
 /// Obtained with [`LogGuard::handle`]. The `LogGuard` remains the only lifecycle
 /// owner: a handle holds no reference to the logger, so dropping or keeping one
@@ -266,6 +267,21 @@ pub struct LogHandle {
 }
 
 impl LogHandle {
+    /// Flushes on a helper thread, bounded by `timeout`; same as [`LogGuard::flush`].
+    ///
+    /// The handle does not own the logger, so it can race the owner's shutdown.
+    /// That race is coordinated, not undefined: a flush that started first keeps
+    /// the logger alive only until it returns, and shutdown waits for it within
+    /// its own timeout; a flush requested after shutdown started does nothing.
+    ///
+    /// # Errors
+    ///
+    /// Every [`LogGuard::flush`] error, plus [`FlushError::ShutDown`] when shutdown
+    /// has started or finished.
+    pub fn flush(&self, timeout: Duration) -> Result<(), FlushError> {
+        handle::flush_installed(timeout)
+    }
+
     /// Read-only health snapshot; identical to [`LogGuard::health`], also after shutdown.
     #[must_use]
     pub fn health(&self) -> BridgeHealth {

@@ -4,6 +4,8 @@
 // - a-5 R-A4-004: `LogGuard::health`, `LogGuard::handle`, `LogHandle::health`, the
 //   `BridgeHealth` snapshot types, `BRIDGE_HEALTH_SCHEMA_VERSION`, the `Timestamp`
 //   re-export, and `Serialize`/`Deserialize` on `DroppedEvents`.
+// - a-5 R-A4-001: `LogHandle::flush`, `FlushError::ShutDown` and its code
+//   `SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN` (flush after shutdown started).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -61,6 +63,7 @@ fn a1_public_api_is_frozen() {
     let _ = |e: FlushError| match e {
         FlushError::TimedOut { timeout: _ } | FlushError::Logger { source: _ } => (),
         FlushError::HelperSpawn { source: _ } | FlushError::HelperLost => (),
+        FlushError::ShutDown => (),
     };
     let _ = |e: ShutdownError| match e {
         ShutdownError::TimedOut { timeout: _ } | ShutdownError::FinalFlush { source: _ } => (),
@@ -79,6 +82,9 @@ fn a5_health_api_is_frozen() {
     let _: fn(&LogGuard) -> BridgeHealth = LogGuard::health;
     let _: fn(&LogGuard) -> LogHandle = LogGuard::handle;
     let _: fn(&LogHandle) -> BridgeHealth = LogHandle::health;
+    let _: fn(&LogHandle, Duration) -> Result<(), FlushError> = LogHandle::flush;
+    let _: sc_observability_log::ErrorCode =
+        sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN;
     let _: u32 = sc_observability_log::BRIDGE_HEALTH_SCHEMA_VERSION;
     fn serde_derives<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     fn snapshot_derives<T: std::fmt::Debug + Clone + PartialEq>() {}

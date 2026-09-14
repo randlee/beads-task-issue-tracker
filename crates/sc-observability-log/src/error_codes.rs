@@ -26,6 +26,9 @@ pub const SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED: ErrorCode =
 /// `FlushError::HelperLost` / `ShutdownError::HelperLost`: the helper thread ended without a result.
 pub const SC_OBSERVABILITY_LOG_HELPER_LOST: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_HELPER_LOST");
+/// `FlushError::ShutDown`: a flush was requested after shutdown had started.
+pub const SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN");
 
 /// Every code defined by this crate, in declaration order.
 pub const ALL: &[ErrorCode] = &[
@@ -36,6 +39,7 @@ pub const ALL: &[ErrorCode] = &[
     SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
     SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
     SC_OBSERVABILITY_LOG_HELPER_LOST,
+    SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
 ];
 
 #[cfg(test)]
@@ -49,6 +53,6 @@ mod tests {
             assert!(code.as_str().starts_with("SC_OBSERVABILITY_LOG_"));
             assert!(seen.insert(code.as_str()), "duplicate code {code}");
         }
-        assert_eq!(ALL.len(), 7);
+        assert_eq!(ALL.len(), 8);
     }
 }
