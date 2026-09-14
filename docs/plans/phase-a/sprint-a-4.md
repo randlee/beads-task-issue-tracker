@@ -1,10 +1,10 @@
 ---
 id: a-4
 title: btit adopts the sc-observability-log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-4-btit-adoption
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption
-target: develop
+target: integrate/phase-a
 recommended_model: standard (bounded integration; UI renderer is pure logic)
 dependency_relations:
   - prerequisite: a-1
@@ -41,7 +41,7 @@ Planning advice; team-lead assigns from the active pool.
 
 ## Hard Dependencies
 
-- a-1 PR merged to `develop`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `develop` after that merge, as a single PR on `develop` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children.
+- a-1 PR merged to `integrate/phase-a`: `init`, `BridgeOptions`, `LogGuard`, `InitError`, `DropCause`, the `LevelFilter` re-export, the frozen API (`crates/sc-observability-log/tests/api_freeze.rs`) and the frozen runtime dependency graph (`crates/runtime-deps.txt`). The a-4 branch is created from `integrate/phase-a` after that merge, as a single PR on `integrate/phase-a` with no stack: GitHub stacks are strictly linear, so a-1 cannot have both a-2 and a-4 as children. (Corrected from an earlier draft that said `develop`; see "Implementation Notes" below — the frontmatter `target:` was already correct.)
 - a-2 and a-3 are **not** prerequisites (`parallel_safe`).
 
 ## Dependency Relations
@@ -55,7 +55,7 @@ PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 - a-4 ↔ a-3 — `parallel_safe`: same ownership split as a-2.
 - a-4 → a-5 — `must_follow` (a-5 follows a-4): the review covers the crates as adopted by btit; a-4 PR merges before a-5 development starts.
 
-Stack: `none (single PR on develop, created after the a-1 PR merges)`.
+Stack: `none (single PR on integrate/phase-a, created after the a-1 PR merges)`.
 
 ## Exact Targets
 
@@ -300,12 +300,12 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 ## Acceptance Criteria
 
 1. `tauri-plugin-log` appears nowhere in `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` or `src-tauri/src`.
-2. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changes. `git diff develop...HEAD` shows no changed lines matching those patterns, other than in `logging.rs` (`log_frontend`, `on_run_event`, `clear_logs`).
+2. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changes. `git diff integrate/phase-a...HEAD` shows no changed lines matching those patterns, other than in `logging.rs` (`log_frontend`, `on_run_event`, `clear_logs`).
 3. The built app writes `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`. Startup records carry the expected `target`, and bracket-tagged records carry the tag as `action`. Evidence is in the PR description.
 4. `read_logs`, `export_logs`, `clear_logs` and `get_log_path_string` work on the JSONL file. `clear_logs` truncates the active file and removes rotated files, and logging continues afterwards. Evidence is in the PR description.
 5. `formatLogLine`/`formatLogLines` tests pass, and the debug panel shows rendered, colorized lines.
 6. The per-OS `get_log_path` `cfg` blocks are gone, `logging.rs` has no platform-gated imports (closes refactor-review item A2 for `logging.rs` only), and `get_log_path` uses `LogGuard::active_log_path` rather than a hand-built path.
-7. On `RunEvent::Exit` the guard is taken out of `LOG_GUARD` and exactly one bounded call is made: `shutdown(LOG_IO_TIMEOUT)` when `Arc::try_unwrap` succeeds, otherwise `flush(LOG_IO_TIMEOUT)`. No code path holds `LOG_GUARD` across `flush` or `shutdown` (`clear_logs` clones the `Arc` and releases the lock first), so exit is bounded by 1×`LOG_IO_TIMEOUT`. The last record logged before quit is present in the file. Evidence is in the PR description.
+7. *(Superseded in a-5: this shared-`Arc` exit design was replaced by a single lifecycle owner to fix R-A4-001; see [`review-a-5.md`](review-a-5.md).)* On `RunEvent::Exit` the guard is taken out of `LOG_GUARD` and exactly one bounded call is made: `shutdown(LOG_IO_TIMEOUT)` when `Arc::try_unwrap` succeeds, otherwise `flush(LOG_IO_TIMEOUT)`. No code path holds `LOG_GUARD` across `flush` or `shutdown` (`clear_logs` clones the `Arc` and releases the lock first), so exit is bounded by 1×`LOG_IO_TIMEOUT`. The last record logged before quit is present in the file. Evidence is in the PR description.
 8. No panics in touched code: `logging.rs` carries the `#![deny(..)]` attribute from the code sample and `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets` reports no error; `grep -nE '\.unwrap\(\)|\.expect\(|panic!|unreachable!|todo!|unimplemented!|eprintln!|println!' src-tauri/src/lib.rs src-tauri/src/logging.rs` prints nothing.
 9. Refactor-review item A1 is closed by design: JSONL records carry the Rust `log` target as `LogEvent.target` (for example `app_lib.cli`, taken from `module_path!()` via `log::Record::target()`), and the debug panel renders that field. No log line depends on the literal `[app_lib]` prefix. Evidence is in the PR description.
 10. `CLAUDE.md` lines 55 and 58 describe the new mechanism and file.
@@ -320,6 +320,16 @@ export function formatLogLines(jsonl: string, defaultAction?: string): string
 - `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets`
 - `! grep -nE '\.unwrap\(\)|\.expect\(|panic!|unreachable!|todo!|unimplemented!|eprintln!|println!' src-tauri/src/lib.rs src-tauri/src/logging.rs`
 - `python3 scripts/check_version_sync.py`
-- `git diff --exit-code develop...HEAD -- crates/`
+- `git diff --exit-code integrate/phase-a...HEAD -- crates/`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets`
 - `pnpm tauri:build` (manual verification per Required Work)
+
+## Implementation Notes
+
+- **Stale "Hard Dependencies" wording (corrected).** The original text said the a-4 branch is "created from `develop`" and is "a single PR on `develop`". That contradicted this doc's own frontmatter (`target: integrate/phase-a`) and `plan-phase-a.md` (`a-4` lane: "single PR on `integrate/phase-a`", created from `origin/integrate/phase-a`). The wording is corrected in place above; no behavior changed, this is a doc-only fix.
+- **PR base (final).** a-1 merged to `integrate/phase-a` as commit `d4967c9`. The a-4 branch was rebased onto `origin/integrate/phase-a` and PR #48 targets `integrate/phase-a` directly; the earlier unmerged-a-1 workaround (basing on `feature/sprint-a-1-log-bridge`) no longer applies.
+- **`crates/` diff check (final).** With the branch rebased onto `origin/integrate/phase-a`, `git diff --exit-code origin/integrate/phase-a...HEAD -- crates/` is empty, confirming a-4 touches no file under `crates/` (acceptance criterion 11).
+- **QA-1 (PR #48): `clear_logs`/`export_logs`/`read_logs` moved to `spawn_blocking`.** The three commands' blocking bodies (`LogGuard::flush`, `fs::write`, `remove_rotated_logs`, `fs::copy`, `fs::read_to_string`) now run inside `tauri::async_runtime::spawn_blocking(move || ..)`, awaited and mapped to the existing `Err(String)` style, instead of running inline on the async runtime (RSH-A4-001). `clear_logs` still clones the `Arc<LogGuard>` under the `LOG_GUARD` lock and releases the lock before moving the clone into the blocking closure, so `LOG_GUARD` is never held across the flush (Deliverable 3 invariant unchanged).
+- **QA-1 (PR #48): `[dev-dependencies] tokio` and `logging::tests`.** `src-tauri/Cargo.toml` gained `tokio = { version = "1", features = ["macros", "rt"] }` under `[dev-dependencies]` so the async log commands can be exercised with `#[tokio::test]`. `logging.rs` gained a `#[cfg(test)] mod tests` covering `get_log_path`, `read_logs`, `clear_logs`, `export_logs` (all against an uninitialized guard/path) and `remove_rotated_logs` (via a temp-dir-backed `ScratchDir` helper and a `TestError` that carries setup/teardown failures out through `?` instead of panicking).
+- **`log_frontend` unknown-level match arms.** Deliverable 7 describes the fallback as "other" mapping to `Info`. The implementation matches `"error"`, `"warn"`, `"info"` explicitly (rather than treating `"info"` as part of the fallback arm, as the original plain-text version did) so the `frontend_level` kv field is attached only to genuinely unrecognized strings, matching the deliverable's intent precisely. Behavior for `"error"`/`"warn"`/`"info"` is unchanged.
+- No other deviations from the spec were required; the a-1 public API (`init`, `BridgeOptions`, `LogGuard`, `InitError`, `FlushError`, `ShutdownError`, `DropCause`, `LevelFilter`, `ServiceName`, `ActionName`) matched the code samples in `sprint-a-1.md` exactly, so `logging.rs` and `lib.rs` were written directly against the code samples in this doc without any `crates/` changes.

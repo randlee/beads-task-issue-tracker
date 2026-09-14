@@ -4,7 +4,7 @@ title: Handoff into ../sc-observability for publish
 status: planned
 branch: feature/sprint-a-6-sc-handoff
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-6-sc-handoff
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (cross-repo governance gates)
 dependency_relations:
   - prerequisite: a-5

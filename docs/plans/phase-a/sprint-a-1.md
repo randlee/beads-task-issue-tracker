@@ -1,10 +1,10 @@
 ---
 id: a-1
 title: sc-observability-log crate — log bridge
-status: planned
+status: complete
 branch: feature/sprint-a-1-log-bridge
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (global logger lifecycle, cross-platform CI)
 dependency_relations:
   - prerequisite: PR #36
@@ -50,7 +50,7 @@ PR merges first. `parallel_safe`: no gate; state non-intersecting ownership.
 - a-1 → a-2 — `must_follow` (a-2 follows a-1): a-2 macros expand to a-1 `__private::{EventParts, enabled, emit, record_drop}` and label through the a-1 `mapping.rs` sanitizer (`__private::{target_label, action_label, field_key_label}`).
 - a-1 → a-4 — `must_follow` (a-4 follows a-1): a-4 consumes the frozen a-1 public API and runtime dependency graph; a-4 starts after the a-1 PR merges.
 
-Stack: `phase-a-core · layer 1 (trunk develop)`.
+Stack: `phase-a-core · layer 1 (trunk integrate/phase-a)`.
 
 ## Exact Targets
 
@@ -90,7 +90,7 @@ Every deliverable must land production-ready for the scope this sprint claims. I
 3. **Public API:** `init`, `BridgeOptions`, `LogGuard`, `InitError`, `FlushError`, `ShutdownError`, `DropCause`, `DroppedEvents`, `DEFAULT_DROP_SHUTDOWN_TIMEOUT`, the `error_codes` module and the re-exports, exactly as in the code samples.
 4. **Errors are discriminated unions:** every error type in the crate, public or internal, is an `enum` whose variants carry typed fields (`#[source]` errors, `Duration`s), so callers `match` on the cause. No opaque `struct X(Box<ErrorContext>)` wrapper and no `String` error is used. For destination compatibility each public error enum (`InitError`, `FlushError`, `ShutdownError`) also exposes `code(&self) -> ErrorCode` (one stable code per variant, from `error_codes.rs`) and `remediation(&self) -> Remediation` (mandatory in sc-observability, `../sc-observability/docs/api-design.md:67`); variants that wrap an sc-observability error return that error's own code and remediation. The crate-private `BoundedError` and `ShutdownStep` and the `#[doc(hidden)]` `LabelError` never reach users (each is mapped to a public error or counted as a `DropCause`), so they carry no code. This deliberately differs from sc-observability's `error_wrapper!` structs (`sc-observability-types/src/errors.rs:19-51`) and is an explicit a-5 review item.
 5. **Single level threshold:** the only level setting is `LoggerConfig.level`. `init` derives `log::set_max_level` and the `__private::enabled` threshold from it. `BridgeOptions` has no level field.
-6. **Process identity:** `init` resolves `LoggerConfig.process_identity` once. This is required because sc-observability 1.2.0 stores the policy but never applies it: `Logger::prepare_event` only validates, filters and redacts (`runtime.rs:247-253`), and `LogEvent.identity` is a required field (`events.rs:90-91`). Resolution: `Auto` → `ProcessIdentity { hostname: None, pid: Some(std::process::id()) }`; `Fixed { hostname, pid }` → as given; `Resolver(r)` → `r.resolve()`, where an `Err` fails `init` with `InitError::IdentityResolution`. Every emitted `LogEvent.identity` carries the cached value.
+6. **Process identity:** `init` resolves `LoggerConfig.process_identity` once. This is required because sc-observability 1.2.0 stores the policy but never applies it: `Logger::prepare_event` only validates, filters and redacts (`runtime.rs:247-253`), and `LogEvent.identity` is a required field (`events.rs:90-91`). Resolution: `Auto` → `ProcessIdentity { hostname: None, pid: Some(std::process::id()) }` (superseded by R-A5-008: a non-empty OS hostname plus the PID, a failed or empty lookup failing `init` with `InitError::IdentityResolution`); `Fixed { hostname, pid }` → as given; `Resolver(r)` → `r.resolve()`, where an `Err` fails `init` with `InitError::IdentityResolution`. Every emitted `LogEvent.identity` carries the cached value.
 7. **Mapping and the single label sanitizer:** the crate-private pure functions `record_to_parts` and `assemble_event`, specified by the mapping table below, and the label sanitizer in `mapping.rs`, which is the only sanitizer in phase-a (code sample below):
    - `sanitize_label(raw: &str) -> Cow<'_, str>` rewrites `::` to `.` and every char outside `[A-Za-z0-9._-]` to `_`. It borrows when `raw` is already valid and never fails.
    - `target_label(raw) -> Result<TargetCategory, LabelError>` sanitizes and maps an empty result to `log`.
@@ -834,13 +834,32 @@ jobs:
           cargo +1.94.1 check --locked --manifest-path crates/Cargo.toml --workspace --all-targets
 ```
 
+## Implementation Notes
+
+Approved developer deviations from the plan text, recorded here for a-2/a-3/a-5:
+
+1. `record_to_parts` returns `Result<EventParts, LabelError>`, not the bare
+   `EventParts` shown in the Deliverable 7/lib.rs skeleton sample. The
+   sanitizer can reject a target after sanitizing (`LabelError::Rejected`),
+   and `record_to_parts` must surface that instead of silently substituting
+   a value; its caller (`bridge::Bridge::log`) maps `Err` to
+   `record_drop(DropCause::InvalidEvent)` and drops the record. Approved by
+   arch-qa, req-qa, rust-qa, rust-best-practices during QA-1 triage.
+2. `crates/sc-observability-log/tests/api_freeze.rs` carries an extra
+   file-level `#![allow(clippy::items_after_statements, clippy::match_same_arms, reason = "...")]`
+   beyond the no-panic allowances in Deliverable 1, because the signature-lock
+   style (derive-probe functions beside the assertions they serve, and one
+   `match` arm per variant for exhaustiveness-by-name) trips those two
+   pedantic lints. Approved by arch-qa, req-qa, rust-qa, rust-best-practices
+   during QA-1 triage; the file remains frozen otherwise.
+
 ## This Sprint Does Not Close
 
 - Event macros (a-2) and `#[instrument]` (a-3).
 - Any btit `src-tauri/` or `app/` change, including removing `tauri-plugin-log` (a-4).
 - Copying the crates into `../sc-observability` (a-6) or publishing them (sc-observability release workflow).
 - Ambient span or trace context for bridge records. Records carry `trace = None` until a-3.
-- Hostname resolution under `ProcessIdentityPolicy::Auto`: std has no hostname API and the runtime dependency set is frozen. Raised for the a-5 review.
+- Hostname resolution under `ProcessIdentityPolicy::Auto`: std has no hostname API and the runtime dependency set is frozen. Raised for the a-5 review. (Superseded by R-A5-008: resolved in a-5 with the `hostname` dependency.)
 - Panics inside sc-observability itself (outside this crate's lint scope). The emit path contains them with `catch_unwind` and `flush`/`shutdown` contain them on the helper thread.
 
 ## Acceptance Criteria

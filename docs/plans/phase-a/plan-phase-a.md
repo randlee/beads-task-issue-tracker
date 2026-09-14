@@ -3,7 +3,7 @@ phase: a
 title: "phase-a: sc-observability-log — log bridge, tracing-compatible macros, and sc-observability handoff"
 canonical_path: docs/plans/phase-a/plan-phase-a.md
 planning_branch: plan/phase-a
-integration_branch: develop
+integration_branch: integrate/phase-a
 status: draft
 owner: Rand Lee
 authored: 2026-09-13
@@ -108,7 +108,7 @@ Migration from tracing 0.1 is an import rename for every supported form. The rej
 | `a-1` | `feature/sprint-a-1-log-bridge` | `phase-a-core` · 1 | PR #36 (satisfied) | none | [`sprint-a-1.md`](./sprint-a-1.md) | `crates/` workspace with lints, both crate manifests with final runtime dependencies, `sc-observability-log` bridge, frozen API test, `crates` CI job on 3 OSes |
 | `a-2` | `feature/sprint-a-2-event-macros` | `phase-a-core` · 2 | a-1 | a-4 | [`sprint-a-2.md`](./sprint-a-2.md) | tracing-compatible event macros, compatibility fixture, consumer-check package |
 | `a-3` | `feature/sprint-a-3-instrument` | `phase-a-core` · 3 | a-2 | a-4 | [`sprint-a-3.md`](./sprint-a-3.md) | tracing-compatible `#[instrument]` (sync and async, all outcomes) plus a compatibility fixture |
-| `a-4` | `feature/sprint-a-4-btit-adoption` | none (single PR on `develop`) | a-1 (PR merged) | a-2, a-3 | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel, bounded exit |
+| `a-4` | `feature/sprint-a-4-btit-adoption` | none (single PR on `integrate/phase-a`) | a-1 (PR merged) | a-2, a-3 | [`sprint-a-4.md`](./sprint-a-4.md) | btit on the bridge: JSONL file, log commands, debug panel, bounded exit |
 | `a-5` | `feature/sprint-a-5-sc-review` | `phase-a-core` · 4 | a-3, a-4 (PR merged) | none | [`sprint-a-5.md`](./sprint-a-5.md) | sc-observability team critical review; every Blocking/Important finding fixed in btit; type-placement decision recorded |
 | `a-6` | `feature/sprint-a-6-sc-handoff` | `phase-a-core` · 5 | a-5 | none | [`sprint-a-6.md`](./sprint-a-6.md) | crates copied into `../sc-observability` with every CI gate green; PR merged; handoff record in btit |
 
@@ -119,25 +119,25 @@ No deliverable is repeated across sprint checklists. Each sprint's status is its
 ```mermaid
 flowchart LR
   P36["PR #36 toolchain (merged)"] --> A1
-  subgraph core["stack phase-a-core (trunk develop)"]
+  subgraph core["stack phase-a-core (trunk integrate/phase-a)"]
     A1["a-1 bridge"] --> A2["a-2 event macros"] --> A3["a-3 #[instrument]"] --> A5["a-5 sc review"] --> A6["a-6 sc handoff"]
   end
-  subgraph adoption["lane 2: single PR on develop"]
+  subgraph adoption["lane 2: single PR on integrate/phase-a"]
     A4["a-4 btit adoption"]
   end
-  A1 -. "a-1 PR merged to develop" .-> A4
-  A4 -. "a-4 PR merged; rebase stack onto develop" .-> A5
+  A1 -. "a-1 PR merged to integrate/phase-a" .-> A4
+  A4 -. "a-4 PR merged; rebase stack onto integrate/phase-a" .-> A5
 ```
 
 - **Lane 1, `phase-a-core`:** a-1 → a-2 → a-3 → a-5 → a-6. These are sequential and share one gh-stack.
-- **Lane 2:** a-4, a single PR on `develop` with no stack. It starts once the a-1 PR is merged to `develop`, and runs in parallel with a-2 and a-3.
-- **Join:** a-5 development starts only after the a-4 PR is merged to `develop` and the remaining `phase-a-core` layers have been rebased onto that `develop` (merge-forward commands below).
+- **Lane 2:** a-4, a single PR on `integrate/phase-a` with no stack. It starts once the a-1 PR is merged to `integrate/phase-a`, and runs in parallel with a-2 and a-3.
+- **Join:** a-5 development starts only after the a-4 PR is merged to `integrate/phase-a` and the remaining `phase-a-core` layers have been rebased onto that `integrate/phase-a` (merge-forward commands below).
 
 ### Why a-4 starts at the a-1 merge rather than the a-1 push
 
 GitHub stacks are strictly linear. A branch has exactly one parent and at most one child. `gh stack link` rejects a PR that is already in a different stack (`~/.claude/skills/gh-stack/SKILL.md`, "Known limitations" and `link`).
 
-Stacking a-4 on the a-1 branch would give a-1 two children, which a stack cannot hold. a-4 is therefore a single PR on `develop`, branched after the a-1 PR merges. It has no stack because it is not part of a sequence.
+Stacking a-4 on the a-1 branch would give a-1 two children, which a stack cannot hold. a-4 is therefore a single PR on `integrate/phase-a`, branched after the a-1 PR merges. It has no stack because it is not part of a sequence.
 
 ## gh-stack and worktree workflow
 
@@ -152,31 +152,31 @@ The stack is therefore managed on GitHub with `gh stack link`, which creates no 
 
 ```bash
 # Layer creation: from the repo root, branch each layer from its parent (sc-git-worktree convention)
-git worktree add -b feature/sprint-a-1-log-bridge   ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge   origin/develop
+git worktree add -b feature/sprint-a-1-log-bridge   ../beads-task-issue-tracker-worktrees/feature/sprint-a-1-log-bridge   origin/integrate/phase-a
 git worktree add -b feature/sprint-a-2-event-macros ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros feature/sprint-a-1-log-bridge   # when a-1 development is pushed
 git worktree add -b feature/sprint-a-3-instrument   ../beads-task-issue-tracker-worktrees/feature/sprint-a-3-instrument   feature/sprint-a-2-event-macros # when a-2 development is pushed
-git worktree add -b feature/sprint-a-5-sc-review    ../beads-task-issue-tracker-worktrees/feature/sprint-a-5-sc-review    feature/sprint-a-3-instrument   # when a-3 is pushed AND the a-4 PR is merged (rebase a-3 onto develop first)
+git worktree add -b feature/sprint-a-5-sc-review    ../beads-task-issue-tracker-worktrees/feature/sprint-a-5-sc-review    feature/sprint-a-3-instrument   # when a-3 is pushed AND the a-4 PR is merged (rebase a-3 onto integrate/phase-a first)
 git worktree add -b feature/sprint-a-6-sc-handoff   ../beads-task-issue-tracker-worktrees/feature/sprint-a-6-sc-handoff   feature/sprint-a-5-sc-review    # when a-5 development is pushed
 
 # GitHub stack: create with the first two layers, then append each new layer by stack number
 # (gh stack link pushes the named branches itself; no separate push step is needed)
-gh stack link --base develop feature/sprint-a-1-log-bridge feature/sprint-a-2-event-macros
+gh stack link --base integrate/phase-a feature/sprint-a-1-log-bridge feature/sprint-a-2-event-macros
 gh stack link <stack-number> feature/sprint-a-3-instrument        # likewise for a-5 and a-6, each after its first push
 
 # Merge-forward before every dev/fix round on layer N (bottom → top, each in its own worktree)
 git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> fetch origin
-git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> rebase <layer-(N-1)-branch>   # layer 1 rebases onto origin/develop
+git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> rebase <layer-(N-1)-branch>   # layer 1 rebases onto origin/integrate/phase-a
 git -C ../beads-task-issue-tracker-worktrees/<layer-N-branch> push --force-with-lease
 
 # Lane 2 (not a sequence, so no stack): after the a-1 PR merges
-git worktree add -b feature/sprint-a-4-btit-adoption ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption origin/develop
+git worktree add -b feature/sprint-a-4-btit-adoption ../beads-task-issue-tracker-worktrees/feature/sprint-a-4-btit-adoption origin/integrate/phase-a
 ```
 
 **Merge rules:**
 - Stacked PRs are merged with `gh stack merge <PR> --yes` (bottom-up, up to that PR) or `gh stack merge <stack-number> --yes`. Never `gh pr merge`. Neither form needs a local checkout.
 - The user completes merges unless they delegate one.
 - In lane 1, the a-1 PR is merged as soon as it passes (`gh stack merge <a-1 PR> --yes`), which unblocks lane 2.
-- After a merge to `develop`, rebase the lowest remaining layer onto `origin/develop` and cascade upward with the merge-forward commands.
+- After a merge to `integrate/phase-a`, rebase the lowest remaining layer onto `origin/integrate/phase-a` and cascade upward with the merge-forward commands.
 - Stack state is inspected only with `gh stack view --json`, run from the main checkout, never from a layer worktree.
 
 **Rebase-stable evidence.** The rebase cascade rewrites layer commit SHAs, so no QA artifact cites a layer SHA. a-5 and a-6 anchor evidence with pushed annotated tags (`phase-a/review-a-5-r1`, `phase-a/handoff-a-6-source`) plus the content tree hash of `crates/` at that tag, and a-5 proves each fix with a `Review-Finding: R-NNN` commit trailer.
@@ -196,7 +196,7 @@ The `must_follow` rules (from the sprint planning guidelines):
 | `a-3 must_follow a-2` | a-3 reuses a-2's `crates/sc-observability-log-macros/src/fields.rs` (`EventSpec`), `Callsite` and field dispatch. Events inside an instrumented fn inherit trace context through the a-1 `emit`. |
 | `a-4 must_follow a-1` | a-4 consumes a-1's `init` / `BridgeOptions` / `LogGuard` / `InitError` / `DropCause` / `LevelFilter` API and the runtime dependency graph a-1 freezes. PR-completion trigger: a-1 PR merged before the a-4 branch is created (see "Why a-4 starts at the a-1 merge"). |
 | `a-5 must_follow a-3` | The review covers the complete crate API (bridge, event macros, `#[instrument]`). |
-| `a-5 must_follow a-4` | The review covers the crates as adopted by a real consumer. The a-4 PR merges, and the stack is rebased onto `develop`, before a-5 development starts. |
+| `a-5 must_follow a-4` | The review covers the crates as adopted by a real consumer. The a-4 PR merges, and the stack is rebased onto `integrate/phase-a`, before a-5 development starts. |
 | `a-6 must_follow a-5` | a-6 copies the crates after every Blocking/Important review finding is fixed, and implements the recorded type-placement decision in `../sc-observability`. |
 | `a-2 parallel_safe a-4` | Non-intersecting ownership (table below), a frozen a-1 API and a frozen runtime graph, each mechanically checked. |
 | `a-3 parallel_safe a-4` | Same as a-2. a-3 changes the *content* of bridge records (trace context) but no API or dependency a-4 compiles against. |
@@ -252,7 +252,7 @@ a-5 reviews the union of these inventories.
 phase-a closes when all of the following hold:
 
 - a-1–a-6 are merged.
-- btit `develop` runs on the bridge.
+- `integrate/phase-a` runs on the bridge and is merged to `develop` through a single phase PR (after a-6 closes).
 - `docs/plans/phase-a/handoff-a-6.md` records the merged `../sc-observability` PR (URL, merge commit, green CI run URL) that adds both crates.
 
 **Not part of phase-a:**

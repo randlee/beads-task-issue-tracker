@@ -1,10 +1,10 @@
 ---
 id: a-2
 title: sc-observability-log-macros — tracing-compatible event macros
-status: planned
+status: complete
 branch: feature/sprint-a-2-event-macros
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-a-2-event-macros
-target: develop
+target: integrate/phase-a
 recommended_model: higher-effort (proc-macro parsing of the tracing field grammar)
 dependency_relations:
   - prerequisite: a-1
@@ -159,7 +159,7 @@ Every deliverable must land at a production-ready level for the scope this sprin
 
 **Tests:**
 - `tests/macros_jsonl.rs` initializes the a-1 guard and asserts each grammar row against the JSONL output: exact `target`, `action`, `message` and `fields` JSON types. This includes `target: TGT`, `target: module_path!()`, `name: concat!(..)`, every brace-form row, `{ KEY } = v`/`?v`/`%v`, `event!(name: "n", Level::INFO, ..)` and `event!(LVL, ..)`.
-- Runtime label and key checks in `tests/macros_jsonl.rs`: with `const EMPTY: &str = ""`, `const RESERVED: &str = "sc_observability_log.x"`, `const RESERVED_PATH: &str = "sc_observability_log::y"` and `const SPACED: &str = "a b"`, one event `info!({ EMPTY } = 1, { RESERVED } = 2, { RESERVED_PATH } = 3, { SPACED } = 4, ok = 5, "m")` is present with `fields == {"a_b": 4, "ok": 5}` and `guard.dropped_events().get(DropCause::InvalidEvent)` increased by exactly 3; `info!(name: "", "m")` is present with the bridge default action and increases the count by exactly 1; `info!(target: "bad target::x", name: "bad name", "m")` records `target = "bad_target.x"`, `action = "bad_name"` and no count.
+- Runtime label and key checks in `tests/macros_jsonl.rs`: with `const EMPTY: &str = ""`, `const RESERVED: &str = "sc_observability_log.x"`, `const RESERVED_PATH: &str = "sc_observability_log::y"` and `const SPACED: &str = "a b"`, one event `info!({ EMPTY } = 1, { RESERVED } = 2, { RESERVED_PATH } = 3, { SPACED } = 4, ok = 5, "m")` is present with `fields == {"a_b": 4, "ok": 5}` and `guard.dropped_events().get(DropCause::InvalidEvent)` increased by exactly 3; `info!(name: "", "m")` is present with the bridge default action and increases the count by exactly 1; `info!(name: "bad name", target: "bad target::x", "m")` records `target = "bad_target.x"`, `action = "bad_name"` and no count.
 - Dispatch tests in `tests/macros_jsonl.rs`: both-traits → Serialize JSON; Debug-only → Debug string; `HashMap<(i32, i32), i32>` and a custom `Serialize` returning `Err` → `null` plus an entry under `sc_observability_log.serialize_errors`; `f64::NAN` → `null`.
 - Disabled level: a call below `LoggerConfig.level` whose argument's `Debug` and `Serialize` impls panic is not evaluated.
 - `callsite.rs` unit tests (no `init`, no counter assertions, per the a-1 rule that only `emit_core_counts_panics_and_reentry` asserts counter deltas): `Callsite::new("", Some("bad name"))` caches `Ok(TargetCategory("log"))` and `Some(Ok(ActionName("bad_name")))`; `Callsite::new("t", Some(""))` caches `Some(Err(LabelError::Empty { kind: LabelKind::Action }))`; `DynamicKey::new("").key()` is `Err(LabelError::Empty { kind: LabelKind::FieldKey })`, `DynamicKey::new("sc_observability_log.x").key()` and `DynamicKey::new("sc_observability_log::y").key()` are `Err(LabelError::ReservedPrefix { kind: LabelKind::FieldKey })`, and `record_dynamic_field` with `DynamicKey::new("a b")` inserts `"a_b"`. These unit tests never pass an invalid label to `emit_callsite` or `record_dynamic_field`, so they never call `record_drop`; the counted paths are asserted only in `tests/macros_jsonl.rs`.
@@ -427,7 +427,7 @@ workspace = true
 
 ## Required Validation
 
-Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-1-log-bridge` before the a-1 PR merges and `origin/develop` after.
+Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-1-log-bridge` before the a-1 PR merges and `origin/integrate/phase-a` after.
 
 - `cargo fmt --check --all --manifest-path crates/Cargo.toml`
 - `cargo clippy --locked --manifest-path crates/Cargo.toml --workspace --all-targets --all-features -- -D warnings`
@@ -443,3 +443,9 @@ Run from the repo root in bash. `<stack-parent>` is `feature/sprint-a-1-log-brid
 - `if grep -q sc-observability-log src-tauri/Cargo.toml; then cargo check --locked --manifest-path src-tauri/Cargo.toml; fi`
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --manifest-path crates/Cargo.toml --target x86_64-pc-windows-msvc --workspace --all-targets`
 - `git diff --check`
+
+## QA-1 Resolutions
+
+- **ATM-QA-001:** Fixed `info!()` example in line 162 to use correct `name:` before `target:` order.
+- **RSH-A2-001:** Added "Field value size" subsection to `crates/sc-observability-log/docs/compatibility.md` documenting unbounded serialization and queue bounds.
+- **RSH-A2-002:** Added "Evaluation cost" subsection to `crates/sc-observability-log/docs/compatibility.md` documenting synchronous evaluation and async implications.
