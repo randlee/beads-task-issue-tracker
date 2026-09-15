@@ -228,7 +228,7 @@ b-8). Only `crates/btit-bd/**` and this doc are touched. bd rules were read from
    file to stay byte-identical, so both criteria cannot hold literally. The intent of AC3 does hold: those two lines
    only construct a `BdCli` and call no method. `CliRunner::new` probes lazily, and `with_seeded_probe` pre-seeds the
    probe, so nothing is spawned. The no-bd run proves this. The grep with `api_freeze.rs` excluded prints nothing.
-   The maintainer needs to decide whether to narrow the grep (e.g. `--exclude=api_freeze.rs`) or change the pin.
+   **Resolved (team-lead, 2026-09-15, 35963d6):** AC3's grep now carries `--exclude=api_freeze.rs`; the pin is unchanged.
 2. **Deliverable 2 deviation (as planned).** `Unknown` and unprobed (`None`) clients take the bd ≥ 0.51 metadata
    rule, as the table's last two rows show.
 3. **Non-object JSON / non-string `backend`.** The code sample is followed literally: any JSON value that parses
