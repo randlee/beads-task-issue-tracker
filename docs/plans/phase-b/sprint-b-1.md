@@ -1,7 +1,7 @@
 ---
 id: b-1
 title: Root workspace and Tauri crate move to crates/btit-app
-status: planned
+status: complete
 branch: feature/sprint-b-1-workspace-foundation
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-1-workspace-foundation
 target: integrate/phase-b
@@ -318,3 +318,62 @@ INDEPENDENT_VERSION_MEMBERS = {"sc-observability-log", "sc-observability-log-mac
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
 - the grep from Acceptance Criterion 7
+
+## Implementation Notes
+
+### Re-baseline (first task)
+
+- `implementation_baseline: develop@94e44d3` (`IMPLEMENTATION_BASELINE=94e44d3`). Shared baseline worktree: `/tmp/btit-baseline-94e44d3` (detached, created with `git worktree add --detach /tmp/btit-baseline-94e44d3 94e44d3`).
+- `generate_handler!` command count at `94e44d3`: **65** (`src-tauri/src/lib.rs:72-136`, inside `generate_handler![` at `:71-137`; `grep -c '#\[tauri::command\]'` over `src-tauri/src` is also 65).
+- `BASELINE_TEST_COUNT` = **155**: `cargo test --manifest-path /tmp/btit-baseline-94e44d3/src-tauri/Cargo.toml -- --list` lists 155 tests, which are 155 unique bare names after the gate's `sed`/`sort -u`. Per module: cli 59, issues 31, attachments 23, logging 19 (`logging::tests` 11 + `logging::lifecycle::tests` 8), updates 9, attachment_refs 6, migration 5, config 2, polling 1. That is the plan's 142 at `a18c724` plus 13, all in `logging` (PRs #50/#52).
+- Phase-a crates test count at `94e44d3`: **93** listed by `cargo test --manifest-path crates/Cargo.toml --workspace -- --list`, of which 84 are test fns (83 unique bare names) and 9 are doctests. Breakdown: `sc-observability-log` unit 62, `tests/api_freeze.rs` 3, 13 single-test integration files (including the trybuild `tests/ui.rs`), consumer-check `tests/control_consumer.rs` 1, `sc-observability-log-macros` unit 5, and doctests (2 for `sc-observability-log`, 7 ignored for `-macros`).
+- App source size at `94e44d3`: 18 `.rs` files, 8 209 lines (the plan's "17 source files, 7 047 lines" is at `a18c724`; `logging/lifecycle.rs` was added).
+
+### Cite re-verification against `94e44d3`
+
+Method: I extracted every `file:line` cite in `plan-phase-b.md` and `sprint-b-1.md`..`sprint-b-12.md` (449 cites, including `:n` continuations), resolved each to its repo path at `94e44d3`, checked that it is in bounds, and compared the file's blob at `a18c724` and `94e44d3`. Every cited file is blob-identical between the two commits except `src-tauri/src/logging.rs` (plus the new `logging/lifecycle.rs`), `.claude/codebase-map.md`, `src-tauri/Cargo.lock` (no line cites) and the phase-a `crates/**` files. So every cite into any other file is unchanged. Cites into the changed files were checked by hand. The only out-of-bounds hit is `config.rs:3289` (plan line 56), which cites tauri-utils, not a repo file. External cites (`../beads` Go sources, tauri-cli, tauri-action) were not re-verified. After this sprint every `src-tauri/src/<f>:<n>` cite reads `crates/btit-app/src/<f>:<n>` with the same line number: the tree `HEAD:crates/btit-app/src` equals `94e44d3:src-tauri/src` (`88e11a7`).
+
+Drifted cites (later sprints use the right-hand column):
+
+| Where | Cite as written | At `94e44d3` | Content |
+| --- | --- | --- | --- |
+| plan:110, sprint-b-3:60 | `logging.rs:32-66` | `logging.rs:37-71` | `LOGGING_ENABLED`, `VERBOSE_LOGGING`, four `log_*!` macros |
+| sprint-b-3:77 | `logging.rs:36-66` | `logging.rs:41-71` | the four macros |
+| sprint-b-3:77 | `logging.rs:166-191` | `logging.rs:175-200` | `get/set_logging_enabled`, `get/set_verbose_logging` |
+| sprint-b-3:282 | `logging.rs:60-66` | `logging.rs:65-71` | `log_debug!` |
+| plan:118 | `logging.rs:88-110` | `logging.rs:97-119` | `install_logging` |
+| sprint-b-12:46 | `logging.rs:1-9` | unchanged | file-level `#![deny(..)]` |
+| plan:77 | `.claude/codebase-map.md:390` | `:391` | stale `backendMode` row |
+| plan:462, sprint-b-1 Exact Targets | `.claude/codebase-map.md` line 420 | line 421 | "Rust tests" line (lines 16 and 208 unchanged) |
+| plan:44, plan:117, sprint-b-1:75 | `crates/Cargo.toml:32-43` | `:32-44` | `[workspace.lints]` (a-5 added `hostname` at `:22`) |
+| sprint-b-1:91 | `crates/Cargo.toml:15-43` | `:15-44` | dependencies + lints |
+| plan:45, sprint-b-1 Deliverable 9 / Exact Targets | `check_version_sync.py:86-95` | `:87-97` | lockfile check |
+| sprint-b-1 Deliverable 9 | `check_version_sync.py:128-160` | `:128-159` | `set_version` |
+| plan:44, plan:46, sprint-b-1 Deliverable 7 | `ci.yml:150-153` | `:149-153` | MSRV step (name line 149) |
+| plan "Test preservation" | 142 tests, logging 6 | 155 tests, logging 19 | see re-baseline above |
+
+### Verification of the planner's risk points
+
+- **Merged root `Cargo.lock`.** It is the app lockfile moved to the root and refreshed by `cargo check --workspace`. No package was removed and no version already in the app lockfile moved; 506 → 511 packages. `crates/Cargo.lock` had 60 packages (59 names, `syn` twice). 54 of those names were already in the app lockfile, because the app already locked `sc-observability-log`'s graph through its path dependency, and they keep the app's versions. 14 (name, version) pairs are identical. The other names in that group now resolve to the app's, mostly older, versions (for example `log` 0.4.34 → 0.4.29, `serde` 1.0.229 → 1.0.228, `tokio` 1.53.1 → 1.49.0, `tempfile` 3.27.0 → 3.25.0). 5 packages are new to the root lockfile and resolved afresh: `sc-observability-log-consumer-check 0.1.0`, `trybuild 1.0.115`, `target-triple 1.0.1`, `termcolor 1.4.1`, `tracing-attributes 0.1.31`. Cargo picked `trybuild` 1.0.115 (not 1.0.121 with `target-tuple`) because it is compatible with the dependencies already locked. Every phase-a gate passes against these versions (below).
+- **trybuild `ui.rs` as a root-workspace member.** `cargo test --locked -p sc-observability-log …` runs `tests/ui.rs`: 1 test, all 19 `tests/ui/*.rs` cases `ok`, and no `.stderr` snapshot changed (the snapshots are frozen and `git status` stays clean).
+- **MSRV step in a root workspace whose app needs 1.98.1.** `cargo +1.94.1 check --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets` passes. Cargo does not reject the unselected `btit-app` (`rust-version = "1.98.1"`).
+- **`check_version_sync.py` exemption.** The OK line matches Deliverable 9, and `--set 1.24.5` is idempotent. In a scratch copy, `--set 1.25.0` bumped the root `Cargo.toml`, `package.json` and the lockfile entry of `beads-issue-tracker` only; the three independent crates stayed `0.1.0` in both manifests and lockfile. Negative cases fail as intended: a member at `0.1.1` against the `=0.1.0` pin; a member using `version.workspace = true` (this first raised a `TypeError`, fixed in `4d76c18`); a member removed from `members`; `btit-app` with an explicit version.
+
+### Deviations (minimal, justified)
+
+1. **Root `Cargo.toml` comments.** The code sample's comments cite `src-tauri/Cargo.toml:31-49/:37/:49` and `crates/Cargo.toml:15-30/:18/:29`. AC7's grep covers `*.toml`, and neither file exists after this sprint, so the comments say "app" / "former crates/ workspace" instead. Every key and value is as in the sample. The version-SSOT header comment moved over from the app manifest, and the `std` rationale comment from `crates/Cargo.toml:18` is kept.
+2. **AC1 content check and Deliverable 3's `! git diff --stat`.** `git diff -M origin/integrate/phase-b...HEAD -- 'crates/btit-app/src/*.rs' | grep -c '^[+-][^+-]'` prints 7253, not 0. The pathspec excludes the rename source, so git cannot pair the renames and shows them as additions. `git diff --stat` also always exits 0, so `! git diff --stat …` can never pass. Checks I used instead: the two-sided pathspec `-- 'src-tauri/src/*.rs' 'crates/btit-app/src/*.rs'` counts **0**, and the tree hash of `HEAD:crates/btit-app/src` equals that of `94e44d3:src-tauri/src` (`88e11a7`); `build.rs`, `capabilities/` and `icons/` are also tree-identical.
+3. **Rename detection ≥ 95% (Deliverable 2).** Commit `767db4f` is the pure `git mv` (40 files, all 100%). In the cumulative diff, `Cargo.lock` is 99% and `tauri.conf.json` 96%. `crates/btit-app/Cargo.toml` and `.gitignore` show as delete/create because the spec requires rewriting more than 5% of them.
+4. **AC3 name diff.** The literal `diff <(… 94e44d3 … | sed -E 's/ v.*//') <(sed -E 's/ v.*//' crates/runtime-deps.txt)` differs by one `syn` line. At `94e44d3` the file listed both `syn v2.0.119` and `syn v3.0.5`; syn 3 was pulled in by `serde_derive 1.0.229`, `thiserror-impl 2.0.20` and `tokio-macros 2.7.2` in `crates/Cargo.lock`. The root lockfile keeps the app's `serde_derive 1.0.228`, `thiserror-impl 2.0.18` and `tokio-macros 2.6.1`, which all use syn 2. The crate-name **set** (`sort -u`) is identical. Upgrading those packages to get syn 3 back would move app lockfile versions, which Deliverable 1 forbids. `crates/runtime-deps.txt` was regenerated with the `ci.yml` command, and the CI diff is empty.
+5. **AC7 grep.** As written it also matches generated repowise artifacts: `docs/repowise/health.md` and `history.md` (dated snapshots of a 2026-09-13 run) and the tracked `.repowise/*.json` index. These are the same class as the excluded `.sc/repowise/data/`, and rewriting historical metric snapshots would falsify them. With `grep -v '^./docs/repowise/' | grep -v '^./.repowise/'` added, the grep prints nothing.
+6. **`.gitignore` comment.** The line above `/target/` read "phase-a crates workspace build output". It now reads "Cargo workspace build output", because the old text is wrong for the root target.
+7. **`crates/btit-app/.gitignore`.** It keeps only `/gen/schemas` (Required Work). The two "Generated by Cargo" header comments went with `/target/`.
+8. **`.claude/codebase-map.md` line 421.** "run via `cargo test` in `src-tauri/`" became "run via `cargo test --workspace` from the repo root". That is the path-equivalent wording, since there is no crate directory to `cd` into for the workspace run. Line 16's box border is one column wider because the new path is longer; the text is as the spec requires.
+9. **`docs/architecture.md`.** On `develop` the file exists but is empty (0 bytes, from `ebdc44f`), and PR #42 is still open. So the file was filled as the "absent" branch describes: the header and status legend of `origin/docs/adr-initial:docs/architecture.md`, a table with only the ADR-009 row, and ADR-009.
+10. **Stack link.** `gh stack link` requires at least 2 arguments (`gh stack link --base integrate/phase-b 57` → "requires at least 2 arg(s)"). The literal `gh stack link integrate/phase-b feature/sprint-b-1-workspace-foundation` would make `integrate/phase-b` a stack layer with its own auto-created PR, so it was not run. The stack is created when b-2 opens: `gh stack link --base integrate/phase-b feature/sprint-b-1-workspace-foundation feature/sprint-b-2-btit-types`, as in the plan.
+11. **QA-1 QA-001: `FieldKey::Dynamic` boxed (large_enum_variant under workspace feature unification).** The sprint freezes the phase-a crates' source, but merging them into the root workspace unifies Cargo features with `crates/btit-app`, which enlarges `syn::Expr` enough that `cargo clippy --all-targets --all-features -- -D warnings` reports `clippy::large_enum_variant` on `pub(crate) enum FieldKey` (`crates/sc-observability-log-macros/src/fields.rs:57`): the `Dynamic(Expr)` variant was at least 240 bytes against a 36-byte `Static` variant. The `-p`-scoped clippy invocation from Deliverable/AC gates still passed, so the finding only surfaces at the workspace-wide `--all-features` scope. Per team-lead decision, fixed in b-1 despite the freeze because the change touches only a crate-private (`pub(crate)`) parser type with no public API, `api_freeze`, or behaviour change: `FieldKey::Dynamic(Expr)` → `FieldKey::Dynamic(Box<Expr>)`, with the construction site (`fields.rs:354`, `Box::new(key)`) and use site (`event.rs:130`, `key.as_ref()`) updated to match. No `#[allow]`/`#[expect]` was used. Verified: workspace-wide `cargo clippy --all-targets --all-features -- -D warnings` no longer reports `fields.rs` or `large_enum_variant` (remaining 37 errors are all pre-existing `crates/btit-app` lints tracked in #49/b-12); `cargo clippy --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings` passes; `cargo test --locked` for the three crates passes (including trybuild `tests/ui.rs`, no `.stderr` snapshot changes); `cargo fmt --check -p sc-observability-log-macros` passes; `cargo +1.94.1 check --locked -p sc-observability-log-macros --all-targets` passes; the `runtime-deps.txt` diff and `api_freeze` tests are unchanged (unaffected, since the crate boundary and public API were not touched).
+
+### Open items before `status: complete`
+
+- Deliverable 11, second half: launching with `pnpm tauri:dev` and checking the `[startup] …` JSONL lines is a manual run for the team-lead (not performed by the developer agent).
+- AC8: CI green on PR #57.

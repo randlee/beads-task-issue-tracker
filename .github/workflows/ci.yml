@@ -80,14 +80,86 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - name: Cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        run: cargo check --workspace --all-targets
 
       - name: Cargo test
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --workspace
+
+  rust-quality:
+    name: rust quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The workspace clippy includes the Tauri app crate, which needs the GTK/WebKit
+      # system libraries on Linux (same set as the backend job).
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      # Keep in sync with rust-toolchain.toml (enforced by the version-sync job).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check --all
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Rustdoc missing-docs
+        run: |
+          cargo rustdoc -p btit-types -- -D missing-docs
+          cargo rustdoc -p btit-beads -- -D missing-docs
+          cargo rustdoc -p btit-cli -- -D missing-docs
+          cargo rustdoc -p btit-bd -- -D missing-docs
+          cargo rustdoc -p btit-br -- -D missing-docs
+
+      # Dependency graph and source gates, host-independent so they run once, on Linux.
+      - name: Dependency graph
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')
+          cargo tree -e normal -p btit-beads --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-types\nlog\nserde_json\n')
+          cargo tree -e normal -p btit-cli --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          cargo tree -e normal -p btit-bd --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-bd\nbtit-beads\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          cargo tree -e normal -p btit-br --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-br\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          # test-support stays out of the app's normal build
+          test "$(cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support)" = 0
+
+      # btit-beads: no process/fs/Tauri/bridge use, only the two logging statics, no allow() of the deny set.
+      - name: btit-beads source gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          test -z "$(grep -rnE 'std::(process|fs)|tauri|sc_observability' crates/btit-beads/src)"
+          test "$(grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-beads/src | grep -oE 'static [A-Z_]+' | sort | tr '\n' ' ')" = "static LOGGING_ENABLED static VERBOSE_LOGGING "
+          test -z "$(grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-beads/src)"
+
+      # btit-cli, btit-bd, btit-br: no Tauri/bridge use, no process-global statics, no allow() of the deny set.
+      - name: btit-cli, btit-bd, btit-br source gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          test -z "$(grep -rn 'tauri\|sc_observability' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
+          test -z "$(grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
+          test -z "$(grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
 
   crates:
     name: crates (${{ matrix.os }})
@@ -109,17 +181,15 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates
 
       - name: Format
-        run: cargo fmt --check --all --manifest-path crates/Cargo.toml
+        run: cargo fmt --check -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check
 
       - name: Clippy
-        run: cargo clippy --locked --manifest-path crates/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --manifest-path crates/Cargo.toml --workspace
+        run: cargo test --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check
 
       # The remaining steps are host-independent, so they run once, on Linux, in bash.
       # CARGO_TERM_COLOR=always (set by the toolchain/cache actions) colors cargo tree's
@@ -129,25 +199,26 @@ jobs:
         shell: bash
         env:
           CARGO_TERM_COLOR: never
-        run: cargo tree --locked --manifest-path crates/Cargo.toml -p sc-observability-log -e normal --target all --prefix none --format '{p}' | sed -E 's/ \(.*$//' | LC_ALL=C sort -u | diff - crates/runtime-deps.txt
+        run: cargo tree --locked -p sc-observability-log -e normal --target all --prefix none --format '{p}' | sed -E 's/ \(.*$//' | LC_ALL=C sort -u | diff - crates/runtime-deps.txt
 
       - name: Test-isolation contract
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          for f in crates/*/tests/*.rs; do if grep -qE '\binit\(' "$f"; then n=$(grep -cE '#\[([A-Za-z_]+::)*test\b' "$f"); [ "$n" -eq 1 ] || { echo "isolation violation: $f has $n test fns"; exit 1; }; fi; done
+          for f in crates/sc-observability-log*/tests/*.rs; do if grep -qE '\binit\(' "$f"; then n=$(grep -cE '#\[([A-Za-z_]+::)*test\b' "$f"); [ "$n" -eq 1 ] || { echo "isolation violation: $f has $n test fns"; exit 1; }; fi; done
 
       - name: Rustdoc missing-docs
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          cargo rustdoc --locked --manifest-path crates/Cargo.toml -p sc-observability-log -- -D missing-docs
-          cargo rustdoc --locked --manifest-path crates/Cargo.toml -p sc-observability-log-macros -- -D missing-docs
+          cargo rustdoc --locked -p sc-observability-log -- -D missing-docs
+          cargo rustdoc --locked -p sc-observability-log-macros -- -D missing-docs
 
       # The MSRV toolchain is installed with rustup rather than a workflow `toolchain` key:
-      # scripts/check_version_sync.py:108-114 requires every such key to equal rust-toolchain.toml.
+      # scripts/check_version_sync.py:142-148 requires every such key to equal rust-toolchain.toml.
+      # The three in-tree crates are selected with -p, not --workspace: btit-app requires 1.98.1.
       - name: MSRV check (1.94.1)
         if: runner.os == 'Linux'
         run: |
           rustup toolchain install 1.94.1 --profile minimal --no-self-update
-          cargo +1.94.1 check --locked --manifest-path crates/Cargo.toml --workspace --all-targets
+          cargo +1.94.1 check --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets

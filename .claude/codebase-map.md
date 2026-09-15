@@ -1,7 +1,7 @@
 # Codebase Map - Beads Task-Issue Tracker
 
 > Auto-generated comprehensive map of the codebase for faster AI reasoning.
-> Last updated: 2026-02-26 | App version: 1.24.2
+> Last updated: 2026-09-15 (phase-b crate split, sprint b-12) | App version: 1.24.5
 
 ## Architecture Overview
 
@@ -12,11 +12,18 @@
 │  ├── Center: issue table with filters/sort/pagination   │
 │  └── Right sidebar: issue detail/preview/edit           │
 ├─────────────────────────────────────────────────────────┤
-│  Tauri 2 Desktop Shell                                  │
-│  ├── Rust backend (src-tauri/src/, 15 modules, 65 cmds) │
-│  ├── bd/br CLI bridge (cli.rs: execute_bd + per-project │
-│  │   lock, version gates, auto-detect)                   │
-│  └── File watcher, logging, update checker              │
+│  Tauri 2 Desktop Shell — crates/btit-app/ (65 commands)  │
+│  ├── Command glue, attachments, migration, polling,      │
+│  │   watcher, updates, probe, logging, backend slot       │
+│  └── Depends on the five library crates below            │
+├─────────────────────────────────────────────────────────┤
+│  Rust workspace crates (root Cargo.toml, crates/*)        │
+│  ├── btit-types  — shared data types (serde only)         │
+│  ├── btit-beads  — BeadsBackend/CliBackend traits,         │
+│  │   BeadsError, pure version/capability/issue logic       │
+│  ├── btit-cli    — process transport (PATH, locks, ops)    │
+│  ├── btit-bd     — bd backend (+ DoltOperations)           │
+│  └── btit-br     — br backend (+ CloseSuggestions)         │
 ├─────────────────────────────────────────────────────────┤
 │  Two CLI backends, selectable in Settings:              │
 │  ├── bd: beads Go CLI 1.x (primary) → .beads/          │
@@ -205,33 +212,49 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 
 ---
 
-## Backend Structure (`src-tauri/`)
+## Backend Structure (`crates/`)
 
-### Files
+Six crates under a root Cargo workspace (`Cargo.toml` at the repo root; phase-b crate split, sprints b-1..b-12). Line counts below are at the b-12 head.
+
+### `crates/btit-app/` — Tauri command glue, filesystem features, backend selection
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | Binary entry point — calls `app_lib::run()` |
-| `src/lib.rs` (155) | Tauri entry point: `mod` declarations, `run()` with plugin setup, startup CLI probe, `generate_handler!` for all 65 commands |
-| `src/logging.rs` | sc-observability-log bridge: `install_logging`/`on_run_event` (delegating to the static `LOGGING: LogLifecycle<LogGuard>`), `ClearError` (stable `BTIT_LOG_CLEAR_*` `code()` + `remediation()`; `clear_logs` returns `"<CODE>: <message>"`) + injectable log-dir reader for `clear_logs`, `report_exit` (stderr, `BTIT_LOG_EXIT_CLEAR_STILL_WRITING` for a degraded exit), `LOGGING_ENABLED`/`VERBOSE_LOGGING`, `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros (declared first with `#[macro_use]`), async log commands (`clear_logs`/`export_logs`/`read_logs` run their blocking bodies via `tauri::async_runtime::spawn_blocking`), `#[cfg(test)] mod tests` |
-| `src/logging/lifecycle.rs` | Single owner of the `LogGuard` (R-A4-001): `LogLifecycle` serializes `clear` (non-owning `LogControl` flush + bounded clear-write slot wait) with `exit` (one bounded final shutdown, `ExitOutcome` incl. `ShutDownWhileClearWriting`); always-on `[logging] health at exit` record (`fields.health` = serialized `BridgeHealthReport`) written before a non-degraded shutdown; `OwnedGuard` trait seam for fake-guard tests |
-| `src/types.rs` (283) | `BdRawIssue`, `Issue`, `Comment`, `Relation`, parent/child structs, create/update payloads, per-command option structs, `CliClient` |
-| `src/issues.rs` (665) | Normalizers (`priority_to_*`, `normalize_issue_*`), `transform_issue` (deps → blockedBy/blocks/parent/children/relations), `normalize_metadata`, `parse_issues_tolerant` |
-| `src/cli.rs` (1368) | `get_extended_path`, `new_command`, auto-detect (`select_default_binary`, `probe_cli_binary`, `MIN_SUPPORTED_BD_MAJOR`), client/version detection + cache, version gates (`supports_*`/`uses_*` with pure `_for` cores), `project_uses_dolt(_for)`, `BD_PROJECT_LOCKS` + `execute_bd`, `check_bd_compatibility` |
-| `src/config.rs` (178) | `AppConfig` (settings.json), `CLI_BINARY`, get/set/validate CLI binary commands, `get_bd_version` |
-| `src/issue_commands.rs` (582) | `bd_list/count/ready/status/show/create/update/close/search/delete`, labels, comments, dependencies, relation types |
-| `src/polling.rs` (238) | `LAST_KNOWN_MTIME`, `bd_poll_data` (batched), `get_beads_mtime`, `bd_check_changed`, `bd_reset_mtime` |
-| `src/migration.rs` (1177) | `LAST_SYNC_TIME` + `sync_bd_database`, `bd_sync`, `bd_repair_database`, Dolt migration (`bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_cleanup_stale_locks`), refs migration v3 helpers |
-| `src/attachments.rs` (805) | Attachment helpers (`sanitize_filename`, `issue_short_id`, `classify_attachment`, `resolve_duplicate_filename`), image read/open, `base64_encode`, filesystem attachment commands, `purge_orphan_attachments` |
-| `src/attachment_refs.rs` (184) | `is_real_external_ref`, `check_refs_migration`, `migrate_attachment_refs` |
-| `src/updates.rs` (493) | GitHub release check for the app and the bd CLI, `compare_versions`, `find_platform_asset`, `download_and_install_update` |
-| `src/watcher.rs` (136) | notify-based `.beads/` watcher: `start_watching`/`stop_watching`/`get_watcher_status`, emits `beads-changed` |
-| `src/probe.rs` (174) | `PROBE_CHILD`, external data proxy commands, `launch_probe` |
+| `src/main.rs` (6) | Binary entry point — calls `app_lib::run()` |
+| `src/lib.rs` (134) | Tauri entry point: `mod` declarations, `run()` with plugin setup, startup CLI probe, `generate_handler!` for all 65 commands |
+| `src/backend.rs` (523) | The app's backend slot: `SLOT: OnceLock<...>`, `install`/`replace`/`current`, `with_cli`, `log_startup`, `check_bd_compatibility` |
+| `src/logging.rs` (788) | sc-observability-log bridge: `install_logging`/`on_run_event` (delegating to the static `LOGGING: LogLifecycle<LogGuard>`), `ClearError` (stable `BTIT_LOG_CLEAR_*` `code()` + `remediation()`; `clear_logs` returns `"<CODE>: <message>"`) + injectable log-dir reader for `clear_logs`, `report_exit` (stderr, `BTIT_LOG_EXIT_CLEAR_STILL_WRITING` for a degraded exit), `LOGGING_ENABLED`/`VERBOSE_LOGGING`, async log commands (`clear_logs`/`export_logs`/`read_logs` run their blocking bodies via `tauri::async_runtime::spawn_blocking`), `#[cfg(test)] mod tests` |
+| `src/logging/lifecycle.rs` (776) | Single owner of the `LogGuard` (R-A4-001): `LogLifecycle` serializes `clear` (non-owning `LogControl` flush + bounded clear-write slot wait) with `exit` (one bounded final shutdown, `ExitOutcome` incl. `ShutDownWhileClearWriting`); always-on `[logging] health at exit` record (`fields.health` = serialized `BridgeHealthReport`) written before a non-degraded shutdown; `OwnedGuard` trait seam for fake-guard tests |
+| `src/config.rs` (189) | `AppConfig` (settings.json), get/set/validate CLI binary commands, `get_bd_version` |
+| `src/issue_commands.rs` (344) | `bd_list/count/ready/status/show/create/update/close/search/delete`, labels, comments, dependencies, relation types — all on `Arc<dyn BeadsBackend>` |
+| `src/polling.rs` (347) | `LAST_KNOWN_MTIME`, `bd_poll_data` (batched), `get_beads_mtime`/`get_beads_mtime_for`, `bd_check_changed`, `bd_reset_mtime` |
+| `src/migration.rs` (1909) | `LAST_SYNC_TIME` + `sync_bd_database`, `bd_sync`, `bd_repair_database`, Dolt migration (`bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_cleanup_stale_locks`) on `DoltOperations`/`run_raw`, refs migration v3 helpers |
+| `src/attachments.rs` (916) | Attachment helpers (`sanitize_filename`, `issue_short_id`, `classify_attachment`, `resolve_duplicate_filename`), image read/open, `base64_encode`, filesystem attachment commands, `purge_orphan_attachments` |
+| `src/attachment_refs.rs` (280) | `is_real_external_ref`, `check_refs_migration`, `migrate_attachment_refs` |
+| `src/updates.rs` (511) | GitHub release check for the app and the bd CLI, `compare_versions`, `find_platform_asset`, `download_and_install_update` |
+| `src/watcher.rs` (157) | notify-based `.beads/` watcher: `start_watching`/`stop_watching`/`get_watcher_status`, emits `beads-changed` |
+| `src/probe.rs` (188) | `PROBE_CHILD`, external data proxy commands, `launch_probe` |
 | `src/fs_commands.rs` (85) | `fs_exists`, `fs_list` (with `.beads`/Dolt detection) |
-| `src/test_support.rs` (22) | `#[cfg(test)]` shared fixtures (`minimal_issue_json`, `issue_json_with_metadata`) |
-| `tauri.conf.json` | Window config (1400x900, overlay title bar), bundle, CSP (connect-src includes `http://localhost:*` for probe SSE), dev port 3133 |
-| `Cargo.toml` | Deps: tauri 2.9.5, serde, reqwest, notify 7, dirs 6, rusqlite (bundled) |
+| `src/test_backend.rs` (259) | `#[cfg(test)]` shared fixtures: `TempProject`, `FakeBackend`, `recording_bd`/`recording_br`, `raw_ok`/`raw_fail`/`spawn_err` |
+| `tauri.conf.json` | Window config (1400x900, overlay title bar), bundle, CSP (connect-src includes `http://localhost:*` for probe SSE), dev port 3133; `build.frontendDist` is `../../.output/public` (two levels up from `crates/btit-app/`) |
+| `Cargo.toml` | `[lints] workspace = true`; deps: `btit-types`, `btit-beads`, `btit-cli`, `btit-bd`, `btit-br`, tauri 2.9.5, `sc-observability-log`, serde, reqwest, notify 7, dirs 6 |
 | `capabilities/default.json` | Tauri capability permissions |
+
+### `crates/btit-types/` — shared data types only (no I/O, no Tauri, no `log`)
+
+`issue.rs` (270, `BdRawIssue`/`Issue`/`Comment`/`Relation`/parent-child structs), `payload.rs` (121, create/update/list payloads), `cli.rs` (135, `CliClient`/`CliVersion`/`CliProbe`/`CompatibilityInfo`/`BackendCapabilities`), `backend.rs` (44, `ProjectRef`/`RelationType`/`ReleaseSource`/`CliOutput`/`DoltOpResult`), `fs.rs` (48, `CountResult`/`DirectoryEntry`/`PurgeResult`/`FsListResult`), `lib.rs` (31).
+
+### `crates/btit-beads/` — backend traits, `BeadsError`, pure beads logic, log gate
+
+`backend.rs` (170, `BeadsBackend`/`CliBackend`/`DoltOperations`/`CloseSuggestions` traits), `error.rs` (468, `BeadsError` discriminated union, `code()`/`remediation()`), `detect.rs` (651, `select_default_binary`, `parse_bd_version`, `detect_cli_client`, `CliSelection`), `compat.rs` (159, `cli_compatibility_warnings`, `is_legacy_bd`), `gates.rs` (373, the five `_for` version-gate cores plus `capabilities()`), `issues.rs` (626, normalizers, `transform_issue`, `PARENT_CHILD`/`STRUCTURAL_TYPES`/`BLOCKING_TYPES`), `parse.rs` (222, `parse_issues_tolerant`, `normalize_metadata`), `logging.rs` (60, `LOGGING_ENABLED`/`VERBOSE_LOGGING` + `log_info!`/`log_warn!`/`log_error!`/`log_debug!` macros), `test_support.rs` (28).
+
+### `crates/btit-cli/` — process transport shared by bd and br
+
+`path.rs` (214, `get_extended_path`, `extended_path_entries`), `command.rs` (30, `new_command`), `locks.rs` (70, `ProjectLocks`, instance-owned), `probe.rs` (88, `CliInvoker::probe`), `runner.rs` (392, `CliRunner`: owns its binary and probe cache, including the `ProbeState::Failed` cache from b-11), `run.rs` (335, `run_json`/`run_raw` bodies), `ops.rs` (728, the shared issue-operation bodies bd and br both call), `testing.rs` (144, `RecordingInvoker`, behind the `test-support` feature), `lib.rs` (40).
+
+### `crates/btit-bd/` and `crates/btit-br/` — the two backend implementations
+
+`btit-bd/src/backend.rs` (292, `BdCli: BeadsBackend + CliBackend + DoltOperations`), `btit-bd/src/dolt.rs` (435, `DoltMode` resolved from `metadata.json`, embedded/server/proxied-server), `btit-bd/src/lib.rs` (18). `btit-br/src/backend.rs` (220, `BrCli: BeadsBackend + CliBackend + CloseSuggestions`), `btit-br/src/lib.rs` (19).
 
 ### Tauri Commands (65 total)
 
@@ -338,30 +361,32 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 
 ### Key Backend Patterns
 
-1. **CLI Client Detection** — Detects `bd` (Go) vs `br` (Rust) client from `--version` output. Cached globally. Affects: daemon flag, JSONL support, relation types. Runs `bd --version` from temp dir to avoid triggering auto-migration
-2. **Per-Project Mutex** — `BD_PROJECT_LOCKS` serializes all `bd` CLI calls per project to prevent concurrent Dolt embedded access (SIGSEGV crash in dolthub/driver)
-3. **Sync Cooldown** — 10s cooldown between `bd sync` calls via `LAST_SYNC_TIME` mutex. Dolt projects skip sync entirely (Dolt handles sync via git)
-4. **Mtime Change Detection** — Tracks `.beads/beads.db` + WAL mtime per-project. Scans nested Dolt layout for bd 0.52+. Cheap polling without CLI calls
-5. **External Ref Sentinel** — Legacy `cleared:{id}` values are treated as "no external ref" (`is_real_external_ref` in `attachment_refs.rs`)
-6. **Issue Transform** — `BdRawIssue` → `Issue`: priority int→string, extracts parent/children/relations/blockers from dependency arrays.
-7. **Tolerant Parsing** — `parse_issues_tolerant()`: tries strict JSON first, falls back to line-by-line
-8. **Path Security** — All attachment operations canonicalize paths + verify inside `.beads/attachments/`
-9. **Dolt Migration** — 7-step process: export JSONL from SQLite, backup, init Dolt, import JSONL, restore labels/deps/comments, convert attachment paths to absolute. Handles empty projects via init-only path
-10. **Dot Notation Parent-Child** — bd >= 0.50 uses structural parent-child via ID (e.g., `abc.1` is child of `abc`). Frontend derives relationships from loaded issues list instead of relying on JSON fields
+1. **Backend slot** — `crates/btit-app/src/backend.rs`'s `SLOT: Slot` holds one `Arc<dyn BeadsBackend>` (a `BdCli` or `BrCli`), built by `install`/`replace` from the configured binary's probe and reached everywhere through `backend::current()`; `backend::with_cli` maps a backend without a CLI facet to `BeadsError::Unsupported`. No process-global client-kind cache remains (superseded by the slot + `CliRunner`'s own probe cache)
+2. **`ProjectLocks`** — `crates/btit-cli/src/locks.rs`'s `ProjectLocks` (instance-owned, one `Arc` shared by `backend.rs`'s `PROJECT_LOCKS` static and every `CliRunner`) serializes CLI calls per project to prevent concurrent Dolt embedded access (SIGSEGV crash in dolthub/driver)
+3. **`BeadsBackend::sync`** — `sync_bd_database`/`bd_sync` (`migration.rs`) call `backend.sync(&project)`; a 10s cooldown between calls is enforced by the app's own `LAST_SYNC_TIME` mutex. Dolt projects skip sync entirely (Dolt handles sync via git)
+4. **CLI Client Detection** — `btit-beads::detect` (`select_default_binary`, `detect_cli_client`, `parse_bd_version`) and `btit-cli::runner::CliRunner` (probe + cache, including the `ProbeState::Failed` cache from b-11) detect `bd` (Go) vs `br` (Rust) from `--version` output, from the temp dir, to avoid triggering auto-migration
+5. **Mtime Change Detection** — Tracks `.beads/beads.db` + WAL mtime per-project. Scans nested Dolt layout for bd 0.52+. Cheap polling without CLI calls
+6. **External Ref Sentinel** — Legacy `cleared:{id}` values are treated as "no external ref" (`is_real_external_ref` in `attachment_refs.rs`)
+7. **Issue Transform** — `btit_beads::issues::transform_issue`: `BdRawIssue` → `Issue`, priority int→string, extracts parent/children/relations/blockers from dependency arrays (`STRUCTURAL_TYPES`/`BLOCKING_TYPES`/`PARENT_CHILD`)
+8. **Tolerant Parsing** — `btit_beads::parse::parse_issues_tolerant()`: tries strict JSON first, falls back to line-by-line
+9. **Path Security** — All attachment operations canonicalize paths + verify inside `.beads/attachments/`
+10. **Dolt Migration** — 7-step process on `DoltOperations`/`run_raw`: export JSONL from SQLite, backup, init Dolt, import JSONL, restore labels/deps/comments, convert attachment paths to absolute. Handles empty projects via init-only path
+11. **Dot Notation Parent-Child** — bd >= 0.50 uses structural parent-child via ID (e.g., `abc.1` is child of `abc`). Frontend derives relationships from loaded issues list instead of relying on JSON fields
 
 ### Global State (Rust)
 
 ```
-LOGGING_ENABLED: AtomicBool (false)          (logging.rs)
-VERBOSE_LOGGING: AtomicBool (false)          (logging.rs)
-LAST_SYNC_TIME: Mutex<Option<Instant>>       — sync cooldown (migration.rs)
-LAST_KNOWN_MTIME: HashMap<String, SystemTime> — per-project mtime cache (polling.rs)
-BD_PROJECT_LOCKS: HashMap<String, Arc<Mutex<()>>> — per-project mutex, prevents concurrent Dolt SIGSEGV (cli.rs)
-CLI_BINARY: Mutex<String> ("bd")             — configurable CLI binary (config.rs)
-CLI_CLIENT_INFO: Mutex<Option<(CliClient, u32, u32, u32)>> — cached version (cli.rs)
-PROBE_CHILD: Mutex<Option<Child>>            — launched probe process (probe.rs)
-Watcher state (watcher.rs)                   — active notify debouncer + watched path
+SLOT: Slot                                    — the app's one Arc<dyn BeadsBackend> (crates/btit-app/src/backend.rs)
+PROJECT_LOCKS: LazyLock<Arc<ProjectLocks>>    — per-project mutex, prevents concurrent Dolt SIGSEGV (backend.rs; ProjectLocks itself lives in btit-cli)
+LOGGING_ENABLED: AtomicBool (false)           (crates/btit-beads/src/logging.rs)
+VERBOSE_LOGGING: AtomicBool (false)           (crates/btit-beads/src/logging.rs)
+LAST_SYNC_TIME: Mutex<Option<Instant>>        — sync cooldown (crates/btit-app/src/migration.rs)
+LAST_KNOWN_MTIME: HashMap<String, SystemTime> — per-project mtime cache (crates/btit-app/src/polling.rs)
+PROBE_CHILD: Mutex<Option<Child>>             — launched probe process (crates/btit-app/src/probe.rs)
+Watcher state (crates/btit-app/src/watcher.rs) — active notify debouncer + watched path (Tauri-managed, not a static)
 ```
+
+No `btit-*` library crate other than `btit-beads` (the two logging atomics) carries process-global mutable state (plan "No process-global client state in library crates"); `CliRunner` and `ProjectLocks` instances are constructed per backend/app, not process globals.
 
 ---
 
@@ -388,7 +413,6 @@ Polling: useAdaptivePolling → bdCheckChanged() (mtime) → if changed → bdPo
 | Setting | Location | Purpose |
 |---------|----------|---------|
 | CLI binary | `~/.config/com.beads.manager/settings.json` | bd or br path |
-| Backend mode | `localStorage beads:proj:{hash}:backendMode` | Per-project: `br`/`bd`/`built-in` |
 | Logs | `~/Library/Logs/com.beads.manager/logs/beads-task-issue-tracker.log.jsonl` | Structured JSONL via `sc-observability-log` bridge (phase-a); rendered by `app/utils/log-format.ts` |
 | Project settings | `localStorage beads:proj:{hash}:*` | Filters, columns, expanded epics, collapsible states |
 | Global settings | `localStorage beads:*` | Theme, favorites, zoom, notifications |
@@ -418,4 +442,4 @@ Polling: useAdaptivePolling → bdCheckChanged() (mtime) → if changed → bdPo
 
 **Total: 214 tests** (10 files) | **Strategy**: Extract pure functions from composables into `app/utils/` for unit testing. Composables remain thin reactive wrappers.
 
-**Rust tests**: Tracker modules contain `#[cfg(test)]` blocks — run via `cargo test` in `src-tauri/`.
+**Rust tests**: Tracker modules contain `#[cfg(test)]` blocks — run via `cargo test --workspace` from the repo root.

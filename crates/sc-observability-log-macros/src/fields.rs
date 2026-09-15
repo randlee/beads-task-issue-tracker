@@ -64,7 +64,10 @@ pub(crate) enum FieldKey {
         span: Span,
     },
     /// `{ KEY } = v`: a constant `&'static str` expression, labelled at runtime.
-    Dynamic(Expr),
+    ///
+    /// Boxed to keep `FieldKey` small: `Expr` is a large enum and would
+    /// otherwise dwarf the `Static` variant.
+    Dynamic(Box<Expr>),
 }
 
 /// One parsed field.
@@ -351,7 +354,7 @@ fn parse_field(input: ParseStream<'_>, context: FieldContext) -> syn::Result<Fie
         input.parse::<Token![=]>()?;
         let value = parse_value(input)?;
         return Ok(Field {
-            key: FieldKey::Dynamic(key),
+            key: FieldKey::Dynamic(Box::new(key)),
             value,
         });
     }

@@ -1,7 +1,7 @@
 ---
 id: b-6
 title: btit-br crate — BrCli (BeadsBackend, CliBackend, CloseSuggestions)
-status: planned
+status: complete
 branch: feature/sprint-b-6-btit-br
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-6-btit-br
 target: integrate/phase-b
@@ -152,3 +152,96 @@ impl CloseSuggestions for BrCli {
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
 - test-preservation gate
+
+## Implementation Notes
+
+Implemented `BrCli { inv: Box<dyn CliInvoker> }` in `crates/btit-br/src/backend.rs`
+per the Explicit Code Samples, plus `crates/btit-br/src/lib.rs` (module declaration
+and doc-inline re-exports of `BrCli`, `BR_RELEASE_SOURCE`),
+`crates/btit-br/tests/api_freeze.rs` and `crates/btit-br/tests/parity.rs`.
+
+### Deviations from the sprint doc
+
+- **`#[derive(Debug)]` does not compile on `BrCli`.** `CliInvoker` (`btit-cli`) has
+  no `Debug` bound (`Send + Sync` only), so `Box<dyn CliInvoker>` is not `Debug` and
+  the literal code sample's `#[derive(Debug)]` fails with E0277. Replaced with a
+  manual `impl std::fmt::Debug for BrCli` that prints the configured binary name
+  (`f.debug_struct("BrCli").field("binary", &self.inv.binary())`). The pinned line
+  `pub struct BrCli { inv: Box<dyn CliInvoker> }` (AC2) is preserved verbatim, with
+  `#[rustfmt::skip]` added so `cargo fmt` does not expand it to a multi-line struct
+  (rustfmt's default one-field-per-line style would otherwise break that grep).
+- **`tests/api_freeze.rs` cannot pin `BrCli::new`/`BrCli::with_seeded_probe` as bare
+  fn pointers.** Both take `binary: impl Into<String>`, which is generic per call
+  site and cannot unify with a single `fn(&str, ...) -> BrCli` pointer type (E0308,
+  same shape as why `btit-cli`'s own `tests/api_freeze.rs` calls `CliRunner::new`
+  directly instead of pinning it as a fn pointer). The test calls both constructors
+  directly with an explicit `: BrCli` binding and converts the result to `&dyn
+  BeadsBackend`/`&dyn CliBackend` instead; a signature change still fails to
+  compile. `with_invoker` (no generic parameter) is pinned as a literal fn pointer
+  as the doc describes.
+- **`tests/parity.rs`'s per-method helper (`call_every_method`) returns `Result`
+  instead of unwrapping inline.** `clippy.toml`'s `allow-unwrap-in-tests` only
+  exempts code directly inside `#[test]` functions (or `#[cfg(test)]` modules), not
+  a plain helper fn called from them, so `-D warnings` rejected the original
+  `.unwrap()`-per-call helper. `call_every_method` now propagates with `?` and
+  returns `Result<(), BeadsError>`; the two `#[test]` callers unwrap the result
+  themselves, where the allowance applies.
+- **`tests/parity.rs` wraps `RecordingInvoker` in an `Arc` behind a local
+  `CliInvoker` adapter (`ArcInvoker`)**, rather than moving a bare
+  `RecordingInvoker` straight into `BrCli::with_invoker` as the deliverable's prose
+  literally reads. `with_invoker` takes ownership of the `Box<dyn CliInvoker>`, so
+  without keeping a second handle the test could never call `.calls()` afterward to
+  assert the recorded argv the deliverable requires. `ArcInvoker(Arc<RecordingInvoker>)`
+  is a local type implementing the foreign `CliInvoker` trait (orphan-rule-legal,
+  since `Arc<RecordingInvoker>` itself is foreign-on-foreign and cannot carry the
+  impl); the `Arc` is cloned once into the box and once kept by the test.
+
+No other deviations; no behaviour delta from the spec (br: never Dolt,
+`--suggest-next` always on close, common-seven relation types, no
+`--all`-vs-two-call ambiguity difference from `bd` beyond what `capabilities_for`
+already encodes).
+
+### Gate results (this worktree, `feature/sprint-b-6-btit-br`)
+
+- `cargo fmt --check -p btit-br` — clean.
+- `cargo clippy -p btit-br --all-targets --all-features -- -D warnings` — clean, no
+  `#[allow(clippy::...)]` in `src`.
+- `cargo rustdoc -p btit-br -- -D missing-docs` — clean (0 warnings after fixing two
+  `clippy::doc_markdown` findings on `beads_rust` in doc comments).
+- `cargo test -p btit-br --features test-support` — 2 (api_freeze) + 9 (parity) = 11
+  tests, all pass.
+- `cargo test -p btit-br` (no `test-support`) — 1 test (`api_freeze::constructors`);
+  `parity.rs` is `#![cfg(feature = "test-support")]`-gated and compiles to 0 tests,
+  as required by Deliverable 6 ("`with_invoker` exists only with
+  `--features test-support`").
+- `cargo test --workspace` — passes (exit 0); all crates green.
+- `cargo check --workspace --all-targets` — clean.
+- `cargo tree -e normal -p btit-br --depth 1 --prefix none --format '{p}' | sed -E
+  's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-br\nbtit-cli\nbtit-types\nlog\nserde_json\n')`
+  — empty diff.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — 0.
+- `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE
+  '^(crates/btit-br/|docs/plans/phase-b/sprint-b-6.md$)'` — empty (confirmed after
+  reverting an accidental workspace-wide `cargo fmt --all` that reformatted
+  `crates/btit-app/*`; only `-p btit-br` fmt/clippy invocations were used from then
+  on, per the sprint's "touch only b-6 files" scope).
+- `python3 scripts/check_version_sync.py` — `version sync OK: app 1.24.5, ...`.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target
+  x86_64-pc-windows-msvc --all-targets` — clean for `btit-br`; the only warnings
+  are pre-existing `btit-app` unused-import/unused-variable warnings tracked in
+  #49, not touched here.
+- `git diff --check` — clean (exit 0).
+- Test-preservation gate (`IMPLEMENTATION_BASELINE=94e44d3`,
+  `BASELINE_TEST_COUNT=155`): `/tmp/baseline-tests.txt` has exactly 155 lines,
+  `/tmp/after-tests.txt` has 351 lines (workspace, `--all-features`), and
+  `comm -23 /tmp/baseline-tests.txt /tmp/after-tests.txt` prints nothing.
+
+### Ambiguity resolved
+
+The Explicit Code Samples' `RecordingInvoker::new(Some(probe))` boxed directly into
+`BrCli::with_invoker` in Deliverable 5's prose does not by itself let a test read
+back `calls()` (ownership moves into the `Box<dyn CliInvoker>` `BrCli` holds
+privately). Resolved by keeping the scripted invoker in an `Arc` and boxing a thin
+local adapter around a clone of it (see Deviations); the assertions are unchanged —
+every recorded argv is checked against the same b-4 Required Work table cells the
+doc specifies.

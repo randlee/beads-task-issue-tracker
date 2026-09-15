@@ -2,8 +2,26 @@
 
 ## [Unreleased]
 
+> Requires **bd 1.x**. bd < 1.0 is legacy and triggers a warning. br is supported as a secondary CLI.
+
+### Changes
+- **Unknown issue types and statuses pass through unchanged** instead of being rewritten to `task`/`open`, so bd's built-in types (`decision`, `message`, `molecule`, `gate`, `spike`, `story`, `milestone`) and custom types round-trip (B1)
+- **`bd delete --hard` and the JSONL/Dolt capability flags cut over at bd 0.51** instead of 0.50, matching bd's actual removal of `--hard` and the daemon change in 0.51.0 (B4, B5)
+- **Dolt projects on bd ≥ 0.51 are detected from `metadata.json`** (server mode and custom data directories included) instead of probing for a `.dolt/` directory (B3/B10)
+- **`P1`-style priorities are accepted case-insensitively**, and out-of-range priorities (outside 0-4) fall back to `p3`, matching bd's own `ParsePriority` (B11)
+- **`conditional-blocks` and `waits-for` dependencies are now shown as blockers** (`blocked_by`/`blocks`) instead of appearing as ordinary relations (B13)
+- **Real external URLs containing `/attachments/` and Windows attachment paths are classified correctly** during attachment-refs migration, instead of being misclassified as local attachment refs (B2)
+- **Pre-release version suffixes (`-rc.1`, `-alpha`, etc.) no longer skew update checks** (B9)
+- **Attachment filenames are fully sanitized, including the extension** (lowercased, diacritics stripped, unsafe characters replaced), and a bare trailing `.` is dropped (B12)
+- **Failed or unparsable `bd --version` probes are cached** until the CLI binary is changed or compatibility is rechecked, instead of re-spawning on every read (B13)
+
 ### Internal
 - **btit adopts the sc-observability-log bridge** (phase-a sprint a-4): `tauri-plugin-log` is replaced by `sc_observability_log::init`. The active log file is now `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`, structured JSONL instead of plain text. No Rust `log_*!`/`log::*!` call site and no `logFrontend(` call site changed; the debug panel renders the JSONL through the new `app/utils/log-format.ts`. Exit is bounded: `RunEvent::Exit` takes the log guard and makes exactly one call (`shutdown` or `flush`) bounded by 2s.
+- **Rust workspace moved to the repository root; crate split (phase-b).** `src-tauri/` is gone: the Tauri app crate lives at `crates/btit-app/` (package name `beads-issue-tracker` unchanged), and the backend logic that used to live in one crate is split into `btit-types` (the frontend data contract and CLI probe/capability value types, data only), `btit-beads` (the `BeadsBackend`/`CliBackend` contract shared by bd and br, the bd-only `DoltOperations` and br-only `CloseSuggestions` traits, the discriminated-union `BeadsError`, and the pure version/capability/issue logic), `btit-cli` (the process transport shared by bd and br: extended PATH, per-project lock, `--json` invocation, and the shared issue-operation bodies), `btit-bd` (the `bd` backend) and `btit-br` (the `br`/beads_rust backend). The in-tree `sc-observability-log` crates joined the root workspace at their own version `0.1.0`. Every Tauri command name, argument and result shape is unchanged; the 65-command `generate_handler!` list and the frontend's `invoke(...)` call sites are unchanged
+- **The Tauri app selects a backend (`BdCli` or `BrCli`) per configured binary** and drives every beads command through the `BeadsBackend` traits instead of free functions and process-global caches; command names, arguments and results are unchanged
+- **Database repair and Dolt migration run through the bd backend's `DoltOperations`**; legacy-path detection (mtime, watcher, directory listing) asks the selected backend. No user-visible change
+- **`btit-bd` adds `DoltMode`** (embedded / server / proxied-server) resolved from `metadata.json`, the switch point for future mode-dependent behaviour
+- **`crates/btit-app` adopts the workspace lint set**: no panics in production code (`unwrap`/`expect`/`panic!`/`unreachable!`/indexing all denied), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean, and the Windows cross-check (`cargo xwin check --target x86_64-pc-windows-msvc`) passes (closes refactor item A2: the platform-gated `Command` imports in `updates.rs` and `attachments.rs` are now fully-qualified call sites). `rust-quality` CI is workspace-wide
 
 ## [1.24.5] - 2026-09-13
 

@@ -1,7 +1,7 @@
 ---
 id: b-9
 title: Pinned-behaviour fixes in btit-beads (B1, B4, B5, B7, B11, B13 parts)
-status: planned
+status: complete
 branch: feature/sprint-b-9-beads-domain-fixes
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-9-beads-domain-fixes
 target: integrate/phase-b
@@ -152,3 +152,39 @@ pub fn uses_dolt_backend_for(client: CliClient, major: u32, minor: u32, _patch: 
 - `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-beads/|docs/plans/phase-b/sprint-b-9.md$)'` prints nothing
 - `python3 scripts/check_version_sync.py`
 - `git diff --check`
+
+## Implementation Notes
+
+Forked from `feature/sprint-b-4-btit-cli` head `506af12` (unchanged; b-4's closure/QA gate for group A was already satisfied when this worktree was created). All work is contained to `crates/btit-beads/src/{issues,gates,compat}.rs` (bodies, doc comments, tests) plus this file's frontmatter/notes.
+
+**Gate results** (run from the worktree, `IMPLEMENTATION_BASELINE=94e44d3`, `BASELINE_TEST_COUNT=155`):
+
+- `cargo fmt --check -p btit-beads` — pass.
+- `cargo clippy -p btit-beads --all-targets -- -D warnings` — pass (one `clippy::doc_markdown` fix: backticked `` `beads_rust` `` in the B7 doc comment).
+- `cargo rustdoc -p btit-beads -- -D missing-docs` — pass.
+- `cargo test -p btit-beads` — 87 unit tests + 9 `api_freeze` tests pass.
+- `cargo test --workspace` — all crates pass (btit-app 70, btit-beads 87+9, btit-bd/br/cli/types, sc-observability-log\* suites, doctests).
+- Test-preservation gate (baseline `/tmp/btit-baseline-94e44d3`): baseline list is non-vacuous at exactly 155 names; `comm -23 baseline after` prints exactly the three replaced names this sprint's Required Work table lists — `normalize_issue_type_defaults_unknown`, `normalize_issue_status_defaults_unknown`, `priority_to_number_defaults_invalid_inputs` — and no others. Their replacements (`normalize_issue_type_passes_unknown_through`, `normalize_issue_status_passes_unknown_through`, `priority_to_number_is_case_insensitive_and_bounded`) and the new `transform_issue_treats_conditional_blocks_and_waits_for_as_blocking` all pass. `grep -rn` for the three removed names under `crates/` is clean.
+- `git diff --exit-code feature/sprint-b-4-btit-cli...HEAD -- crates/btit-beads/tests/api_freeze.rs crates/btit-beads/src/lib.rs` — empty (frozen API untouched).
+- `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-beads/|docs/plans/phase-b/sprint-b-9.md$)'` — prints nothing.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — `0`.
+- `python3 scripts/check_version_sync.py` — OK (app 1.24.5, toolchain 1.98.1).
+- `git diff --check` — clean.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` — passes for `crates/btit-beads` and the rest of the workspace; the only warnings are pre-existing `btit-app` lint drift (unused imports/variables in `updates.rs`, `attachments.rs`) tracked in #49, not touched by this sprint.
+- `cargo fmt --all` (run once, to confirm no stray formatting) also reformatted several `crates/btit-app/**` files (pre-existing #49 drift); those were reverted with `git checkout -- crates/btit-app/` so this sprint's diff stays scoped to `btit-beads`.
+
+**B7 (OQ-4) disposition:** default taken, per the sprint doc and OQ-4 — `br` source is unavailable locally and the binary is not installed, so the behaviour cannot be verified. The doc comment on `supports_list_all_flag_for` now reads "br: returns true (unverified against beads_rust; OQ-4)"; the code and the `Br` row of `supports_list_all_flag_table_driven` and `capabilities_for_pins_a18c724_values` are unchanged.
+
+**Behaviour deltas (for the b-12 changelog collation):**
+
+- B1: unknown issue types/statuses are no longer rewritten to `task`/`open` — they pass through unchanged, so bd's built-in types (`decision`, `message`, `molecule`, `gate`, `spike`, `story`, `milestone`) and custom types round-trip.
+- B4: `bd delete --hard` is now offered for bd 0.50.x too (cutoff moved from `<50` to `<51`), matching bd's actual removal of `--hard` in 0.51.0.
+- B5: `uses_jsonl_files`/`uses_dolt_backend` cutover moved from bd 0.50.0 to bd 0.51.0; the `cli_compatibility_warnings` Dolt-note condition moved with it (`minor >= 51`). Whether the underlying daemon removal landed in 0.50 or 0.51 is not independently re-verified in this sprint (carried over uncertainty, noted for the record); the cutover value itself follows the sprint doc's citation of `factory.go:49` / bd 0.51.0.
+- B11: `priority_to_number` now accepts `p`/`P` case-insensitively (`"P1"` → `"1"`); any digit outside 0-4 (`p5`-`p9`, which bd's `ParsePriority` rejects) falls back to `"3"`, same as any other unparseable input. A bare digit (`"1"`) now returns that digit instead of `"3"`, matching bd's `ParsePriority` (QA-1 QA-002; pinned in `priority_to_number_is_case_insensitive_and_bounded`).
+- B13 (relations fixture): the pinning test now uses bd's real `relates-to` dependency type instead of the nonexistent `related-to`.
+- B13 (blocking types): `conditional-blocks` and `waits-for` now behave like `blocks` — they feed `blocked_by`/`blocks` in both directions and are excluded from `relations`, instead of showing up as ordinary relations.
+- B13 (out-of-range warning case): the `(0, 99, 0)` case is dropped from `warnings_for_0_50_through_0_56_include_dolt_note` (bd has not shipped past 0.56.x) and the table now starts at `(0, 51, 0)`, matching the B5 cutover; the message-substring assertions are unchanged.
+
+**Deviations from the sprint doc:** none. The sprint doc's exact code samples for `priority_to_number`, `supports_delete_hard_flag_for`, `uses_jsonl_files_for`, `uses_dolt_backend_for`, and the `STRUCTURAL_TYPES`/`BLOCKING_TYPES` constants were implemented verbatim (module-qualified as `crate::issues`/`crate::gates` rather than the plan's illustrative `cli.rs`/`issues.rs` paths, since b-3 already moved this code into `crates/btit-beads/src/`).
+
+**Ambiguity resolved:** the doc's B1 test example gives `"decision"` → `"decision"` and `"custom-x"` → `"custom-x"` for `normalize_issue_type_passes_unknown_through` but does not give explicit values for `normalize_issue_status_passes_unknown_through`. Used the same two values (`"decision"`, `"custom-x"`) for the status test for consistency, since any unrecognized string demonstrates the pass-through behaviour equally well.
