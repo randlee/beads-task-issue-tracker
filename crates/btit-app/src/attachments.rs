@@ -231,19 +231,13 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
     })
 }
 
-/// Sanitize a filename for safe storage and br JSONL compatibility.
-/// Converts to kebab-case, strips diacritics, removes unsafe chars.
-/// Example: "Screenshot 2026-02-24 à 10.30.png" → "screenshot-2026-02-24-a-10-30.png"
-pub(crate) fn sanitize_filename(filename: &str) -> String {
-    // Split into stem and extension
-    let (stem, ext) = match filename.rfind('.') {
-        Some(pos) => (&filename[..pos], &filename[pos..]),
-        None => (filename, ""),
-    };
-
+/// Applies the kebab-case sanitization rules (diacritics stripped, unsafe
+/// chars replaced with `-`, dashes collapsed and trimmed) to one filename
+/// segment (either the stem or the extension, without its leading dot).
+fn sanitize_segment(segment: &str) -> String {
     // Strip diacritics by replacing common accented chars, then lowercase + kebab-case
-    let mut sanitized = String::with_capacity(stem.len());
-    for c in stem.chars() {
+    let mut sanitized = String::with_capacity(segment.len());
+    for c in segment.chars() {
         let replacement = match c {
             'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => "a",
             'è' | 'é' | 'ê' | 'ë' | 'È' | 'É' | 'Ê' | 'Ë' => "e",
@@ -279,13 +273,28 @@ pub(crate) fn sanitize_filename(filename: &str) -> String {
             prev_dash = false;
         }
     }
-    let result = result.trim_matches('-');
+    result.trim_matches('-').to_string()
+}
 
-    let ext_lower = ext.to_lowercase();
-    if result.is_empty() {
-        format!("file{}", ext_lower)
+/// Sanitize a filename for safe storage and br JSONL compatibility.
+/// Converts to kebab-case, strips diacritics, removes unsafe chars — in both
+/// the stem and the extension, keeping the leading `.` between them.
+/// Example: "Screenshot 2026-02-24 à 10.30.png" → "screenshot-2026-02-24-a-10-30.png"
+pub(crate) fn sanitize_filename(filename: &str) -> String {
+    // Split into stem and extension (extension excludes the leading dot)
+    let (stem, ext) = match filename.rfind('.') {
+        Some(pos) => (&filename[..pos], &filename[pos + 1..]),
+        None => (filename, ""),
+    };
+
+    let sanitized_stem = sanitize_segment(stem);
+    let sanitized_ext = sanitize_segment(ext);
+    let stem_part = if sanitized_stem.is_empty() { "file".to_string() } else { sanitized_stem };
+
+    if sanitized_ext.is_empty() {
+        stem_part
     } else {
-        format!("{}{}", result, ext_lower)
+        format!("{}.{}", stem_part, sanitized_ext)
     }
 }
 
@@ -706,9 +715,14 @@ mod tests {
 
     #[test]
     fn sanitize_filename_fallback_for_empty_stem() {
-        let result = sanitize_filename(".txt");
-        assert!(!result.is_empty());
-        assert!(result.ends_with(".txt"));
+        assert_eq!(sanitize_filename(".txt"), "file.txt");
+    }
+
+    #[test]
+    fn sanitize_filename_sanitizes_extension() {
+        assert_eq!(sanitize_filename("a.b<c>"), "a.b-c");
+        assert_eq!(sanitize_filename("Report.MD"), "report.md");
+        assert_eq!(sanitize_filename("x.tar.gz"), "x-tar.gz");
     }
 
     #[test]
@@ -788,6 +802,12 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    // Both tests below pin the current short-id-only folder naming documented
+    // in docs/attachments.md (B8). Because the folder key is the short id, two
+    // issues with different project prefixes but the same short-id suffix
+    // (e.g. "proj-abc" and "other-abc") collide on one folder; see the
+    // collision note in docs/attachments.md.
 
     #[test]
     fn resolve_attachment_dir_uses_short_id() {

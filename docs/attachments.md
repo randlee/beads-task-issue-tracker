@@ -7,11 +7,25 @@ The **filesystem** is the sole source of truth for attachments. The `external_re
 ```
 .beads/
   attachments/
-    {issue-id}/
+    {short-id}/
       screenshot-2026-02-24.png
       spec-technique.md
       screenshot-2026-02-24-1.png    <- automatic duplicate handling
 ```
+
+The folder is named after the issue's **short ID** — the text after the last `-`
+in the full issue ID (e.g. `proj-abc` → `abc`; `kybio-front-nuxt-4-466d` →
+`466d`; see `issue_short_id` in `crates/btit-app/src/attachments.rs`), not the
+full issue ID.
+
+> **Collision note:** because the folder name is only the short ID, two issues
+> in the *same database* that have different project prefixes but the same
+> short-ID suffix (e.g. `proj-abc` and `other-abc`) share one attachment
+> folder. Deleting either issue (`bd delete`, which removes
+> `.beads/attachments/{short-id}/` — see `crates/btit-app/src/issue_commands.rs`)
+> removes attachments for both. This is a known limitation of the current
+> layout; changing it to use the full issue ID requires a data migration and
+> is out of scope for this fix (tracked as documentation-only, B8).
 
 ## How It Works
 
@@ -19,7 +33,7 @@ The **filesystem** is the sole source of truth for attachments. The `external_re
 
 1. User clicks "Attach" in the issue preview or form
 2. One or more files are selected (multi-file supported, filtered by allowed extensions)
-3. Tauri backend copies each file to `.beads/attachments/{issue-id}/`
+3. Tauri backend copies each file to `.beads/attachments/{short-id}/`
    - Filename is sanitized (diacritics stripped, kebab-case)
    - Duplicates: `image.png` → `image-1.png` → `image-2.png`
 4. Frontend refreshes the attachment list from the filesystem
@@ -28,7 +42,7 @@ The **filesystem** is the sole source of truth for attachments. The `external_re
 ### Viewing attachments
 
 1. Frontend calls `list_attachments(projectPath, issueId)` Tauri command
-2. Backend reads `.beads/attachments/{issue-id}/` directory
+2. Backend reads `.beads/attachments/{short-id}/` directory
 3. Files are classified as `image` or `markdown` by extension
 4. Results are sorted by modification time (newest first)
 5. Absolute paths are returned — no resolution needed on the frontend
@@ -43,7 +57,7 @@ The **filesystem** is the sole source of truth for attachments. The `external_re
 ### Deleting an issue
 
 1. The issue is deleted via `bd delete {id} --force --hard`
-2. The entire `.beads/attachments/{issue-id}/` folder is deleted
+2. The entire `.beads/attachments/{short-id}/` folder is deleted
 3. An orphan purge mechanism also cleans up leftover attachment folders
 
 ## External References
