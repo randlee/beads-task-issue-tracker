@@ -104,6 +104,16 @@ mod tests {
     }
 
     #[test]
+    fn warnings_for_0_50_x_have_no_dolt_note() {
+        // B5 boundary, excluded side: bd 0.50.x still gets only the legacy warning.
+        for v in [(0, 50, 0), (0, 50, 3)] {
+            let w = cli_compatibility_warnings(CliClient::Bd, Some(v.into()));
+            assert_eq!(w.len(), 1, "{v:?}: {w:?}");
+            assert!(!w.iter().any(|m| m.contains("Dolt")), "{w:?}");
+        }
+    }
+
+    #[test]
     fn warnings_for_0_50_through_0_56_include_dolt_note() {
         // B5: the Dolt-note cutoff moved to 0.51.0; the out-of-range (0, 99, 0) case is
         // dropped (B13) since bd has not shipped past 0.56.x.

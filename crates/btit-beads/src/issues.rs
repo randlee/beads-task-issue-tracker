@@ -24,9 +24,9 @@ pub fn priority_to_string(priority: i32) -> String {
     format!("p{}", p)
 }
 
-/// Map `p0`..`p4` (case-insensitive `p`/`P` prefix) back to its digit for the CLI's
-/// `--priority`; anything else, including out-of-range digits bd rejects (`p5`-`p9`),
-/// becomes `"3"`, today's default (B11).
+/// Map `p0`..`p4` (case-insensitive `p`/`P` prefix, or a bare digit, as bd's
+/// `ParsePriority` accepts) back to its digit for the CLI's `--priority`; anything else,
+/// including out-of-range digits bd rejects (`p5`-`p9`), becomes `"3"`, today's default (B11).
 #[must_use]
 pub fn priority_to_number(priority: &str) -> String {
     let digits = priority.strip_prefix(['p', 'P']).unwrap_or(priority);
@@ -435,6 +435,9 @@ mod tests {
         // B11: `p`/`P` accepted case-insensitively; anything outside 0-4 (bd rejects
         // p5-p9) falls back to "3".
         assert_eq!(priority_to_number("P1"), "1");
+        // A bare digit is accepted, matching bd's `ParsePriority` (QA-1 QA-002).
+        assert_eq!(priority_to_number("1"), "1");
+        assert_eq!(priority_to_number("5"), "3");
         assert_eq!(priority_to_number("p7"), "3");
         assert_eq!(priority_to_number("p"), "3");
         assert_eq!(priority_to_number("x"), "3");
