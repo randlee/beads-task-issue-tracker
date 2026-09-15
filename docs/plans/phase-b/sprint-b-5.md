@@ -1,7 +1,7 @@
 ---
 id: b-5
 title: btit-bd crate — BdCli (BeadsBackend, CliBackend, DoltOperations)
-status: planned
+status: in_progress
 branch: feature/sprint-b-5-btit-bd
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-5-btit-bd
 target: integrate/phase-b
@@ -180,3 +180,36 @@ impl DoltOperations for BdCli {
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
 - test-preservation gate
+
+## Implementation Notes
+
+Implemented on `feature/sprint-b-5-btit-bd`, forked from the b-4 head (`506af12`).
+
+**Gate outputs**
+
+- `cargo fmt --check -p btit-bd` — clean.
+- `cargo clippy -p btit-bd --all-targets --all-features -- -D warnings` — clean (also re-checked without `--features test-support`).
+- `cargo rustdoc -p btit-bd -- -D missing-docs` — clean.
+- `cargo test -p btit-bd --features test-support` — 10 unit + 3 `api_freeze` + 1 `parity` tests pass.
+- `cargo test -p btit-bd` (no features) — the same 10 unit + 2 `api_freeze` tests pass; `tests/parity.rs` compiles to an empty binary (`#![cfg(feature = "test-support")]`) and `with_invoker_signature` in `api_freeze.rs` is skipped, as Deliverable 7 requires.
+- `cargo test --workspace` — all green (349 test names in `--list`).
+- `cargo check --workspace --all-targets` — clean.
+- `cargo tree -e normal -p btit-bd --depth 1` — exactly `btit-bd, btit-beads, btit-cli, btit-types, log, serde_json`.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — `0`.
+- `git diff --name-only feature/sprint-b-4-btit-cli...HEAD | grep -vE '^(crates/btit-bd/|docs/plans/phase-b/sprint-b-5.md$)'` — empty.
+- `python3 scripts/check_version_sync.py` — OK.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` — clean (pre-existing `btit-app` warnings in `updates.rs`/`attachments.rs` are #49 drift, untouched here).
+- `git diff --check` — clean.
+- Test-preservation gate against baseline `94e44d3` (`BASELINE_TEST_COUNT=155`): `/tmp/baseline-tests.txt` has 155 lines, `/tmp/after-tests.txt` is non-vacuous, `comm -23 /tmp/baseline-tests.txt /tmp/after-tests.txt` prints nothing.
+
+**Deviations from the sprint doc**
+
+- Acceptance criterion 2's literal regex `grep -nE '^pub struct BdCli \{ inv: Box<dyn CliInvoker> \}' crates/btit-bd/src/backend.rs` cannot match under `cargo fmt`: stable rustfmt always expands a named-field struct definition onto multiple lines (only struct *literals* can stay single-line), regardless of width. `BdCli` is declared as `pub struct BdCli { inv: Box<dyn CliInvoker>, }`, fmt-canonical multi-line, with `inv` as the sole field. The semantic intent (no process-global statics, no field or generic holding the concrete `CliRunner`) is verified by the criterion's other two regexes, both of which pass as written.
+- `to_dolt_result` and `project_uses_dolt_for` are `pub` (crate-public), not `pub(crate)` as Deliverable 4's prose states for `to_dolt_result`: Deliverable 7 pins both in `tests/api_freeze.rs`, an external integration-test binary that can only see `pub` items. `pub(crate)` is kept for the four pure argument builders (`doctor_fix_args`, `migrate_to_dolt_args`, `init_args`, `import_args`), which Deliverable 7 does not list and which are exercised by `dolt.rs`'s own `#[cfg(test)]` unit tests instead.
+- `BdCli` cannot `#[derive(Debug)]` as the Explicit Code Sample shows: `CliInvoker` is not `Debug` (it has no such bound, and adding one would leak into `RecordingInvoker`/`AppInvoker`), so `Box<dyn CliInvoker>` cannot derive it either. Added a manual `impl Debug for BdCli` that reports the configured binary and `finish_non_exhaustive()`s the rest, keeping `missing_debug_implementations` (workspace `warn` lint) satisfied without changing `CliInvoker`'s contract (out of this sprint's scope; not a b-4 file).
+- `project_uses_dolt_false_without_beads_dir`, one of the seven moved tests, is placed in `backend.rs`'s test module (calling `BdCli::new(..).project_uses_dolt(..)`) rather than in `dolt.rs`, since it exercises the `BdCli` wrapper end-to-end (and still spawns `bd --version`, per Deliverable 5) rather than the pure `project_uses_dolt_for` core that the other six tests exercise directly; `dolt.rs` holds those six. All seven exist in `crates/btit-bd` and none remain in `crates/btit-app/src/cli.rs`, satisfying Acceptance Criterion 4.
+- `tests/parity.rs` covers each `BeadsBackend`/`DoltOperations` method once per probe with a `RecordingInvoker` wrapped in a small in-test `Shared(Arc<RecordingInvoker>)` `CliInvoker` adapter, so the test can hand `BdCli::with_invoker` a `Box<dyn CliInvoker>` while still reading `calls()` on the same recorder afterward (`BdCli` exposes no accessor back to its invoker, by design). `to_dolt_result`'s field-by-field mapping (also named in Deliverable 6) is asserted directly in `dolt.rs`'s unit tests instead of via a scripted raw reply in `parity.rs`, since the two need not be the same assertion site and the unit test is simpler.
+
+**Behaviour deltas**
+
+- None intended. `project_uses_dolt_for` and the `DoltOperations` argument vectors are copied verbatim from `crates/btit-app/src/cli.rs` / the sprint doc's code sample. `BeadsBackend`/`CliBackend` methods are thin `ops::*`/`self.inv.*` delegations with the exact bd choices Deliverable 2 specifies (`close` → `suggest_next: false`, `delete` → `hard: supports_delete_hard_flag`, `relation_types` → the ten-entry bd list, `sync` → `no_daemon: supports_daemon_flag`).
