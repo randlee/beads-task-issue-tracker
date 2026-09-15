@@ -1,7 +1,7 @@
 ---
 id: b-11
 title: Pinned-behaviour fixes in the app and btit-cli (B2, B6, B8, B9, B10, B12, B13 probe cache)
-status: planned
+status: in_progress
 branch: feature/sprint-b-11-app-cli-fixes
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-11-app-cli-fixes
 target: integrate/phase-b
@@ -155,3 +155,52 @@ impl std::fmt::Debug for CliRunner {   // manual: Box<dyn Fn> is not Debug
 - `git diff --exit-code <layer-7 head>...HEAD -- crates/btit-types crates/btit-beads`
 - `git log --first-parent --no-merges --format=%H <layer-7 head>..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|crates/btit-cli/|docs/attachments.md$|Cargo.lock$|docs/plans/phase-b/sprint-b-11.md$)'` prints nothing
 - test-preservation gate with the replaced-name lists (Acceptance Criterion 2)
+
+## Implementation Notes
+
+**Layer-7 head**: `0ac5c7c` (b-10). Head at close of this sprint's work: `1062153` (b-8 merge, join layer) plus this sprint's own commits on top.
+
+### Gate outputs
+
+- `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br` — clean, no output.
+- `cargo clippy -p btit-cli --all-targets --all-features -- -D warnings` — clean, no output (only `Checking`/`Finished` lines).
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — `0`.
+- `cargo test --workspace` — all crates pass, including the phase-a `sc-observability-log*` crates (unchanged).
+- `cargo test --manifest-path crates/btit-app/Cargo.toml --lib` — 105 passed, 0 failed (104 baseline + 1 net: B2 adds 2, B6 replaces 1-for-1, B9 replaces 1-for-1, B10 replaces 2-for-2, B12 adds 1).
+- `cargo test -p btit-cli --all-features` — 22 (lib) + 7 (api_freeze) + 20 (ops_argv) + 19 (ops_behaviour) + 1 (resolve_working_dir) passed.
+- `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets` — no errors; pre-existing warnings only (issue #49, b-12 scope). Not introduced by this sprint's new lines, which follow the surrounding file's existing (non-rustfmt) style deliberately, to avoid a large unrelated reformat of `btit-app` (see Deviations).
+- `pnpm test` — 20 files, 366 tests passed.
+- `npx vue-tsc --noEmit` — clean, no output.
+- `python3 scripts/check_version_sync.py` — `version sync OK: app 1.24.5, rust toolchain 1.98.1 (...)`.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` — succeeds; only two pre-existing `unused_imports: std::process::Command` warnings on the Windows target (conditional-compile pattern already present in `attachments.rs`/`updates.rs` before this sprint; not introduced here).
+- `git diff --check` — clean.
+- `git diff --exit-code 0ac5c7c...HEAD -- crates/btit-types crates/btit-beads` — empty.
+- Join-layer file-touch check (`git log --first-parent --no-merges --format=%H 0ac5c7c..HEAD | xargs -I{} git show --name-only --format= {} | sort -u | grep -vE '^(crates/btit-app/|crates/btit-cli/|docs/attachments.md$|Cargo.lock$|docs/plans/phase-b/sprint-b-11.md$)'`) — prints nothing once this sprint's own commits are the only ones counted past the b-8 merge commit at `1062153`.
+- Test-preservation gate (`IMPLEMENTATION_BASELINE=94e44d3`, `BASELINE_TEST_COUNT=155`, baseline worktree `/tmp/btit-baseline-94e44d3`, private replacement-list files under the session scratchpad, not `/tmp/replaced.txt`): baseline list = 155 lines (confirmed non-vacuous); after-list (workspace, `--all-features`) = 411 lines; union of `replaced-b9.txt` (3 names), `replaced-b10.txt` (4 names) and `replaced-b11.txt` (4 names, this sprint's own) applied via `grep -vxFf`; the final `comm -23 <(grep -vxFf replaced.txt baseline-tests.txt) after-tests.txt` printed nothing.
+
+### B13 required-work test names
+
+New: `probe_failure_is_cached_and_reports_unknown`, `fresh_runner_probes_again`, `parsed_probe_is_cached_once` (all in `crates/btit-cli/src/runner.rs`, `#[cfg(feature = "test-support")]`, using the `with_version_probe` seam and an `AtomicUsize`-counting closure).
+
+### Deviations
+
+- **`cargo fmt --all` was reverted for files this sprint did not intend to reformat.** Running the mandated `cargo fmt --all` once reformatted the entire `btit-app` crate (issue #49's pre-existing drift, owned by b-12), not just this sprint's edits. To keep the join-layer file-touch discipline meaningful (own commits touch only their targets, with a minimal, reviewable diff) and to avoid pre-empting b-12's lint/format rollout, the four `btit-app` files this sprint edits (`attachment_refs.rs`, `attachments.rs`, `polling.rs`, `updates.rs`) were restored to their original formatting and only the new/changed lines were added, matching each file's existing (pre-b-12) style. `crates/btit-cli` files (owned by this sprint per the crate's Required Validation) were left `cargo fmt`-clean as required by `cargo fmt --check -p ... -p btit-cli ...`.
+- **`missing_binary_has_no_client_info_and_is_not_cached` renamed to `missing_binary_caches_failed_and_reports_unknown`** in `crates/btit-cli/src/runner.rs`. This test is not part of the `IMPLEMENTATION_BASELINE` test set (it was added post-split, by b-4/b-7), so it is not subject to the replaced-name gate; it was renamed and its body updated because B13 changes its actual behaviour: a missing binary is now cached as `ProbeState::Failed` on first probe, not left uncached.
+- **`get_beads_mtime_for_returns_none_for_empty_dir` uses a non-existent path**, not a created-but-empty directory. An existing empty directory still has a real mtime (so the Dolt branch's `fs::metadata(beads_dir)` read would return `Some`), which would fail the "None for both `(false,false)` and `(true,_)`" assertion the spec requires; a path that was never created has no metadata to read in either branch, giving `None` for both.
+- **`sanitize_filename`'s trailing-dot edge case changed slightly.** For an input ending in a bare `.` with no extension characters after it (e.g. `"test."`), the old code kept the extension slot as `"."` verbatim (`format!("{}{}", result, ext_lower)` with `ext_lower = "."`), producing `"test."`. The new code treats the (empty) text after the last `.` as the extension segment, sanitizes it to `""`, and omits the separator entirely, producing `"test"`. This case has no existing or new pinning test and is not exercised by any caller with a real trailing-dot filename; recorded here as a residual per the "no behaviour change beyond your doc" instruction.
+
+### B9 residual (Acceptance Criterion 5)
+
+An RC version still compares equal to its own final release: `compare_versions("1.2.0-rc.1", "1.2.0")` is `false` (no update offered), because `parse_version` drops the pre-release suffix entirely before comparing, so `1.2.0-rc.1` and `1.2.0` both parse to `[1, 2, 0]`. This means a user running a release-candidate build is never offered the update to the corresponding final release by `compare_versions` alone — only a *later* version (e.g. `1.2.1`) triggers an update. This is the direction the review (B9 deliverable) chose: the fix's purpose is to stop pre-release suffixes from *skewing* comparisons (e.g. `"1.0.0-alpha"` no longer partially parses to `[1, 0]` and silently drops a real numeric segment), not to add full semver pre-release ordering. Pinned by `compare_versions_ignores_prerelease_suffix`.
+
+### Behaviour deltas recorded
+
+- B13 (this sprint): a failing or unparsable `--version` probe now spawns **at most once per `CliRunner`** (cached as `ProbeState::Failed`), closing the b-7 items "an unparsed or missing binary re-probes `--version` on every read" and RSH-002 as they apply to `client_info()`/`client()`/`version()`/`capabilities()`. A fresh `CliRunner` (new binary, or a compatibility-recheck rebuild per b-7 Deliverable 4) probes again, as before.
+- B2: `is_real_external_ref` now classifies URLs (any `scheme://`) as real before applying the local-path heuristics, so a URL that happens to contain `/attachments/` or `/.beads/` (e.g. a Redmine attachment-download URL) is no longer misclassified as a local attachment ref. Windows absolute paths (`C:\...`, `C:/...`, `\\server\share\...`) are now explicitly classified as local, closing a gap where such strings fell through to the generic rules and could be misclassified depending on their exact shape.
+- B9: pre-release suffixes (`-alpha`, `-rc.1`, etc.) no longer cause `compare_versions` to silently drop trailing numeric version segments; see the B9 residual above for the remaining known limitation.
+- B10/B6: no behavioural change to production code paths (`find_platform_asset`, `get_beads_mtime`/`get_beads_mtime_with` compose the same pure cores they did before, just now exposed as `find_platform_asset_for`/`platform_asset_suffix` and `get_beads_mtime_for` for platform-independent, spawn-free testing).
+- B12: `sanitize_filename` now also sanitizes the file extension (lowercased, diacritics stripped, unsafe characters replaced with `-`), not just the stem. Previously an extension like `.MD` or `.b<c>` passed through mostly unsanitized (only lowercased); it is now fully normalized, consistent with the stem.
+
+### Changelog lines
+
+"Real external URLs containing `/attachments/` and Windows attachment paths are classified correctly during refs migration; pre-release suffixes no longer skew update checks; attachment filename extensions are sanitized; failed CLI version probes are cached until the binary is changed or compatibility is rechecked."
