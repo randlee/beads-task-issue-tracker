@@ -1,6 +1,6 @@
 ---
 id: b-10
-title: Dolt detection redesign in btit-bd (B3, B10 wrapper test, B13 rename)
+title: Dolt detection redesign in btit-bd (B3, DoltMode, B10 wrapper test, B13 rename)
 status: planned
 branch: feature/sprint-b-10-dolt-detection
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-10-dolt-detection
@@ -32,6 +32,7 @@ Planning advice; team-lead assigns from the active pool.
 ## Goal
 
 - Close B3: on bd ≥ 0.51 decide Dolt vs not-Dolt from `metadata.json` with bd's own `GetBackend()` rule instead of probing `.beads/dolt/<name>/.dolt`, so server-mode and custom-data-dir projects are detected.
+- Add `DoltMode` (embedded / server / proxied-server), resolved from `metadata.json` with bd's rules, as the single switch point for any mode-dependent behaviour (maintainer decision 2026-09-15: one implementation with an enum switch in phase-b; separate embedded and server implementations are a later-phase decision).
 - Close the `btit-bd` parts of B10 and B13: the wrapper-calling test spawns no `bd`, and the misleading test name is fixed.
 
 ## Hard Dependencies
@@ -52,7 +53,8 @@ Stack: group B · layer 7 (b-8 | b-10, first to close). If this sprint closes fi
 
 Line numbers are at `a18c724`; after b-5 the code is in `crates/btit-bd/src/dolt.rs`.
 
-- `crates/btit-bd/src/dolt.rs`: `project_uses_dolt_for` (from `cli.rs:482-515`); tests from `cli.rs:1239-1302`
+- `crates/btit-bd/src/dolt.rs`: `project_uses_dolt_for` (from `cli.rs:482-515`); tests from `cli.rs:1239-1302`; new `DoltMode` and `project_dolt_mode`
+- `crates/btit-bd/tests/dolt_mode.rs` (new: `DoltMode` verification table and signature pin)
 - `docs/plans/phase-b/sprint-b-10.md` (`status:` frontmatter and Implementation Notes)
 
 ## Deliverables
@@ -80,7 +82,31 @@ Every listed deliverable is expected to land at a production-ready level for the
 3. **Tests replaced.** `project_uses_dolt_for_nested_layout_needs_metadata_and_dolt_dir` → `project_uses_dolt_for_bd_1x_reads_metadata_backend` (the table above); `project_uses_dolt_for_sqlite_metadata_or_empty_dir_is_false` → `project_uses_dolt_for_bd_0_50_keeps_filesystem_probe` (today's nested-layout expectations for `(Bd, 0, 50, x)`); `project_uses_dolt_for_legacy_dolt_dir` kept.
 4. **B10 (btit-bd part).** `project_uses_dolt_false_without_beads_dir` → `project_uses_dolt_for_is_false_for_dir_without_beads_layout`, calling the `_for` core with `BD_1`; no `bd` spawn remains in `btit-bd` tests.
 5. **B13 rename.** `project_uses_dolt_for_br_and_legacy_bd_never_true` → `project_uses_dolt_for_legacy_dolt_dir_by_client` (same body).
-6. **Frozen API untouched.** `crates/btit-bd/tests/api_freeze.rs` is byte-identical to the b-5 branch (the signature `fn project_uses_dolt_for(Option<(CliClient, u32, u32, u32)>, &Path) -> bool` is unchanged).
+6. **`DoltMode` (maintainer decision 2026-09-15).** In `crates/btit-bd/src/dolt.rs`, a `#[non_exhaustive]` `pub enum DoltMode { Embedded, Server, ProxiedServer }` and `pub fn project_dolt_mode(beads_dir: &Path) -> Option<DoltMode>`, following bd's `GetDoltMode()` at `../beads` `610339cd7` (`internal/configfile/configfile.go`: constants 325-327, `GetDoltMode` 471-478, `HostImpliesServerMode` 417-437, `IsLocalHostString` 443-449):
+   - `metadata.json` absent or unparsable, or its `backend` is `sqlite`/`postgres`/`mysql` → `None` (not a Dolt project; same backend rule as deliverable 1).
+   - `dolt_mode` non-empty, compared case-insensitively: `server` → `Server`; `proxied-server` → `ProxiedServer`; `embedded` or any other value → `Embedded` (bd's `IsDoltServerMode` treats every non-`server` explicit value as not-server).
+   - `dolt_mode` missing or empty: `dolt_server_host` non-empty and not local (`""`, `localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` after trim and lowercase) → `Server`; otherwise → `Embedded`.
+   - **Known limitation (recorded in Implementation Notes):** the runtime overrides `BEADS_DOLT_SERVER_MODE`, `BEADS_DOLT_SHARED_SERVER`, `BEADS_DOLT_SERVER_HOST` and the `config.yaml` `dolt.mode`/`dolt.host` fallbacks are not consulted; `project_dolt_mode` reports the project-local persisted mode only. A `dolt-server.port` file or a running `dolt sql-server` process is never evidence of server mode (maintainer's vault: embedded with a stale port file; beads-ralph: embedded with a leftover server process).
+   - **Switch rule.** Mode-dependent behaviour in phase-b is written as a `match` on `DoltMode` inside `btit-bd`; no second trait or implementation per mode. Phase-b adds no app caller (nothing in today's behaviour differs by mode); the enum is the switch point for later work (Dolt server settings / database listing view, issue #51 SQL access).
+7. **`DoltMode` verification table** (each row a case in `crates/btit-bd/tests/dolt_mode.rs::project_dolt_mode_follows_bd_get_dolt_mode`, using a temp `.beads` dir; the file also pins `let _: fn(&Path) -> Option<DoltMode> = project_dolt_mode;`):
+
+   | `metadata.json` | extra files | expected |
+   |---|---|---|
+   | `{"backend":"dolt","dolt_mode":"embedded","dolt_database":"iron"}` | `dolt-server.port` containing `3308`, `embeddeddolt/iron/` dir | `Some(Embedded)` |
+   | `{"backend":"dolt","dolt_mode":"server"}` | none | `Some(Server)` |
+   | `{"backend":"dolt","dolt_mode":"SERVER"}` | none | `Some(Server)` |
+   | `{"backend":"dolt","dolt_mode":"proxied-server"}` | none | `Some(ProxiedServer)` |
+   | `{"backend":"dolt","dolt_mode":"bogus"}` | none | `Some(Embedded)` |
+   | `{"backend":"dolt"}` | none | `Some(Embedded)` |
+   | `{}` | none | `Some(Embedded)` |
+   | `{"backend":"dolt","dolt_server_host":"db.example.com"}` | none | `Some(Server)` |
+   | `{"backend":"dolt","dolt_server_host":"127.0.0.1"}` | none | `Some(Embedded)` |
+   | `{"backend":"dolt","dolt_mode":"embedded","dolt_server_host":"db.example.com"}` | none | `Some(Embedded)` |
+   | `{"backend":"sqlite","dolt_mode":"server"}` | none | `None` |
+   | absent | none | `None` |
+   | `not json` | none | `None` |
+
+8. **Frozen API untouched.** `crates/btit-bd/tests/api_freeze.rs` is byte-identical to the b-5 branch (the signature `fn project_uses_dolt_for(Option<(CliClient, u32, u32, u32)>, &Path) -> bool` is unchanged).
 
 ## Required Work
 
@@ -93,7 +119,7 @@ Every listed deliverable is expected to land at a production-ready level for the
   | `project_uses_dolt_false_without_beads_dir` | `project_uses_dolt_for_is_false_for_dir_without_beads_layout` |
   | `project_uses_dolt_for_br_and_legacy_bd_never_true` | `project_uses_dolt_for_legacy_dolt_dir_by_client` |
 
-- `metadata.json` parsing uses `serde_json::from_str::<serde_json::Value>`; only the `backend` key is read.
+- `metadata.json` parsing uses `serde_json::from_str::<serde_json::Value>`; `project_uses_dolt_for` reads only the `backend` key; `project_dolt_mode` reads `backend`, `dolt_mode` and `dolt_server_host`.
 - Changelog lines (collated by b-12): "Dolt projects on bd ≥ 0.51 are detected from `metadata.json` (server mode and custom data dirs included)."
 
 ## Explicit Code Samples
@@ -121,6 +147,7 @@ pub fn project_uses_dolt_for(info: Option<(CliClient, u32, u32, u32)>, beads_dir
 ## This Sprint Does Not Close
 
 - Modelling postgres/mysql as a third storage kind (limitation recorded).
+- Separate embedded and server implementations, env-var/`config.yaml` mode overrides, server discovery, any `DoltMode` app caller or UI (later phase).
 - Any app-side change (b-8, b-11).
 
 ## Acceptance Criteria
@@ -129,7 +156,8 @@ pub fn project_uses_dolt_for(info: Option<(CliClient, u32, u32, u32)>, beads_dir
 2. Every row of the verification table is a test case and passes on all three CI OSes; the replacement tests in Required Work exist and the removed names do not (`! grep -rn 'project_uses_dolt_for_nested_layout\|project_uses_dolt_for_sqlite_metadata\|project_uses_dolt_false_without_beads_dir\|never_true' crates/`).
 3. No test in `btit-bd` spawns a CLI, checked mechanically on every OS: `! grep -rnE 'BdCli::new\(|BdCli::with_seeded_probe\(|Command::new|probe_cli_binary|probe_version_output' crates/btit-bd/tests` and, for in-file `#[cfg(test)]` modules, `awk '/#\[cfg\(test\)\]/{t=1} t&&/(BdCli::new\(|Command::new|probe_cli_binary|probe_version_output)/{print FILENAME":"FNR": "$0}' crates/btit-bd/src/*.rs` prints nothing. On Linux and macOS only, additionally `SAFE_PATH="$(dirname "$(command -v cargo)"):/usr/bin:/bin"; ! PATH="$SAFE_PATH" command -v bd && PATH="$SAFE_PATH" cargo test -p btit-bd` passes with no `bd` reachable (skipped on Windows, where the greps are the gate).
 4. `cargo clippy -p btit-bd --all-targets -- -D warnings`, `cargo fmt --check -p btit-bd`, `cargo rustdoc -p btit-bd -- -D missing-docs` pass.
-5. Implementation Notes record the postgres/mysql limitation.
+5. Implementation Notes record the postgres/mysql limitation and the `DoltMode` env-var/`config.yaml` limitation.
+5a. Every row of the `DoltMode` verification table passes on all three CI OSes; `grep -n 'pub enum DoltMode' crates/btit-bd/src/dolt.rs` matches once and the enum carries `#[non_exhaustive]`.
 6. QA-1 complete; CI green; every command in Required Validation passes.
 
 ## Required Validation
