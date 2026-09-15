@@ -195,6 +195,7 @@ An RC version still compares equal to its own final release: `compare_versions("
 
 ### Behaviour deltas recorded
 
+- B12: `sanitize_filename` drops a bare trailing `.` (`"test."` → `"test"`; previously `"test."`). Pinned by `sanitize_filename_drops_bare_trailing_dot` (QA-1 ATM-QA-001).
 - B13 (this sprint): a failing or unparsable `--version` probe now spawns **at most once per `CliRunner`** (cached as `ProbeState::Failed`), closing the b-7 items "an unparsed or missing binary re-probes `--version` on every read" and RSH-002 as they apply to `client_info()`/`client()`/`version()`/`capabilities()`. A fresh `CliRunner` (new binary, or a compatibility-recheck rebuild per b-7 Deliverable 4) probes again, as before.
 - B2: `is_real_external_ref` now classifies URLs (any `scheme://`) as real before applying the local-path heuristics, so a URL that happens to contain `/attachments/` or `/.beads/` (e.g. a Redmine attachment-download URL) is no longer misclassified as a local attachment ref. Windows absolute paths (`C:\...`, `C:/...`, `\\server\share\...`) are now explicitly classified as local, closing a gap where such strings fell through to the generic rules and could be misclassified depending on their exact shape.
 - B9: pre-release suffixes (`-alpha`, `-rc.1`, etc.) no longer cause `compare_versions` to silently drop trailing numeric version segments; see the B9 residual above for the remaining known limitation.

@@ -83,7 +83,7 @@ The `external_ref` field is reserved for **real external references only**:
 - **v1**: Absolute file paths stored in `external_ref` (newline-separated)
 - **v2**: Compact `att:xxx.ext` format with `index.json` for display names
 - **v3** (current): Filesystem-only. `external_ref` cleaned of all attachment refs.
-  Marker file: `.beads/.migrated-refs-v3`
+  Marker file: `.beads/.migrated-attachments` (plus a transient `.beads/.migrated-attachments-notify`, written by auto-migration and removed once the next status check reports `just_migrated`)
 
 ## Related Files
 

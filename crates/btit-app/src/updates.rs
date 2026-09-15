@@ -499,8 +499,8 @@ mod tests {
         // An RC still compares equal to its own final release: it is not offered
         // its own final release as an update (residual behaviour, recorded in
         // Implementation Notes as the direction this review chose).
-        assert!(compare_versions("1.2.0-rc.1", "1.2.0") == false);
-        assert!(compare_versions("1.2.0-rc.1", "1.2.1") == true);
+        assert!(!compare_versions("1.2.0-rc.1", "1.2.0"));
+        assert!(compare_versions("1.2.0-rc.1", "1.2.1"));
     }
 
 

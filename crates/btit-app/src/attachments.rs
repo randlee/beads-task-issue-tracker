@@ -726,6 +726,13 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_filename_drops_bare_trailing_dot() {
+        // B12 side effect (QA-1 ATM-QA-001): an empty extension no longer keeps the
+        // bare separator. Windows strips trailing dots from file names anyway.
+        assert_eq!(sanitize_filename("test."), "test");
+    }
+
+    #[test]
     fn issue_short_id_extracts_after_last_dash() {
         assert_eq!(issue_short_id("proj-abc"), "abc");
         assert_eq!(issue_short_id("proj-abc-def"), "def");
