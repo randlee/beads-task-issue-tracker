@@ -58,9 +58,10 @@ pub struct CliProbe {
 }
 
 /// The five version-gated capabilities (today the `supports_*`/`uses_*` wrappers).
-// Five independent, orthogonal capability flags, not app state: a state machine or
-// enum encoding would be less readable than the plain struct every call site expects.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Five independent, orthogonal capability flags, not app state: a state machine or enum encoding would be less readable than the plain struct every call site expects."
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BackendCapabilities {
     /// True when the CLI accepts a `--no-daemon` flag.
@@ -98,9 +99,10 @@ pub struct CliOutput {
 }
 
 /// Snapshot of CLI compatibility, returned to the frontend by `check_bd_compatibility`.
-// The frontend's `CompatibilityInfo` DTO wire shape is pinned (Deliverable 2); the
-// bool fields are independent flags the UI reads individually, not app state.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "The frontend's `CompatibilityInfo` DTO wire shape is pinned (Deliverable 2); the bool fields are independent flags the UI reads individually, not app state."
+)]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompatibilityInfo {

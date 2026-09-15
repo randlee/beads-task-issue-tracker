@@ -2,7 +2,7 @@ use crate::attachments::issue_short_id;
 use crate::cli::{execute_bd, get_cli_client_info, supports_delete_hard_flag, supports_list_all_flag};
 use crate::issues::{parse_issues_tolerant, priority_to_number, transform_issue};
 use crate::migration::sync_bd_database;
-use btit_types::*;
+use btit_types::{BdRawIssue, CliClient, CountResult, CreatePayload, CwdOptions, Issue, ListOptions, UpdatePayload};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
