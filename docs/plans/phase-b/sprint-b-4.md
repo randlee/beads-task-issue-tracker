@@ -1,7 +1,7 @@
 ---
 id: b-4
 title: btit-cli crate — shared CLI transport, issue-operation bodies, and the btit-bd/btit-br skeletons
-status: planned
+status: in_progress
 branch: feature/sprint-b-4-btit-cli
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-4-btit-cli
 target: integrate/phase-b
@@ -349,3 +349,118 @@ impl CliInvoker for AppInvoker {
 - `git diff --check`
 - test-preservation gate
 - `pnpm tauri:dev` (manual, Acceptance Criterion 7)
+
+## Implementation Notes
+
+Base: `feature/sprint-b-3-btit-beads@a226ab7`. Gate inputs from `sprint-b-1.md`: `IMPLEMENTATION_BASELINE=94e44d3`,
+`BASELINE_TEST_COUNT=155`, baseline worktree `/tmp/btit-baseline-94e44d3`. `origin/integrate/phase-b` is still at `eca588b`
+(pre-b-2), so the layer diffs (AC4, AC9) are taken against `origin/feature/sprint-b-3-btit-beads`.
+
+### Cite re-verification
+
+The Exact Targets cite `a18c724`. After b-2 and b-3, `crates/btit-app/src/cli.rs` shifted, so the moved items were found by name
+(at the b-3 head: `BD_PROJECT_LOCKS` 24-25, `get_extended_path` 32-69, `new_command` 73-82, `probe_cli_binary` 89-100,
+`extended_path_entries` 104-111, `default_cli_binary` 113-139, `execute_bd` 279-348; the seven moved tests 402-503). `lib.rs:41,53,64`
+read `lib.rs:38,50,61` at the b-3 head (b-3 added the `extern crate btit_beads` lines). The other cites were unchanged:
+`issue_commands.rs` (18-72 … 556-578), `polling.rs:43-60`, `attachments.rs:50,189`, `migration.rs:4,222-250,275-300`,
+`config.rs:1,12`, `updates.rs:1,75`.
+
+### What moved where
+
+- `path.rs`: `get_extended_path`, `extended_path_entries`, and the four `extended_path_*` tests. `command.rs`: `new_command`.
+  `probe.rs`: `probe_cli_binary` (now through `run::probe_version_output`), `default_cli_binary`, and the three `probe_returns_none_*` tests.
+- `locks.rs`: `ProjectLocks` (`new`, `Default`, `guard`). `run.rs`: `resolve_working_dir`, `json_argv`, `json_invocation`, `spawn_json`
+  (the `execute_bd` body after argv assembly), `run_json`, `run_raw`, `probe_version_output`. `runner.rs`: `CliInvoker`, `CliRunner`.
+- `ops.rs`: `list`, `ready`, `status`, `show`, `create`, `update`, `close`, `search`, `label_add`, `label_remove`, `delete`,
+  `comment_add`, `dep_add`, `dep_remove`, `relation_types`, `sync`. `testing.rs` (feature `test-support`): `RecordingInvoker`.
+- App: `cli.rs` keeps the statics, `get_cli_client_info`, the wrappers, `project_uses_dolt(_for)`, `reset_bd_version_cache` and
+  `check_bd_compatibility`; it adds `PROJECT_LOCKS`, `AppInvoker` and the `execute_bd` wrapper, and drops the re-exports only the
+  moved functions used (`parse_cli_probe`, `select_default_binary`, `CLI_CANDIDATES`, `CLI_FALLBACK`).
+- Tests: `app_lib` 77 → 70 (7 moved). `btit-cli`: 19 unit tests, `tests/api_freeze.rs` 5, `tests/ops_argv.rs` 20 (every cell of the
+  argv table, plus the three literal cells), `tests/ops_behaviour.rs` 19, `tests/resolve_working_dir.rs` 1.
+
+### Gates run
+
+- Required Validation, all pass: `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br`;
+  `cargo clippy -p btit-cli -p btit-bd -p btit-br --all-targets --all-features -- -D warnings` (also without `--all-features`, and for
+  `x86_64-pc-windows-msvc` through `cargo xwin clippy`); `cargo rustdoc -p btit-cli -- -D missing-docs`; `cargo test --workspace`;
+  `cargo test -p btit-cli` and `cargo test -p btit-cli --features test-support`; `cargo check --workspace --all-targets`; the three
+  `cargo tree` diffs (empty); `git diff --exit-code origin/feature/sprint-b-3-btit-beads...HEAD -- crates/btit-beads crates/btit-types`
+  (empty); `python3 scripts/check_version_sync.py` (OK line now lists `btit-cli, btit-bd, btit-br`, no script change);
+  `cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` (only the three pre-existing Windows-only warnings
+  b-3 recorded: `updates.rs:5`, `attachments.rs:2`, `updates.rs:444`); `git diff --check`; `pnpm test` (366 passed); `npx vue-tsc --noEmit`.
+- Test preservation: baseline list 155 lines, after list 340, `comm -23` prints nothing.
+- Command contract gates: signature diff empty (65 headers); frontend invoke subset prints nothing.
+- AC1/AC3/AC8 greps print nothing; `grep -c 'fn default_cli_binary() -> String' crates/btit-app/src/config.rs` is 1;
+  `cargo metadata` lists `btit-bd` and `btit-br`; both skeleton `lib.rs` files are 5 lines;
+  `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` is 0. The static grep was also run with perl, because BSD
+  grep does not accept the `\(crate\)` group (CI runs the GNU form).
+- AC4: each moved op body was compared token by token with its b-3-head original. The deltas are `execute_bd(.., cwd)?` →
+  `inv.run_json(project, ..)?`; `format!(..)` errors → `BeadsError::ParseFailed { target, id, source }` (b-3 table);
+  `parse_issues_tolerant` context labels (`list`, `list_open`, `list_closed`, `ready`) and the dropped IPC-edge `.map_err(|e| e.to_string())`;
+  `supports_list_all_flag()` → `inv.capabilities().supports_list_all_flag`, `supports_delete_hard_flag()` → `hard`, the `get_cli_client_info()`
+  Br match → `suggest_next`; `options.query.<f>` → `query.<f>`; `&str` parameters (`id.clone()` → `id.to_string()`,
+  `std::slice::from_ref(&id)` → `&[id.to_string()]`); and `transform_issue`/`json!({"success": true})` staying in the commands.
+  rustfmt reformatted the moved bodies (Required Validation runs `fmt --check -p btit-cli`).
+
+### Deviations (minimal, justified)
+
+1. **`RecordingInvoker::with_binary(..)`, not `.binary(..)`.** An inherent `binary(self, ..)` builder shadows `CliInvoker::binary(&self)`
+   in method resolution, so `rec.binary()` on a concrete `RecordingInvoker` would not compile. Only the builder name changed. Default `"bd"`.
+2. **`AppInvoker` passes `CliClient::Unknown` to `resolve_working_dir`.** The client only labels the `Unsupported` error of a non-local
+   `ProjectRef`, and none exists. Reading `get_cli_client_info()` for it would add a `--version` spawn per call whenever the probe fails
+   (only parsed probes are cached). `run_json` keeps the one `supports_daemon_flag()` read `execute_bd` made. `execute_bd` is a 3-line
+   wrapper, `AppInvoker.run_json(&ProjectRef::local(cwd), ..).map_err(|e| e.to_string())`, which is `run::run_json(&get_cli_binary(),
+   supports_daemon_flag(), &PROJECT_LOCKS, &wd, ..)`. It carries `#[expect(dead_code, ..)]` because every former caller now goes through `ops`.
+3. **Log lines from `ops::list` on more paths (log text only).** The moved `bd_list` range (18-72) contains the `[bd_list] --all requested …`,
+   `[bd_list] Found {} issues (fallback)` and `[bd_list] Found {} issues` lines. `bd_count`, `bd_poll_data` and `purge_orphan_attachments`
+   now call `ops::list`, so they also emit those lines. The log target of moved lines is `btit_cli::ops`/`btit_cli::run` (plan "Behaviour preserved" (2)).
+4. **Legacy-only argv order in `bd_count` and `bd_poll_data`.** On bd < 0.55 (and unknown/no probe), their closed-issues call was
+   `list --status=closed --limit=0`. Through `ops::list` it is `list --limit=0 --status=closed`, the argv table's two-call form. The set
+   of issues is the same. The open list is now parsed before the closed call runs, so invalid open-list JSON fails one call earlier. The
+   `--all` path (bd ≥ 0.55, br) is byte-identical.
+5. **`ops::sync` `CommandFailed.status_display`.** `CliOutput` carries only the exit code, so the text is rebuilt as
+   `std::process::ExitStatus`'s `Display` (`exit status: N`, or `exit code: N` on Windows; `terminated by signal` for `None`). A unit test
+   checks it against std for exit codes. The app's sync mapping reads only `stderr`/`source`, so no app string depends on it. An `Err(e)` arm
+   covers the other `BeadsError` variants, which a local project cannot produce: `sync_bd_database` logs `[sync] Failed to run {} sync: {e}`
+   and `bd_sync` returns `e.to_string()`.
+6. **Lint handling.** `#[expect(.., reason)]`, never `#[allow]`: `get_extended_path` `uninlined_format_args` (non-Windows only; the Windows
+   raw-string branch does not trip it), `new_command` `unused_mut` (non-Windows) and `unreadable_literal` (Windows, `0x08000000`), the moved
+   Windows test `extended_path_entries_precede_ambient_path` `map_unwrap_or`, and the `ops` functions `list`/`update`/`delete`
+   (`uninlined_format_args`; `update` also `too_many_lines`). Otherwise-verbatim moved code: `resolve_working_dir` uses
+   `map_or_else` for the `current_dir()` fallback (`clippy::map_unwrap_or`); `relation_types` uses `if client == Br` (clippy rejects the adapted
+   `match` as an equality check); `CliRunner::client_info` uses `if let` where the sample has `match` (`single_match_else`); local `argv` bindings are
+   `full_args` (`similar_names` against `args`, the name `execute_bd` used).
+7. **Manifests.** `btit-cli` takes `btit-types`/`btit-beads` as `.workspace = true`, and the root `[workspace.dependencies]` gains
+   `btit-cli = { path = "crates/btit-cli" }` for the app (the b-3 convention, b-3 Deviation 3). The skeletons use the path dependencies
+   exactly as in the code sample. `btit-cli` declares `[[test]] required-features = ["test-support"]` for `ops_argv` and `ops_behaviour`,
+   so `cargo test -p btit-cli` passes without the feature. `cargo test --workspace` still runs them, because the skeletons' dev-dependency
+   unifies the feature in.
+8. **Small API additions.** `ProjectLocks::new()` besides `Default` (C-CTOR). `probe_version_output`'s `Spawn.operation` is
+   `Some("--version")`. `RecordingInvoker` replies `Ok("")` for `run_json` and a successful empty `CliOutput` for `run_raw` when its
+   queue is empty (the sample's `run_json` default, applied to both).
+9. **Test layout.** The `resolve_working_dir` precedence test mutates `BEADS_PATH`, so it is the only test in its own binary
+   (the unit tests read `PATH`/`HOME` and spawn processes concurrently). `show`/`update`/`close`/`delete`/`relation_types` behaviour
+   tests are in `tests/ops_behaviour.rs`, and the argv table is in `tests/ops_argv.rs`.
+10. **CI.** Besides the `rust-quality` fmt/clippy/rustdoc/`cargo tree` rows for the three crates, the Dependency graph step asserts that
+    `test-support` is absent from the app's normal feature tree. A new Linux step runs the AC1/AC8 source greps for `btit-cli`, `btit-bd`
+    and `btit-br`, as b-3 did for `btit-beads`.
+
+### Behaviour deltas (PR description)
+
+- `ProjectLocks` recovers a poisoned map or project mutex with `PoisonError::into_inner` where `execute_bd` called `.unwrap()` (Deliverable 3).
+- `purge_orphan_attachments` on bd < 0.55 takes the two-call fallback instead of an unconditional `--all` (Deliverable 10).
+- Deviations 3 and 4 above (log lines; legacy argv order in `bd_count`/`bd_poll_data`).
+
+### Shared files pre-registered for group A (b-5, b-6, b-9)
+
+Root `Cargo.toml` (members `crates/btit-cli`, `crates/btit-bd`, `crates/btit-br`; `[workspace.dependencies] btit-cli`), root `Cargo.lock`
+(`btit-cli`, `btit-bd`, `btit-br` with their dependency edges), `crates/btit-bd/{Cargo.toml,clippy.toml,src/lib.rs}`,
+`crates/btit-br/{Cargo.toml,clippy.toml,src/lib.rs}` (final dependency sets and the `test-support` feature), and the
+`.github/workflows/ci.yml` `rust-quality` rows (fmt, clippy, rustdoc, `cargo tree`, source gates) for all three crates.
+
+### Open items before `status: complete`
+
+- AC7: the `pnpm tauri:dev` manual check (list, show, create, update, close, search, label add/remove, delete, dependency add/remove, sync,
+  debug panel; three `[bd] <binary> <args> | cwd: <dir>` log lines as evidence in the PR) is for the team-lead; the developer agent did not launch the app.
+- AC10: CI green on the PR.
