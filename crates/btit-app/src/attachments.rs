@@ -1,6 +1,5 @@
-use crate::cli::AppInvoker;
+use crate::backend;
 use std::process::Command;
-use btit_cli::ops;
 use btit_types::{ListQuery, ProjectRef, PurgeResult};
 use serde::Serialize;
 use std::env;
@@ -188,7 +187,7 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
     let existing_ids: std::collections::HashSet<String> = {
         let project = ProjectRef::local(Some(abs_project_path.to_string_lossy().to_string()));
         let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
-        let issues = ops::list(&AppInvoker, &project, &all).map_err(|e| e.to_string())?;
+        let issues = backend::current().list(&project, &all).map_err(|e| e.to_string())?;
         issues.into_iter().map(|i| i.id).collect()
     };
 

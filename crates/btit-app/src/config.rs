@@ -1,28 +1,25 @@
-use crate::cli::reset_bd_version_cache;
-use btit_cli::{command::new_command, path::get_extended_path};
+use crate::backend;
+use btit_beads::error::BeadsError;
+use btit_cli::run::probe_version_output;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
-
-// Configurable CLI binary name (default: "bd")
-pub(crate) static CLI_BINARY: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new("bd".to_string()));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
-    #[serde(default = "default_cli_binary")]
+    #[serde(default = "default_binary")]
     pub(crate) cli_binary: String,
 }
 
 /// Serde default for `AppConfig::cli_binary`: auto-detects the CLI (`btit_cli::probe::default_cli_binary`).
-fn default_cli_binary() -> String {
+fn default_binary() -> String {
     btit_cli::probe::default_cli_binary()
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            cli_binary: default_cli_binary(),
+            cli_binary: default_binary(),
         }
     }
 }
@@ -61,21 +58,17 @@ pub(crate) fn save_config(config: &AppConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// The configured CLI binary, read from the backend slot (`"bd"` for a non-CLI backend).
 pub(crate) fn get_cli_binary() -> String {
-    CLI_BINARY.lock().unwrap().clone()
+    backend::with_cli("cli binary", |c| c.binary()).unwrap_or_else(|_| "bd".into())
 }
 
 #[tauri::command]
 pub(crate) async fn get_bd_version() -> String {
     let binary = get_cli_binary();
-    match new_command(&binary)
-        .arg("--version")
-        .current_dir(std::env::temp_dir())
-        .env("PATH", get_extended_path())
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match probe_version_output(&binary) {
+        Ok(output) if output.success => {
+            let version = output.stdout.trim().to_string();
             if binary != "bd" {
                 format!("{} ({})", version, binary)
             } else {
@@ -102,9 +95,8 @@ pub(crate) async fn set_cli_binary_path(path: String) -> Result<String, String> 
     // Validate the binary first
     let version = validate_cli_binary_internal(&binary)?;
 
-    // Update global state and reset version cache (new binary may be different version)
-    *CLI_BINARY.lock().unwrap() = binary.clone();
-    reset_bd_version_cache();
+    // Rebuild the backend for the new binary (it may be a different client or version)
+    backend::replace(&binary);
 
     // Persist to config file
     let mut config = load_config();
@@ -132,14 +124,9 @@ pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, Strin
         return Err("Invalid binary path: directory traversal not allowed".to_string());
     }
 
-    match new_command(binary)
-        .arg("--version")
-        .current_dir(std::env::temp_dir())
-        .env("PATH", get_extended_path())
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match probe_version_output(binary) {
+        Ok(output) if output.success => {
+            let version = output.stdout.trim().to_string();
             if version.is_empty() {
                 Err(format!("'{}' returned empty version output", binary))
             } else {
@@ -147,8 +134,11 @@ pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, Strin
             }
         }
         Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stderr = output.stderr.trim().to_string();
             Err(format!("'{}' failed: {}", binary, if stderr.is_empty() { "unknown error".to_string() } else { stderr }))
+        }
+        Err(BeadsError::Spawn { source, .. }) => {
+            Err(format!("'{}' not found or not executable: {}", binary, source))
         }
         Err(e) => {
             Err(format!("'{}' not found or not executable: {}", binary, e))

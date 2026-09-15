@@ -21,6 +21,8 @@ serde.workspace = true
 btit-types.workspace = true
 btit-beads.workspace = true
 btit-cli.workspace = true
+btit-bd = { path = "../btit-bd" }   # b-7: the backend slot constructs BdCli
+btit-br = { path = "../btit-br" }   # b-7: the backend slot constructs BrCli
 log.workspace = true
 sc-observability-log.workspace = true
 tauri.workspace = true
@@ -34,4 +36,7 @@ dotenvy.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+# b-7 backend-slot seam tests: RecordingInvoker and BdCli::with_invoker (dev-only; never in the normal graph)
+btit-cli = { workspace = true, features = ["test-support"] }
+btit-bd = { path = "../btit-bd", features = ["test-support"] }
 # no [lints] until b-12

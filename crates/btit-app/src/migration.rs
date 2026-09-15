@@ -1,9 +1,10 @@
 use crate::attachment_refs::is_real_external_ref;
 use btit_types::CliClient;
 use crate::attachments::issue_short_id;
-use crate::cli::{get_cli_client_info, project_uses_dolt, supports_daemon_flag, uses_jsonl_files, AppInvoker};
+use crate::cli::{client_info, project_uses_dolt, supports_daemon_flag, uses_jsonl_files};
+use crate::backend;
 use btit_beads::error::BeadsError;
-use btit_cli::{command::new_command, ops, path::get_extended_path};
+use btit_cli::{command::new_command, path::get_extended_path};
 use btit_types::ProjectRef;
 use crate::config::get_cli_binary;
 use std::env;
@@ -223,7 +224,7 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
 
     // Run bd sync (bidirectional - exports local changes AND imports remote changes)
     let binary = get_cli_binary();
-    match ops::sync(&AppInvoker, &ProjectRef::local(Some(working_dir.clone())), supports_daemon_flag()) {
+    match backend::current().sync(&ProjectRef::local(Some(working_dir.clone()))) {
         Ok(()) => {
             log_info!("[sync] Sync completed successfully");
             // Update cooldown timestamp
@@ -271,7 +272,7 @@ pub(crate) async fn bd_sync(cwd: Option<String>) -> Result<(), String> {
     let binary = get_cli_binary();
     log_info!("[bd_sync] Manual sync requested for: {}", working_dir);
 
-    match ops::sync(&AppInvoker, &ProjectRef::local(Some(working_dir.clone())), supports_daemon_flag()) {
+    match backend::current().sync(&ProjectRef::local(Some(working_dir.clone()))) {
         Ok(()) => {}
         Err(BeadsError::CommandFailed { stderr, .. }) => {
             log_error!("[bd_sync] Sync failed: {}", stderr.trim());
@@ -487,8 +488,8 @@ pub(crate) async fn bd_check_needs_migration(cwd: Option<String>) -> Result<Migr
     }
 
     // Check bd version — only bd >= 0.50 requires Dolt
-    match get_cli_client_info() {
-        Some((CliClient::Bd, major, minor, _)) if major > 0 || minor >= 50 => {
+    match client_info() {
+        (CliClient::Bd, Some(v)) if v.major > 0 || v.minor >= 50 => {
             // bd >= 0.50: check if project is fully migrated
         }
         _ => {
@@ -583,15 +584,15 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
     }
 
     // Verify bd >= 0.50
-    if let Some((_, major, minor, _)) = get_cli_client_info() {
-        if major == 0 && minor < 50 {
+    match client_info() {
+        (_, Some(v)) if v.major == 0 && v.minor < 50 => {
             return Err(format!(
                 "bd version 0.50+ is required for Dolt migration (current: {}.{})",
-                major, minor
+                v.major, v.minor
             ));
         }
-    } else {
-        return Err("Could not determine bd version".to_string());
+        (_, Some(_)) => {}
+        (_, None) => return Err("Could not determine bd version".to_string()),
     }
 
     // Clean up partial migration if dolt/ directory exists

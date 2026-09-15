@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate btit_beads; // brings log_info!/log_warn!/log_error!/log_debug! into textual scope
 mod logging;
+mod backend;
 mod cli;
 mod config;
 mod updates;
@@ -37,31 +38,12 @@ pub fn run() {
             log::info!("=== Beads Task-Issue Tracker starting ===");
             log::info!("[startup] Extended PATH: {}", btit_cli::path::get_extended_path());
 
-            // Load config and set CLI binary (auto-detects br→bd if no config exists)
+            // Load config and install the backend for its CLI binary (auto-detects bd→br if no config exists)
             let config = config::load_config();
             log::info!("[startup] CLI binary: {}", config.cli_binary);
-            *config::CLI_BINARY
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = config.cli_binary.clone();
-
-            // Check if CLI binary is accessible
-            // IMPORTANT: Run from /tmp to avoid bd auto-migrating projects in cwd
-            let binary = config::get_cli_binary();
-            match btit_cli::probe::probe_cli_binary(&binary) {
-                Some(p) => {
-                    log::info!("[startup] {} found: {} ({})", binary, p.raw, cli::cli_client_name(p.client));
-                    for w in cli::cli_compatibility_warnings(p.client, p.version) {
-                        log::warn!("[startup] {}", w);
-                    }
-                }
-                None => {
-                    log::error!(
-                        "[startup] {} not found or not executable. Searched: {}",
-                        binary,
-                        btit_cli::path::extended_path_entries().join(if cfg!(windows) { "; " } else { ":" })
-                    );
-                }
-            }
+            // One `--version` probe (run from the temp dir): selects the backend and feeds the startup log
+            let probe = backend::install(&config.cli_binary);
+            backend::log_startup(&config.cli_binary, &probe);
 
             Ok(())
         })
@@ -90,7 +72,7 @@ pub fn run() {
             logging::get_log_path_string,
             logging::log_frontend,
             config::get_bd_version,
-            cli::check_bd_compatibility,
+            backend::check_bd_compatibility,
             config::get_cli_binary_path,
             config::set_cli_binary_path,
             config::validate_cli_binary,

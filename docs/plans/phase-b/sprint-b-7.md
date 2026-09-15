@@ -1,7 +1,7 @@
 ---
 id: b-7
 title: Backend slot and beads-command rewire — Arc<dyn BeadsBackend> in the app
-status: planned
+status: in_progress
 branch: feature/sprint-b-7-backend-slot
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-7-backend-slot
 target: integrate/phase-b

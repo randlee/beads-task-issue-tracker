@@ -1,6 +1,6 @@
-use crate::cli::{project_uses_dolt, uses_jsonl_files, AppInvoker};
+use crate::cli::{project_uses_dolt, uses_jsonl_files};
+use crate::backend;
 use btit_beads::issues::transform_issue;
-use btit_cli::ops;
 use crate::migration::sync_bd_database;
 use btit_types::{BdRawIssue, Issue, ListQuery, ProjectRef};
 use std::fs;
@@ -43,12 +43,13 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
     // Fetch issues: single --all call for bd >= 0.55, fallback to 2 calls for older versions
     let project = ProjectRef::local(cwd.clone());
     let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
-    let raw_all = ops::list(&AppInvoker, &project, &all).map_err(|e| e.to_string())?;
+    let backend = backend::current();
+    let raw_all = backend.list(&project, &all).map_err(|e| e.to_string())?;
     let (raw_open, raw_closed): (Vec<_>, Vec<_>) = raw_all.into_iter()
         .partition(|issue: &BdRawIssue| issue.status != "closed");
 
     // Fetch ready issues
-    let raw_ready = ops::ready(&AppInvoker, &project).map_err(|e| e.to_string())?;
+    let raw_ready = backend.ready(&project).map_err(|e| e.to_string())?;
 
     log_info!("[bd_poll_data] Batched poll done: {} open, {} closed, {} ready",
         raw_open.len(), raw_closed.len(), raw_ready.len());
