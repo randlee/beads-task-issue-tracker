@@ -2,6 +2,13 @@
 
 use btit_types::{BdRawIssue, ChildIssue, Comment, Issue, ParentIssue, Relation};
 
+/// Dependency types that carry structure (parent-child) or block work (bd's
+/// `conditional-blocks` and `waits-for` behave like `blocks`, B13).
+const STRUCTURAL_TYPES: [&str; 4] = ["blocks", "conditional-blocks", "waits-for", "parent-child"];
+
+/// Dependency types that block work and feed `blocked_by`/`blocks` (B13).
+const BLOCKING_TYPES: [&str; 3] = ["blocks", "conditional-blocks", "waits-for"];
+
 /// Render a numeric priority as `p0`..`p4`; out-of-range values become `p3`.
 #[must_use]
 #[expect(
@@ -17,46 +24,31 @@ pub fn priority_to_string(priority: i32) -> String {
     format!("p{}", p)
 }
 
-/// Map `p0`..`p4` back to its digit for the CLI's `--priority`; anything else becomes `"3"`.
+/// Map `p0`..`p4` (case-insensitive `p`/`P` prefix) back to its digit for the CLI's
+/// `--priority`; anything else, including out-of-range digits bd rejects (`p5`-`p9`),
+/// becomes `"3"`, today's default (B11).
 #[must_use]
 pub fn priority_to_number(priority: &str) -> String {
-    if let Some(caps) = priority.strip_prefix('p') {
-        if caps.len() == 1 && caps.chars().next().unwrap_or('x').is_ascii_digit() {
-            return caps.to_string();
-        }
+    let digits = priority.strip_prefix(['p', 'P']).unwrap_or(priority);
+    match digits {
+        "0" | "1" | "2" | "3" | "4" => digits.to_string(),
+        _ => "3".to_string(),
     }
-    "3".to_string()
 }
 
-/// Pass through a known issue type; anything else becomes `"task"`.
+/// Pass an issue type through unchanged (B1): bd's built-in types (`decision`, `message`,
+/// `molecule`, `gate`, `spike`, `story`, `milestone`, plus `types.custom`) and any custom
+/// type would otherwise be silently rewritten to `"task"` on save, losing data.
 #[must_use]
 pub fn normalize_issue_type(issue_type: &str) -> String {
-    let valid_types = ["bug", "task", "feature", "epic", "chore"];
-    if valid_types.contains(&issue_type) {
-        issue_type.to_string()
-    } else {
-        "task".to_string()
-    }
+    issue_type.to_string()
 }
 
-/// Pass through a known issue status; anything else becomes `"open"`.
+/// Pass an issue status through unchanged (B1): rewriting an unrecognized status to
+/// `"open"` on save would silently lose data.
 #[must_use]
 pub fn normalize_issue_status(status: &str) -> String {
-    let valid_statuses = [
-        "open",
-        "in_progress",
-        "blocked",
-        "closed",
-        "deferred",
-        "tombstone",
-        "pinned",
-        "hooked",
-    ];
-    if valid_statuses.contains(&status) {
-        status.to_string()
-    } else {
-        "open".to_string()
-    }
+    status.to_string()
 }
 
 /// Normalize a raw CLI issue into the frontend `Issue` shape (parent, children,
@@ -99,8 +91,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
         })
         .filter(|v: &Vec<ChildIssue>| !v.is_empty());
 
-    // Extract non-blocking relations (everything except "blocks" and "parent-child")
-    let structural_types = ["blocks", "parent-child"];
+    // Extract non-structural, non-blocking relations.
     let mut relations: Vec<Relation> = Vec::new();
     let mut seen_relations: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
@@ -109,7 +100,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
     if let Some(ref deps) = raw.dependencies {
         for dep in deps {
             if let Some(ref dep_type) = dep.dependency_type {
-                if structural_types.contains(&dep_type.as_str()) {
+                if STRUCTURAL_TYPES.contains(&dep_type.as_str()) {
                     continue;
                 }
                 let id = dep
@@ -140,7 +131,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
     if let Some(ref dependents) = raw.dependents {
         for dep in dependents {
             if let Some(ref dep_type) = dep.dependency_type {
-                if structural_types.contains(&dep_type.as_str()) {
+                if STRUCTURAL_TYPES.contains(&dep_type.as_str()) {
                     continue;
                 }
                 let id = dep.id.clone().unwrap_or_default();
@@ -220,7 +211,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
                 // bd show format: [{id, dependency_type: "blocks"}] — these block the current issue
                 for dep in deps {
                     if let (Some(ref dep_type), Some(ref id)) = (&dep.dependency_type, &dep.id) {
-                        if dep_type == "blocks" && !bb.contains(id) {
+                        if BLOCKING_TYPES.contains(&dep_type.as_str()) && !bb.contains(id) {
                             bb.push(id.clone());
                         }
                     }
@@ -228,7 +219,9 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
                     if let (Some(ref dep_type), Some(ref depends_on_id), Some(ref _issue_id)) =
                         (&dep.dependency_type, &dep.depends_on_id, &dep.issue_id)
                     {
-                        if dep_type == "blocks" && !bb.contains(depends_on_id) {
+                        if BLOCKING_TYPES.contains(&dep_type.as_str())
+                            && !bb.contains(depends_on_id)
+                        {
                             bb.push(depends_on_id.clone());
                         }
                     }
@@ -247,7 +240,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
             if let Some(ref dependents) = raw.dependents {
                 for dep in dependents {
                     if let (Some(ref dep_type), Some(ref id)) = (&dep.dependency_type, &dep.id) {
-                        if dep_type == "blocks" && !bl.contains(id) {
+                        if BLOCKING_TYPES.contains(&dep_type.as_str()) && !bl.contains(id) {
                             bl.push(id.clone());
                         }
                     }
@@ -438,13 +431,16 @@ mod tests {
     }
 
     #[test]
-    fn priority_to_number_defaults_invalid_inputs() {
-        assert_eq!(priority_to_number(""), "3");
+    fn priority_to_number_is_case_insensitive_and_bounded() {
+        // B11: `p`/`P` accepted case-insensitively; anything outside 0-4 (bd rejects
+        // p5-p9) falls back to "3".
+        assert_eq!(priority_to_number("P1"), "1");
+        assert_eq!(priority_to_number("p7"), "3");
         assert_eq!(priority_to_number("p"), "3");
+        assert_eq!(priority_to_number("x"), "3");
+        assert_eq!(priority_to_number(""), "3");
         assert_eq!(priority_to_number("p10"), "3");
-        assert_eq!(priority_to_number("pa"), "3");
         assert_eq!(priority_to_number("priority"), "3");
-        assert_eq!(priority_to_number("unknown"), "3");
         assert_eq!(priority_to_number("5"), "3");
     }
 
@@ -467,11 +463,11 @@ mod tests {
     }
 
     #[test]
-    fn normalize_issue_type_defaults_unknown() {
-        assert_eq!(normalize_issue_type(""), "task");
-        assert_eq!(normalize_issue_type("unknown"), "task");
-        assert_eq!(normalize_issue_type("Bug"), "task"); // case-sensitive
-        assert_eq!(normalize_issue_type("improvement"), "task");
+    fn normalize_issue_type_passes_unknown_through() {
+        // B1: unrecognized types (bd built-ins like "decision" or a custom type) must not
+        // be rewritten to "task", or data is lost on save.
+        assert_eq!(normalize_issue_type("decision"), "decision");
+        assert_eq!(normalize_issue_type("custom-x"), "custom-x");
     }
 
     #[test]
@@ -487,11 +483,10 @@ mod tests {
     }
 
     #[test]
-    fn normalize_issue_status_defaults_unknown() {
-        assert_eq!(normalize_issue_status(""), "open");
-        assert_eq!(normalize_issue_status("unknown"), "open");
-        assert_eq!(normalize_issue_status("Closed"), "open"); // case-sensitive
-        assert_eq!(normalize_issue_status("in-progress"), "open");
+    fn normalize_issue_status_passes_unknown_through() {
+        // B1: unrecognized statuses must not be rewritten to "open", or data is lost on save.
+        assert_eq!(normalize_issue_status("decision"), "decision");
+        assert_eq!(normalize_issue_status("custom-x"), "custom-x");
     }
 
     // ---- transform_issue branches (#2) ------------------------------------------
@@ -588,10 +583,11 @@ mod tests {
 
     #[test]
     fn transform_issue_extracts_relations() {
+        // B13: bd's dependency type is "relates-to" (types.go:1225); "related-to" does not exist.
         let json = minimal_issue_json("test-1", "Test");
         let json = json.replace(
             r#""dependencies":null"#,
-            r#""dependencies":[{"id":"test-2","dependency_type":"related-to"}]"#,
+            r#""dependencies":[{"id":"test-2","dependency_type":"relates-to"}]"#,
         );
         let issues = parse_issues_tolerant(&format!("[{}]", json), "test").unwrap();
         let issue = transform_issue(issues.into_iter().next().unwrap());
@@ -599,6 +595,26 @@ mod tests {
         let relations = issue.relations.unwrap();
         assert_eq!(relations.len(), 1);
         assert_eq!(relations[0].id, "test-2");
-        assert_eq!(relations[0].relation_type, "related-to");
+        assert_eq!(relations[0].relation_type, "relates-to");
+    }
+
+    #[test]
+    fn transform_issue_treats_conditional_blocks_and_waits_for_as_blocking() {
+        // B13: "conditional-blocks" and "waits-for" (types.go:1216-1217) behave like "blocks":
+        // they feed blocked_by/blocks and are excluded from relations, in both directions.
+        let json = minimal_issue_json("test-1", "Test");
+        let json = json.replace(
+            r#""dependencies":null"#,
+            r#""dependencies":[{"id":"test-2","dependency_type":"conditional-blocks"}]"#,
+        );
+        let json = json.replace(
+            r#""dependents":null"#,
+            r#""dependents":[{"id":"test-3","dependency_type":"waits-for","status":"open","priority":3}]"#,
+        );
+        let issues = parse_issues_tolerant(&format!("[{}]", json), "test").unwrap();
+        let issue = transform_issue(issues.into_iter().next().unwrap());
+        assert_eq!(issue.blocked_by, Some(vec!["test-2".to_string()]));
+        assert_eq!(issue.blocks, Some(vec!["test-3".to_string()]));
+        assert!(issue.relations.is_none());
     }
 }
