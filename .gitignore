@@ -37,8 +37,8 @@ coverage
 .temp
 *.cache
 
-# phase-a crates workspace build output
-crates/target/
+# Cargo workspace build output
+/target/
 
 # repowise — index & caches are machine-local artifacts (regenerable via
 # `repowise update --provider codex_cli --yes`). Config, data exports, and

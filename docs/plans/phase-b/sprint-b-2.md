@@ -1,7 +1,7 @@
 ---
 id: b-2
 title: btit-types crate — shared data types only
-status: planned
+status: complete
 branch: feature/sprint-b-2-btit-types
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-2-btit-types
 target: integrate/phase-b
@@ -265,3 +265,34 @@ pub struct DoltOpResult {
 - the `cargo tree` dependency gate from Deliverable 7
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
+
+## Implementation Notes
+
+Base: `feature/sprint-b-1-workspace-foundation@c686c25`, later rebased onto `66b5ec3`
+(b-1 QA-1 fix box-ing `FieldKey::Dynamic`) before the final push. Baseline for the gates
+is `IMPLEMENTATION_BASELINE=94e44d3` / `BASELINE_TEST_COUNT=155` as recorded in
+`sprint-b-1.md`.
+
+### Gates run
+
+- AC1(a) `cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')`: empty diff.
+- AC1(b) `! grep -rnE 'std::(process|fs|env|io|net)|tauri|log::' crates/btit-types/src`: prints nothing (no matches).
+- AC1 impl list `grep -rhoE '^impl(<[^>]*>)? [^{]+' crates/btit-types/src | sed -E 's/ *$//' | sort` returns exactly the four listed impls.
+- AC3 diff: `git diff <base> -- crates/btit-app/src` (using the pre-b-2 HEAD, since `integrate/phase-b` does not exist yet — see Deviation 1) shows only the allowed edits: `use` line changes, `mod types;` removal, the `CliProbe`/`CompatibilityInfo`/orphaned-doc-comment removal from `cli.rs`, `.into()`/`CliVersion` adaptations at the affected call sites (including the two the plan's enumeration didn't name explicitly — `lib.rs`'s `check_bd_compatibility` warning loop and `test_support::probe`; see Deviation 2), `CompatibilityInfo { .. }` construction edits, and the `options.<field>` → `options.query.<field>` reads in `bd_list`.
+- Test preservation (plan "Test preservation" gate, against `/tmp/btit-baseline-94e44d3`): baseline list is 155 lines (non-vacuous); after-list is non-empty; `comm -23` prints nothing. `app_lib` now has 152 tests (155 − 3 moved), `btit-types` has 28 (`api_freeze` 25 + `compatibility_info` 3): 152 + 28 = 180, versus the baseline's 155 + the 3 that moved staying pinned by name.
+- `python3 scripts/check_version_sync.py` OK line reads `(beads-issue-tracker, btit-types; independent: …)`, matching AC6.
+- `cargo fmt --check -p btit-types`, `cargo clippy -p btit-types --all-targets -- -D warnings`, `cargo rustdoc -p btit-types -- -D missing-docs`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `pnpm test` (366 passed, unchanged), `npx vue-tsc --noEmit` (clean), `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` (clean except two pre-existing Windows-only warnings in `updates.rs`/`attachments.rs` unrelated to this sprint), `git diff --check`: all pass.
+
+### Deviations (minimal, justified)
+
+1. **AC3 base ref.** `integrate/phase-b` does not exist yet (it is created when the stack forms). Used the pre-b-2 tip of `feature/sprint-b-1-workspace-foundation` (`c686c25`, later rebased to `66b5ec3`) as the diff base instead; it is the same tree `integrate/phase-b` would have at this point in the stack.
+2. **Two `.into()` call sites the plan's Required Work didn't name.** `lib.rs`'s startup probe (`cli::cli_compatibility_warnings(p.client, p.version)`) and `test_support::probe`'s `CliProbe { client, version, raw }` construction both read/write the now-`CliProbe.version: Option<CliVersion>` field and needed the same `.map(Into::into)` adaptation as the `_for` call sites the plan does name (`rank_cli_candidate`, `CliSelection::is_legacy`, `parse_cli_probe`, `check_bd_compatibility`). Mechanical, no behavior change; covered by AC3's "`.into()`/`CliVersion` adaptations" category.
+3. **`clippy::struct_excessive_bools` on `BackendCapabilities` and `CompatibilityInfo`.** Both shapes are pinned by the plan's explicit code samples (five and eight `bool` fields respectively) and cannot be restructured without breaking the frontend wire contract (`CompatibilityInfo`) or the `_for` call sites (`BackendCapabilities`). `#[expect(clippy::struct_excessive_bools, reason = "...")]` with a one-line rationale (per M-LINT-OVERRIDE-EXPECT) on each, so `cargo clippy -p btit-types --all-targets -- -D warnings` (workspace `pedantic = warn` promoted to deny) passes without changing either shape. (QA-1 RBP-F001: converted from `#[allow]` with a separate rationale comment to `#[expect]` with the rationale inlined in `reason`, so a stale override would surface as an unfulfilled-expectation warning.)
+4. **Two `clippy::doc-markdown` backtick fixes** (`` `DoltHub` ``, `` `beads_rust` ``) and one `#[must_use]` on `ProjectRef::local`, needed for the same `-D warnings` pass; no semantic change, not part of AC1's enumerated impl list (attributes, not `impl` lines).
+5. **`tests/compatibility_info.rs` as a separate file from `tests/api_freeze.rs`.** Deliverable 2 says the three JSON tests move "into `crates/btit-types/tests/`" (plural, no filename). Kept them in their own file (matching their `cli.rs` test-module grouping) rather than folding them into `api_freeze.rs`, which is a pin/contract file, not a JSON-shape regression file. Both are `tests/*.rs` integration tests, so `cargo test -- --list` lists all three by bare name, satisfying the test-preservation gate.
+
+6. **QA-1 ATM-QA-002.** `crates/btit-app/src/issue_commands.rs` used `use btit_types::*;`. Replaced with an explicit named import (`BdRawIssue, CliClient, CountResult, CreatePayload, CwdOptions, Issue, ListOptions, UpdatePayload`), matching the other rewired `btit-app` files (`fs_commands.rs`, `cli.rs`, `issues.rs`, `polling.rs`, `test_support.rs`, `migration.rs`, `updates.rs`); command headers keep naming types bare.
+
+### Open items before `status: complete`
+
+None. CI on PR is the maintainer's confirmation step (not run by the developer agent).

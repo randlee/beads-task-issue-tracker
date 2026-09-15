@@ -2,15 +2,19 @@
 """Version / toolchain single-source-of-truth check (and bump helper).
 
 Sources of truth:
-  * App version  -> src-tauri/Cargo.toml  [workspace.package].version
+  * App version  -> Cargo.toml (repo root)  [workspace.package].version
   * Rust toolchain -> rust-toolchain.toml  [toolchain].channel
 
 Derived / mirrored values this script verifies:
-  * src-tauri/Cargo.toml   every workspace package uses `version.workspace = true`
-  * src-tauri/tauri.conf.json  has no `version` (Tauri falls back to Cargo.toml)
+  * Cargo.toml             every workspace package uses `version.workspace = true`,
+                           except INDEPENDENT_VERSION_MEMBERS, which carry one identical
+                           explicit version equal to the `=` pin of
+                           [workspace.dependencies].sc-observability-log-macros
+  * crates/btit-app/tauri.conf.json  has no `version` (Tauri falls back to Cargo.toml)
   * package.json           `version` equals the workspace version (Nuxt reads it)
-  * src-tauri/Cargo.lock   workspace package entries carry the workspace version
-  * src-tauri/Cargo.toml   [workspace.package].rust-version equals the toolchain channel
+  * Cargo.lock             workspace package entries carry the workspace version
+                           (INDEPENDENT_VERSION_MEMBERS excluded)
+  * Cargo.toml             [workspace.package].rust-version equals the toolchain channel
   * .github/workflows/*.yml  every `toolchain:` pin equals the toolchain channel
 
 Usage:
@@ -29,12 +33,16 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CARGO_TOML = ROOT / "src-tauri" / "Cargo.toml"
-CARGO_LOCK = ROOT / "src-tauri" / "Cargo.lock"
-TAURI_CONF = ROOT / "src-tauri" / "tauri.conf.json"
+CARGO_TOML = ROOT / "Cargo.toml"
+CARGO_LOCK = ROOT / "Cargo.lock"
+TAURI_CONF = ROOT / "crates" / "btit-app" / "tauri.conf.json"
 PACKAGE_JSON = ROOT / "package.json"
 TOOLCHAIN_TOML = ROOT / "rust-toolchain.toml"
 WORKFLOWS = ROOT / ".github" / "workflows"
+# Workspace members that keep their own version (in-tree phase-a crates; not bumped with the app).
+INDEPENDENT_VERSION_MEMBERS = {"sc-observability-log", "sc-observability-log-macros", "sc-observability-log-consumer-check"}
+# The `=X.Y.Z` pin the independent members' shared version must equal.
+INDEPENDENT_VERSION_PIN_DEPENDENCY = "sc-observability-log-macros"
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
@@ -68,11 +76,37 @@ def check() -> list[str]:
         return [f"{rel(CARGO_TOML)}: [workspace.package].version missing or not semver: {version!r}"]
 
     packages: list[str] = []
+    independent: dict[str, str | None] = {}
     for manifest_path in workspace_package_manifests(cargo):
         pkg = load_toml(manifest_path).get("package", {})
-        packages.append(pkg.get("name", "?"))
+        name = pkg.get("name", "?")
+        if name in INDEPENDENT_VERSION_MEMBERS:
+            member_version = pkg.get("version")
+            if isinstance(member_version, str) and SEMVER.match(member_version):
+                independent[name] = member_version
+            else:
+                independent[name] = None
+                errors.append(
+                    f"{rel(manifest_path)}: [package].version must be an explicit semver string "
+                    f"(independently versioned member), got {member_version!r}"
+                )
+            continue
+        packages.append(name)
         if pkg.get("version") != {"workspace": True}:
             errors.append(f"{rel(manifest_path)}: [package] must use `version.workspace = true`")
+
+    missing = sorted(INDEPENDENT_VERSION_MEMBERS - independent.keys())
+    if missing:
+        errors.append(f"{rel(CARGO_TOML)}: independent members are not workspace members: {', '.join(missing)}")
+    pin_dep = cargo.get("workspace", {}).get("dependencies", {}).get(INDEPENDENT_VERSION_PIN_DEPENDENCY, {})
+    pin = pin_dep.get("version") if isinstance(pin_dep, dict) else None
+    independent_versions = set(independent.values())
+    independent_version = next(iter(independent_versions)) if len(independent_versions) == 1 else None
+    if independent_version is None or f"={independent_version}" != pin:
+        errors.append(
+            f"{rel(CARGO_TOML)}: independent members must share one explicit version equal to the {pin!r} pin "
+            f"of [workspace.dependencies].{INDEPENDENT_VERSION_PIN_DEPENDENCY}, got {independent!r}"
+        )
 
     tauri_conf = json.loads(TAURI_CONF.read_text(encoding="utf-8"))
     if "version" in tauri_conf:
@@ -114,7 +148,10 @@ def check() -> list[str]:
                     errors.append(f"{rel(wf)}: toolchain pin {pinned!r} != {rel(TOOLCHAIN_TOML)} channel {channel!r}")
 
     if not errors:
-        print(f"version sync OK: app {version}, rust toolchain {channel} ({', '.join(packages)})")
+        print(
+            f"version sync OK: app {version}, rust toolchain {channel} "
+            f"({', '.join(packages)}; independent: {', '.join(independent)} @ {independent_version})"
+        )
     return errors
 
 
@@ -129,7 +166,11 @@ def set_version(new_version: str) -> None:
     if not SEMVER.match(new_version):
         raise SystemExit(f"not a semver version: {new_version!r}")
     cargo = load_toml(CARGO_TOML)
-    packages = [load_toml(m)["package"]["name"] for m in workspace_package_manifests(cargo)]
+    packages = [
+        name
+        for name in (load_toml(m)["package"]["name"] for m in workspace_package_manifests(cargo))
+        if name not in INDEPENDENT_VERSION_MEMBERS
+    ]
 
     text = CARGO_TOML.read_text(encoding="utf-8")
     text = sub_once(

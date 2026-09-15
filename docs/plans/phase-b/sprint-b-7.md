@@ -1,7 +1,7 @@
 ---
 id: b-7
 title: Backend slot and beads-command rewire — Arc<dyn BeadsBackend> in the app
-status: planned
+status: complete
 branch: feature/sprint-b-7-backend-slot
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-7-backend-slot
 target: integrate/phase-b
@@ -209,7 +209,7 @@ pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Is
 1. `! grep -rnE 'CLI_CLIENT_INFO|CLI_BINARY|execute_bd|AppInvoker|reset_bd_version_cache|get_cli_client_info|supports_(list_all|delete_hard)_flag\(\)|uses_dolt_backend\(\)|fn project_uses_dolt_for' crates/btit-app/src`; `grep -c 'pub(crate) fn' crates/btit-app/src/cli.rs` is `4`; `grep -rn 'dyn CliBackend' crates/btit-app/src` matches only `backend.rs` (the slot type is `Arc<dyn BeadsBackend>`; CLI access goes through `with_cli`).
 2. `sed -n '/generate_handler!\[/,/\]/p' crates/btit-app/src/lib.rs | grep -oE '[a-z_]+::[a-z_]+' | sed 's/.*:://'` equals the same extraction at `$IMPLEMENTATION_BASELINE` (the `develop@<sha>` b-1 recorded; 65 names in the same order at `a18c724`, re-counted by b-1); the plan's command-signature gate (1) diffs empty and the frontend invoke-subset gate (2) prints nothing.
 3. `grep -c 'tauri::command' crates/btit-app/src/*.rs | awk -F: '{s+=$2} END {print s}'` is `65`.
-4. `cargo tree -e normal -p beads-issue-tracker --depth 1` includes `btit-bd`, `btit-br`, `btit-cli`, `btit-beads`, `btit-types`; the only workspace crate depending on `tauri` or `sc-observability-log` is the app: `for d in tauri sc-observability-log; do cargo tree -e normal --workspace -i "$d" --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | grep -E '^(btit-|beads-issue-tracker)' | sort -u | diff - <(echo beads-issue-tracker); done` is empty (inverted tree, one level up from the dependency).
+4. `cargo tree -e normal -p beads-issue-tracker --depth 1` includes `btit-bd`, `btit-br`, `btit-cli`, `btit-beads`, `btit-types`; the only workspace crate depending on `tauri` or `sc-observability-log` is the app: `for d in tauri sc-observability-log; do cargo tree -e normal --workspace -i "$d" --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | grep -E '^(btit-|beads-issue-tracker)' | sort -u | diff - <(echo beads-issue-tracker); done` is empty (inverted tree, one level up from the dependency). `sc-observability-log` is itself a workspace member since b-1 (in-tree, 0.1.0), so the inverted tree also prints `sc-observability-log` (depth 0) and `sc-observability-log-consumer-check` (its in-tree dependant, `crates/sc-observability-log-consumer-check/Cargo.toml:11`); the `grep -E '^(btit-|beads-issue-tracker)'` filter drops both, so the gate still means exactly "among the btit crates and the app, only the app depends on it". Additionally `! grep -rln 'sc_observability' crates/btit-types/src crates/btit-beads/src crates/btit-cli/src crates/btit-bd/src crates/btit-br/src` prints nothing.
 5. b-5, b-6 and b-9 are merged in (`git branch --contains origin/feature/sprint-b-9-beads-domain-fixes` lists this branch, likewise the other two); `cargo test --workspace` passes; the test-preservation gate with b-9's replacement list prints nothing.
 6. The factory tests (Deliverable 2) pass; a new test asserts `check_bd_compatibility`'s capability fields equal `capabilities_for(probe)` for a seeded probe. The startup seam test (Deliverable 3) asserts `probe_calls() == 0` after `log_startup`, and `! grep -nE '\.probe\(\)' crates/btit-app/src/lib.rs` matches nothing (startup probes once, inside `install`). The `install_with_if` seam test (Deliverable 4) asserts a `replace` landing between the fresh probe and the rebuild is not overwritten.
 7. Manual verification (Deliverable 10) recorded in the PR; the deviation record (Deliverable 8) is in this doc's Implementation Notes.
@@ -233,3 +233,102 @@ pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Is
 - `git diff --check`
 - test-preservation gate (b-9 replacement list applied); the `generate_handler!` diff from Acceptance Criterion 2
 - `pnpm tauri:dev` (manual, Deliverable 10)
+
+## Implementation Notes
+
+Implemented on `feature/sprint-b-7-backend-slot` (layer 6, group A join). Branch head before this sprint's
+commits: `a336be6` (b-9 at `52a6bb8` as layer 5, b-6 merged at `68433f6`, b-5 merged at `a336be6`). No further
+merge-forward was needed: `origin/feature/sprint-b-5-btit-bd`, `…b-6-btit-br` and `…b-9-beads-domain-fixes` are
+all contained in this branch.
+
+**Gate outputs** (layer-5 head = `origin/feature/sprint-b-9-beads-domain-fixes` = `52a6bb8`;
+`IMPLEMENTATION_BASELINE=94e44d3`, worktree `/tmp/btit-baseline-94e44d3`)
+
+- `cargo check --workspace --all-targets` — clean, 0 warnings.
+- `cargo test --workspace` — all green; 14 new `backend::tests`.
+- `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets` — 0 errors; the remaining warnings are
+  all pre-existing #49 drift in `migration.rs`, `updates.rs`, `attachments.rs`, `attachment_refs.rs` and
+  `watcher.rs`. None of them is in `backend.rs` or `cli.rs`. With the workspace deny set and pedantic added
+  (`-W clippy::pedantic -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic -W clippy::indexing_slicing`),
+  those two files report one finding only: `clippy::ref_option` on `log_startup(binary: &str, probe: &Option<CliProbe>)`.
+  That signature is fixed by Deliverable 3. An `#[expect]` cannot be added before b-12 enables the app lints,
+  because it would be unfulfilled.
+- `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br` — clean. The new `backend.rs`
+  and the rewritten `cli.rs` are rustfmt-clean. The rest of `btit-app` was not reformatted (#49, b-12).
+- `git diff --exit-code 52a6bb8...HEAD -- crates/btit-types crates/btit-cli` — exit 0.
+- AC 8(b) first-parent file list — prints nothing.
+- Command-signature gate (1) — diff empty (65 headers). Frontend invoke-subset gate (2) — prints nothing.
+- AC 2 `generate_handler!` extraction — identical to the baseline, in the same order. 65 command names; the
+  extraction also matches the `tauri::generate_handler` line itself on both sides.
+- AC 3 — `65`.
+- AC 1 — the forbidden-name grep prints nothing; `grep -c 'pub(crate) fn' cli.rs` = `4`; `dyn CliBackend` appears
+  only in `backend.rs`; `BdCli::new|BrCli::new` appear only in `backend.rs`; `\.probe\(\)` matches nothing in
+  `lib.rs` or `backend.rs`.
+- AC 4 — `cargo tree -e normal -p beads-issue-tracker --depth 1` lists `btit-bd`, `btit-beads`, `btit-br`,
+  `btit-cli`, `btit-types`. The inverted `tauri` and `sc-observability-log` diffs are empty, and the
+  `sc_observability` grep prints nothing.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — `0`.
+- Test-preservation gate — the baseline list has exactly 155 names and the after list 376. Raw `comm -23` prints
+  exactly b-9's three replaced names. With `/tmp/replaced.txt` = those three names applied, it prints nothing.
+- `pnpm test` — 20 files, 366 tests passed. `npx vue-tsc --noEmit` — exit 0.
+- `python3 scripts/check_version_sync.py` — OK.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
+  — clean. The only warnings are the pre-existing #49 ones in `updates.rs:5,444` and `attachments.rs:2`.
+- `git diff --check` — clean.
+- `pnpm tauri:dev` manual verification (Deliverable 10, AC 7) — **open**, left for the team-lead.
+
+**Deviation record (Deliverable 8)**
+
+- (a) The client kind is fixed per backend instance. Re-detection happens only in `set_cli_binary_path`
+  (`backend::replace`) and `check_bd_compatibility` (conditional rebuild). Example: a binary whose `--version`
+  fails at startup and later answers as `br` is still driven as `BdCli` (no `--suggest-next`) until one of those
+  two commands runs.
+- (b) Poisoned locks on the slot are recovered with `PoisonError::into_inner` instead of panicking.
+- (c) `parse_issues_tolerant` context labels (b-4 `ops`).
+- (d) The `log` target of the moved CLI code follows its module path (`app_lib::cli` → `btit_cli::run`,
+  `btit_cli::runner`, …).
+
+Nothing else is recorded as a deviation. Two consequences of the Deliverable 4 and Exact Targets code are noted
+here for QA. Neither changes a command result or a log line:
+
+- `client_info()` and the `check_bd_compatibility` comparison read `client()` and `version()` separately.
+  On a slot whose runner has no cached probe (lazy `BdCli::new`: the startup probe failed or did not parse),
+  each read may spawn `--version` until one succeeds and is cached. Today one `get_cli_client_info()` read spawned
+  at most once. The effect is limited to extra `--version` spawns while the binary does not answer with a parsed
+  version. B13 probe-failure caching (b-11) removes it.
+- `set_cli_binary_path` now probes the new binary eagerly in `replace`. Before, the reset cache was refilled by the
+  next gated call. The spawn count is the same; only its timing moves earlier.
+
+**Spec ambiguities resolved**
+
+1. *Testable slot without racing the process global.* The spec shows free functions over `static SLOT`. Seam tests
+   that install `RecordingInvoker` backends into that global would race every other app test that reaches
+   `current()`, for example through `project_uses_dolt`. Resolution: a private `Slot` struct holds the
+   `RwLock<Option<Arc<dyn BeadsBackend>>>`. The spec's functions (`install`, `install_with`, `replace`, `current`,
+   `with_cli`, `build_backend`) are free functions over `static SLOT: Slot`. `install_with_if` and the
+   `check_bd_compatibility` rule are `Slot` methods, and tests use their own `Slot` instances. The command body
+   is `let binary = get_cli_binary(); let fresh = probe_cli_binary(&binary); SLOT.compatibility(binary, fresh.as_ref())`.
+2. *`current()` before `install`.* The spec's recursive `install("bd"); current()` could overwrite a concurrent
+   `setup` install. Resolution: the fallback probes `bd` outside the lock and then fills the slot only if it is
+   still empty (`get_or_insert`). This is a tightening, and nothing is observable.
+3. *`bd_show` sample log line.* The Explicit Code Sample adds `log_info!("[bd_show] Issue {} found: {}")`, while
+   Deliverable 5 requires every command to keep its log lines. Resolution: Deliverable 5 wins, so no log line was
+   added. All commands keep today's log lines.
+4. *Dev-dependencies.* The ownership table gives app dev-deps with `test-support` to b-8. Deliverables 3 and 4
+   require `RecordingInvoker`-backed seam tests in `backend.rs`. Resolution: b-7 adds
+   `[dev-dependencies] btit-cli = { workspace = true, features = ["test-support"] }` and
+   `btit-bd = { path = "../btit-bd", features = ["test-support"] }`. The normal graph has no `test-support`, as the
+   gate above shows.
+5. *`btit-bd`/`btit-br` dependency form.* `[workspace.dependencies]` has no entries for them, and root
+   `Cargo.toml` is outside b-7's file set (AC 8b). Resolution: path dependencies in `crates/btit-app/Cargo.toml`,
+   the same form `btit-bd`/`btit-br` use for their own siblings.
+6. *`build_backend`.* No production caller exists, because `install` needs the probe for startup logging. It is
+   kept as the named factory and exercised by tests, with `#[cfg_attr(not(test), expect(dead_code, reason = …))]`.
+7. *`RecordingInvoker` after boxing.* `BdCli::with_invoker` takes ownership, so the tests read `probe_calls()`
+   through a test-local `Shared(Arc<RecordingInvoker>)` `CliInvoker` delegate. Its `probe` delegation is written
+   `CliInvoker::probe(self.0.as_ref())`.
+8. *`validate_cli_binary_internal` spawn error text.* `probe_version_output` wraps the `io::Error` in
+   `BeadsError::Spawn`. Resolution: the `source` is formatted, so the frontend still sees
+   `'<bin>' not found or not executable: <io error>` verbatim.
+
+**Changelog line (for b-12):** The Tauri app selects a backend (`BdCli` or `BrCli`) per configured binary and drives every beads command through the `BeadsBackend` traits; command names, arguments and results are unchanged.
