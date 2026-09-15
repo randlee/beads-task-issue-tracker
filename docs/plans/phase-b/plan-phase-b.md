@@ -4,7 +4,7 @@ title: "phase-b: crate split — root workspace, btit-types, beads backend trait
 canonical_path: docs/plans/phase-b/plan-phase-b.md
 planning_branch: plan/phase-b
 integration_branch: integrate/phase-b
-status: draft
+status: complete
 owner: Rand Lee
 authored: 2026-09-13
 baseline: integrate/phase-a@a18c724 (planning baseline; line numbers below are at this commit)

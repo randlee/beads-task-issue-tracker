@@ -1,7 +1,7 @@
 ---
 id: b-11
 title: Pinned-behaviour fixes in the app and btit-cli (B2, B6, B8, B9, B10, B12, B13 probe cache)
-status: in_progress
+status: complete
 branch: feature/sprint-b-11-app-cli-fixes
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-11-app-cli-fixes
 target: integrate/phase-b

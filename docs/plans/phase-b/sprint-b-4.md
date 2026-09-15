@@ -1,7 +1,7 @@
 ---
 id: b-4
 title: btit-cli crate — shared CLI transport, issue-operation bodies, and the btit-bd/btit-br skeletons
-status: in_progress
+status: complete
 branch: feature/sprint-b-4-btit-cli
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-4-btit-cli
 target: integrate/phase-b

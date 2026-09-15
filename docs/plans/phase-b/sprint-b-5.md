@@ -1,7 +1,7 @@
 ---
 id: b-5
 title: btit-bd crate — BdCli (BeadsBackend, CliBackend, DoltOperations)
-status: in_progress
+status: complete
 branch: feature/sprint-b-5-btit-bd
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-5-btit-bd
 target: integrate/phase-b

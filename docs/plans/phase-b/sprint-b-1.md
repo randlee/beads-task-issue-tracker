@@ -1,7 +1,7 @@
 ---
 id: b-1
 title: Root workspace and Tauri crate move to crates/btit-app
-status: in_progress
+status: complete
 branch: feature/sprint-b-1-workspace-foundation
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-1-workspace-foundation
 target: integrate/phase-b

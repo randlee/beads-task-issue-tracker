@@ -1,7 +1,7 @@
 ---
 id: b-9
 title: Pinned-behaviour fixes in btit-beads (B1, B4, B5, B7, B11, B13 parts)
-status: in_progress
+status: complete
 branch: feature/sprint-b-9-beads-domain-fixes
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-9-beads-domain-fixes
 target: integrate/phase-b

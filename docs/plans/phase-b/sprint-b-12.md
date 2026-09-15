@@ -1,7 +1,7 @@
 ---
 id: b-12
 title: App crate hardening — workspace lints, no panics, fmt/clippy clean, A2; phase docs
-status: in_progress
+status: complete
 branch: feature/sprint-b-12-app-hardening
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-12-app-hardening
 target: integrate/phase-b

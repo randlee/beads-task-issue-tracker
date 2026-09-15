@@ -1,7 +1,7 @@
 ---
 id: b-6
 title: btit-br crate — BrCli (BeadsBackend, CliBackend, CloseSuggestions)
-status: in_progress
+status: complete
 branch: feature/sprint-b-6-btit-br
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-6-btit-br
 target: integrate/phase-b

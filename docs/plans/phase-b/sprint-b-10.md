@@ -1,7 +1,7 @@
 ---
 id: b-10
 title: Dolt detection redesign in btit-bd (B3, DoltMode, B10 wrapper test, B13 rename)
-status: in_progress
+status: complete
 branch: feature/sprint-b-10-dolt-detection
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-10-dolt-detection
 target: integrate/phase-b

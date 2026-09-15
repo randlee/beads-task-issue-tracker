@@ -1,7 +1,7 @@
 ---
 id: b-8
 title: Legacy-path and Dolt rewire — migration, mtime, watcher, fs, updates on the slot; delete cli.rs
-status: in_progress
+status: complete
 branch: feature/sprint-b-8-legacy-dolt-rewire
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-8-legacy-dolt-rewire
 target: integrate/phase-b
