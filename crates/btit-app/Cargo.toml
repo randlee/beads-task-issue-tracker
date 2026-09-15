@@ -19,6 +19,7 @@ tauri-build.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 btit-types.workspace = true
+btit-beads.workspace = true
 log.workspace = true
 sc-observability-log.workspace = true
 tauri.workspace = true

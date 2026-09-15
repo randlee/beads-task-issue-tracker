@@ -1,11 +1,25 @@
+//! Issue normalization: raw CLI issues to the frontend `Issue` shape.
+
 use btit_types::{BdRawIssue, ChildIssue, Comment, Issue, ParentIssue, Relation};
 
-pub(crate) fn priority_to_string(priority: i32) -> String {
-    let p = if (0..=4).contains(&priority) { priority } else { 3 };
+/// Render a numeric priority as `p0`..`p4`; out-of-range values become `p3`.
+#[must_use]
+#[expect(
+    clippy::uninlined_format_args,
+    reason = "moved verbatim from btit-app in b-3; behaviour and body edits belong to b-9"
+)]
+pub fn priority_to_string(priority: i32) -> String {
+    let p = if (0..=4).contains(&priority) {
+        priority
+    } else {
+        3
+    };
     format!("p{}", p)
 }
 
-pub(crate) fn priority_to_number(priority: &str) -> String {
+/// Map `p0`..`p4` back to its digit for the CLI's `--priority`; anything else becomes `"3"`.
+#[must_use]
+pub fn priority_to_number(priority: &str) -> String {
     if let Some(caps) = priority.strip_prefix('p') {
         if caps.len() == 1 && caps.chars().next().unwrap_or('x').is_ascii_digit() {
             return caps.to_string();
@@ -14,7 +28,9 @@ pub(crate) fn priority_to_number(priority: &str) -> String {
     "3".to_string()
 }
 
-pub(crate) fn normalize_issue_type(issue_type: &str) -> String {
+/// Pass through a known issue type; anything else becomes `"task"`.
+#[must_use]
+pub fn normalize_issue_type(issue_type: &str) -> String {
     let valid_types = ["bug", "task", "feature", "epic", "chore"];
     if valid_types.contains(&issue_type) {
         issue_type.to_string()
@@ -23,8 +39,19 @@ pub(crate) fn normalize_issue_type(issue_type: &str) -> String {
     }
 }
 
-pub(crate) fn normalize_issue_status(status: &str) -> String {
-    let valid_statuses = ["open", "in_progress", "blocked", "closed", "deferred", "tombstone", "pinned", "hooked"];
+/// Pass through a known issue status; anything else becomes `"open"`.
+#[must_use]
+pub fn normalize_issue_status(status: &str) -> String {
+    let valid_statuses = [
+        "open",
+        "in_progress",
+        "blocked",
+        "closed",
+        "deferred",
+        "tombstone",
+        "pinned",
+        "hooked",
+    ];
     if valid_statuses.contains(&status) {
         status.to_string()
     } else {
@@ -32,7 +59,16 @@ pub(crate) fn normalize_issue_status(status: &str) -> String {
     }
 }
 
-pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
+/// Normalize a raw CLI issue into the frontend `Issue` shape (parent, children,
+/// relations, blockers, comment and dependency counts).
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "moved verbatim from btit-app in b-3; behaviour and body edits belong to b-9"
+)]
+pub fn transform_issue(raw: BdRawIssue) -> Issue {
     // Parent info - dependencies array now contains relationship info, not full issue details
     // For now, we just use the parent ID if available
     let parent = raw.parent.as_ref().map(|parent_id| {
@@ -45,22 +81,29 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
     });
 
     // Extract children from dependents array (with dependency_type: "parent-child")
-    let children: Option<Vec<ChildIssue>> = raw.dependents.as_ref().map(|deps| {
-        deps.iter()
-            .filter(|d| d.dependency_type.as_deref() == Some("parent-child") && d.id.is_some())
-            .map(|c| ChildIssue {
-                id: c.id.clone().unwrap_or_default(),
-                title: c.title.clone().unwrap_or_default(),
-                status: normalize_issue_status(&c.status.clone().unwrap_or_else(|| "open".to_string())),
-                priority: priority_to_string(c.priority.unwrap_or(3)),
-            })
-            .collect()
-    }).filter(|v: &Vec<ChildIssue>| !v.is_empty());
+    let children: Option<Vec<ChildIssue>> = raw
+        .dependents
+        .as_ref()
+        .map(|deps| {
+            deps.iter()
+                .filter(|d| d.dependency_type.as_deref() == Some("parent-child") && d.id.is_some())
+                .map(|c| ChildIssue {
+                    id: c.id.clone().unwrap_or_default(),
+                    title: c.title.clone().unwrap_or_default(),
+                    status: normalize_issue_status(
+                        &c.status.clone().unwrap_or_else(|| "open".to_string()),
+                    ),
+                    priority: priority_to_string(c.priority.unwrap_or(3)),
+                })
+                .collect()
+        })
+        .filter(|v: &Vec<ChildIssue>| !v.is_empty());
 
     // Extract non-blocking relations (everything except "blocks" and "parent-child")
     let structural_types = ["blocks", "parent-child"];
     let mut relations: Vec<Relation> = Vec::new();
-    let mut seen_relations: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen_relations: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
 
     // From dependencies array (these are issues the current issue depends on)
     if let Some(ref deps) = raw.dependencies {
@@ -69,7 +112,11 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                 if structural_types.contains(&dep_type.as_str()) {
                     continue;
                 }
-                let id = dep.id.clone().or_else(|| dep.depends_on_id.clone()).unwrap_or_default();
+                let id = dep
+                    .id
+                    .clone()
+                    .or_else(|| dep.depends_on_id.clone())
+                    .unwrap_or_default();
                 if id.is_empty() {
                     continue;
                 }
@@ -104,9 +151,14 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                 if seen_relations.contains(&key) {
                     // Replace existing entry from dependencies if this one has more metadata
                     if dep.title.is_some() {
-                        if let Some(existing) = relations.iter_mut().find(|r| r.id == id && r.relation_type == *dep_type) {
+                        if let Some(existing) = relations
+                            .iter_mut()
+                            .find(|r| r.id == id && r.relation_type == *dep_type)
+                        {
                             existing.title = dep.title.clone().unwrap_or_default();
-                            existing.status = normalize_issue_status(&dep.status.clone().unwrap_or_else(|| "open".to_string()));
+                            existing.status = normalize_issue_status(
+                                &dep.status.clone().unwrap_or_else(|| "open".to_string()),
+                            );
                             existing.priority = priority_to_string(dep.priority.unwrap_or(3));
                             existing.direction = "dependent".to_string();
                         }
@@ -116,7 +168,9 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                     relations.push(Relation {
                         id,
                         title: dep.title.clone().unwrap_or_default(),
-                        status: normalize_issue_status(&dep.status.clone().unwrap_or_else(|| "open".to_string())),
+                        status: normalize_issue_status(
+                            &dep.status.clone().unwrap_or_else(|| "open".to_string()),
+                        ),
                         priority: priority_to_string(dep.priority.unwrap_or(3)),
                         relation_type: dep_type.clone(),
                         direction: "dependent".to_string(),
@@ -127,9 +181,9 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
     }
 
     // Compute comment_count before consuming raw.comments
-    let comment_count = raw.comment_count.or_else(|| {
-        raw.comments.as_ref().map(|c| c.len() as i32)
-    });
+    let comment_count = raw
+        .comment_count
+        .or_else(|| raw.comments.as_ref().map(|c| c.len() as i32));
 
     Issue {
         id: raw.id,
@@ -143,8 +197,11 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
         created_at: raw.created_at,
         updated_at: raw.updated_at,
         closed_at: raw.closed_at,
-        comments: raw.comments.unwrap_or_default().into_iter().map(|c| {
-            Comment {
+        comments: raw
+            .comments
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| Comment {
                 id: match c.id {
                     serde_json::Value::Number(n) => n.to_string(),
                     serde_json::Value::String(s) => s,
@@ -153,8 +210,8 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                 author: c.author,
                 content: c.text.or(c.content).unwrap_or_default(),
                 created_at: c.created_at,
-            }
-        }).collect(),
+            })
+            .collect(),
         blocked_by: {
             // Try raw.blocked_by first (if bd ever populates it directly)
             let mut bb = raw.blocked_by.unwrap_or_default();
@@ -168,14 +225,20 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                         }
                     }
                     // bd list format: [{issue_id, depends_on_id, type: "blocks"}]
-                    if let (Some(ref dep_type), Some(ref depends_on_id), Some(ref _issue_id)) = (&dep.dependency_type, &dep.depends_on_id, &dep.issue_id) {
+                    if let (Some(ref dep_type), Some(ref depends_on_id), Some(ref _issue_id)) =
+                        (&dep.dependency_type, &dep.depends_on_id, &dep.issue_id)
+                    {
                         if dep_type == "blocks" && !bb.contains(depends_on_id) {
                             bb.push(depends_on_id.clone());
                         }
                     }
                 }
             }
-            if bb.is_empty() { None } else { Some(bb) }
+            if bb.is_empty() {
+                None
+            } else {
+                Some(bb)
+            }
         },
         blocks: {
             let mut bl = raw.blocks.unwrap_or_default();
@@ -190,7 +253,11 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
                     }
                 }
             }
-            if bl.is_empty() { None } else { Some(bl) }
+            if bl.is_empty() {
+                None
+            } else {
+                Some(bl)
+            }
         },
         external_ref: raw.external_ref,
         estimate_minutes: raw.estimate,
@@ -199,16 +266,20 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
         working_notes: raw.notes,
         parent,
         children,
-        relations: if relations.is_empty() { None } else { Some(relations) },
+        relations: if relations.is_empty() {
+            None
+        } else {
+            Some(relations)
+        },
         metadata: normalize_metadata(raw.metadata),
         spec_id: raw.spec_id,
         comment_count,
-        dependency_count: raw.dependency_count.or_else(|| {
-            raw.dependencies.as_ref().map(|d| d.len() as i32)
-        }),
-        dependent_count: raw.dependent_count.or_else(|| {
-            raw.dependents.as_ref().map(|d| d.len() as i32)
-        }),
+        dependency_count: raw
+            .dependency_count
+            .or_else(|| raw.dependencies.as_ref().map(|d| d.len() as i32)),
+        dependent_count: raw
+            .dependent_count
+            .or_else(|| raw.dependents.as_ref().map(|d| d.len() as i32)),
     }
 }
 
@@ -218,7 +289,8 @@ pub(crate) fn transform_issue(raw: BdRawIssue) -> Issue {
 ///   or data round-tripped through the app) is parsed if it holds an object
 /// - `null`, empty objects, and empty/whitespace strings become `None` so the UI can
 ///   use presence as "has custom fields"
-pub(crate) fn normalize_metadata(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
+#[must_use]
+pub fn normalize_metadata(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
     use serde_json::Value;
     match value {
         None | Some(Value::Null) => None,
@@ -239,82 +311,14 @@ pub(crate) fn normalize_metadata(value: Option<serde_json::Value>) -> Option<ser
     }
 }
 
-/// Parse issues with tolerance for malformed entries
-/// Returns all successfully parsed issues and logs failures
-pub(crate) fn parse_issues_tolerant(output: &str, context: &str) -> Result<Vec<BdRawIssue>, String> {
-    // First try strict parsing
-    if let Ok(issues) = serde_json::from_str::<Vec<BdRawIssue>>(output) {
-        return Ok(issues);
-    }
-
-    // If strict parsing fails, try tolerant parsing
-    log_warn!("[{}] Strict parsing failed, attempting tolerant parsing", context);
-
-    let value: serde_json::Value = serde_json::from_str(output)
-        .map_err(|e| {
-            log_error!("[{}] JSON is completely invalid: {}", context, e);
-            format!("Invalid JSON: {}", e)
-        })?;
-
-    // br >= 0.1.30 wraps `list` output in a paginated envelope:
-    // {"issues": [...], "total": N, "offset": N, "limit": N, "has_more": bool}
-    // Unwrap the envelope if present, otherwise expect a flat array.
-    let arr_value;
-    let arr = if let Some(obj) = value.as_object() {
-        if let Some(issues) = obj.get("issues").and_then(|v| v.as_array()) {
-            log_info!("[{}] Unwrapped paginated envelope ({} issues)", context, issues.len());
-            arr_value = issues.clone();
-            &arr_value
-        } else {
-            log_error!("[{}] Expected array or envelope with 'issues' key, got object: {:?}", context, obj.keys().collect::<Vec<_>>());
-            return Err("Expected JSON array or paginated envelope".to_string());
-        }
-    } else {
-        value.as_array().ok_or_else(|| {
-            log_error!("[{}] Expected array, got: {:?}", context, value);
-            "Expected JSON array".to_string()
-        })?
-    };
-
-    let mut issues = Vec::new();
-    let mut failed_count = 0;
-
-    for (i, obj) in arr.iter().enumerate() {
-        let obj_str = serde_json::to_string(obj).unwrap_or_default();
-        match serde_json::from_str::<BdRawIssue>(&obj_str) {
-            Ok(issue) => issues.push(issue),
-            Err(e) => {
-                failed_count += 1;
-                let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
-                log_error!("[{}] Skipping issue {} (id={}): {}", context, i, id, e);
-
-                // Log which fields are present/missing
-                if let Some(obj_map) = obj.as_object() {
-                    let keys: Vec<&str> = obj_map.keys().map(|s| s.as_str()).collect();
-                    log_error!("[{}] Issue {} has keys: {:?}", context, i, keys);
-
-                    // Check for common missing required fields
-                    let required = ["id", "title", "status", "priority", "issue_type", "created_at", "updated_at"];
-                    let missing: Vec<&&str> = required.iter().filter(|k| !keys.contains(*k)).collect();
-                    if !missing.is_empty() {
-                        log_error!("[{}] Issue {} missing required fields: {:?}", context, i, missing);
-                    }
-                }
-            }
-        }
-    }
-
-    if failed_count > 0 {
-        log_warn!("[{}] Parsed {} issues, skipped {} malformed entries", context, issues.len(), failed_count);
-    }
-
-    Ok(issues)
-}
-
-
 #[cfg(test)]
+#[expect(
+    clippy::uninlined_format_args,
+    reason = "tests moved verbatim from btit-app in b-3; bodies change only for CliVersion conversions"
+)]
 mod tests {
     use super::*;
+    use crate::parse::parse_issues_tolerant;
     use crate::test_support::*;
 
     // ---- metadata normalization (#7) ----------------------------------------
@@ -324,7 +328,10 @@ mod tests {
         // bd emits metadata as a JSON object; this used to fail Option<String> and drop the issue
         let json = format!(
             "[{}]",
-            issue_json_with_metadata("m-1", r#"{"project":"gold","refs":["[[Note]]"],"nested":{"a":1},"percent_complete":56}"#)
+            issue_json_with_metadata(
+                "m-1",
+                r#"{"project":"gold","refs":["[[Note]]"],"nested":{"a":1},"percent_complete":56}"#
+            )
         );
         let issues = parse_issues_tolerant(&json, "test").unwrap();
         assert_eq!(issues.len(), 1, "issue with object metadata must be kept");
@@ -338,15 +345,20 @@ mod tests {
 
     #[test]
     fn bd_show_shape_with_object_metadata_deserializes() {
-        let v: serde_json::Value = serde_json::from_str(&issue_json_with_metadata("m-2", r#"{"k":"v"}"#)).unwrap();
-        let raw: BdRawIssue = serde_json::from_value(v).expect("bd show payload with object metadata");
+        let v: serde_json::Value =
+            serde_json::from_str(&issue_json_with_metadata("m-2", r#"{"k":"v"}"#)).unwrap();
+        let raw: BdRawIssue =
+            serde_json::from_value(v).expect("bd show payload with object metadata");
         assert_eq!(raw.metadata.unwrap()["k"], "v");
     }
 
     #[test]
     fn string_metadata_holding_json_object_is_parsed() {
         // metadata is a JSON *string* whose content is an object (legacy payload shape)
-        let json = format!("[{}]", issue_json_with_metadata("m-3", r#""{\"project\":\"iron\"}""#));
+        let json = format!(
+            "[{}]",
+            issue_json_with_metadata("m-3", r#""{\"project\":\"iron\"}""#)
+        );
         let issue = transform_issue(parse_issues_tolerant(&json, "test").unwrap().remove(0));
         assert_eq!(issue.metadata.unwrap()["project"], "iron");
     }
@@ -365,8 +377,14 @@ mod tests {
     #[test]
     fn non_object_metadata_is_preserved_not_dropped() {
         use serde_json::json;
-        assert_eq!(normalize_metadata(Some(json!("free text"))), Some(json!("free text")));
-        assert_eq!(normalize_metadata(Some(json!("[1,2]"))), Some(json!("[1,2]")));
+        assert_eq!(
+            normalize_metadata(Some(json!("free text"))),
+            Some(json!("free text"))
+        );
+        assert_eq!(
+            normalize_metadata(Some(json!("[1,2]"))),
+            Some(json!("[1,2]"))
+        );
         assert_eq!(normalize_metadata(Some(json!([1, 2]))), Some(json!([1, 2])));
         assert_eq!(normalize_metadata(Some(json!(42))), Some(json!(42)));
     }
@@ -376,92 +394,18 @@ mod tests {
         let json = format!("[{}]", issue_json_with_metadata("m-4", r#"{"a":1}"#));
         let issue = transform_issue(parse_issues_tolerant(&json, "test").unwrap().remove(0));
         let out = serde_json::to_value(&issue).unwrap();
-        assert!(out["metadata"].is_object(), "frontend must receive an object, got {}", out["metadata"]);
-        // Absent metadata serializes as null
-        let issue = transform_issue(parse_issues_tolerant(&format!("[{}]", minimal_issue_json("m-5", "x")), "test").unwrap().remove(0));
-        assert!(serde_json::to_value(&issue).unwrap()["metadata"].is_null());
-    }
-
-    #[test]
-    fn parse_flat_array() {
-        let json = format!("[{}]", minimal_issue_json("abc-123", "Bug fix"));
-        let result = parse_issues_tolerant(&json, "test_flat");
-        assert!(result.is_ok());
-        let issues = result.unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].id, "abc-123");
-        assert_eq!(issues[0].title, "Bug fix");
-    }
-
-    #[test]
-    fn parse_paginated_envelope() {
-        let json = format!(
-            r#"{{"issues":[{},{}],"total":2,"offset":0,"limit":50,"has_more":false}}"#,
-            minimal_issue_json("abc-123", "First"),
-            minimal_issue_json("def-456", "Second")
+        assert!(
+            out["metadata"].is_object(),
+            "frontend must receive an object, got {}",
+            out["metadata"]
         );
-        let result = parse_issues_tolerant(&json, "test_envelope");
-        assert!(result.is_ok());
-        let issues = result.unwrap();
-        assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0].id, "abc-123");
-        assert_eq!(issues[1].id, "def-456");
-    }
-
-    #[test]
-    fn parse_empty_flat_array() {
-        let result = parse_issues_tolerant("[]", "test_empty_flat");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
-
-    #[test]
-    fn parse_empty_envelope() {
-        let json = r#"{"issues":[],"total":0,"offset":0,"limit":50,"has_more":false}"#;
-        let result = parse_issues_tolerant(json, "test_empty_envelope");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
-
-    #[test]
-    fn parse_object_without_issues_key_fails() {
-        let json = r#"{"error":"something went wrong"}"#;
-        let result = parse_issues_tolerant(json, "test_bad_object");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_invalid_json_fails() {
-        let result = parse_issues_tolerant("not json at all", "test_invalid");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_real_br_envelope() {
-        // Matches the shape from br 0.1.30+ (`br list --json --limit 1`):
-        // br omits many optional fields (owner, assignee, labels, etc.) and includes extra
-        // fields (source_repo, compaction_level). serde_json defaults missing Option<T> to None
-        // and ignores unknown fields, so this parses correctly.
-        let json = r#"{"issues":[{"id":"proj-abc","title":"Example bug report","description":"A test description","status":"open","priority":2,"issue_type":"bug","created_at":"2025-06-15T09:30:00.000000000Z","updated_at":"2025-06-15T10:45:00.000000000Z","source_repo":".","compaction_level":0,"dependency_count":0,"dependent_count":0}],"total":1,"limit":1,"offset":0,"has_more":true}"#;
-        let result = parse_issues_tolerant(json, "test_real_br");
-        assert!(result.is_ok());
-        let issues = result.unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].id, "proj-abc");
-        assert_eq!(issues[0].issue_type, "bug");
-        assert_eq!(issues[0].priority, 2);
-    }
-
-    #[test]
-    fn parse_envelope_skips_malformed_entries() {
-        let good = minimal_issue_json("abc-123", "Good");
-        let bad = r#"{"id":"bad-456","title":"Bad"}"#; // missing required fields
-        let json = format!(r#"{{"issues":[{},{}],"total":2,"offset":0,"limit":50,"has_more":false}}"#, good, bad);
-        let result = parse_issues_tolerant(&json, "test_tolerant_envelope");
-        assert!(result.is_ok());
-        let issues = result.unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].id, "abc-123");
+        // Absent metadata serializes as null
+        let issue = transform_issue(
+            parse_issues_tolerant(&format!("[{}]", minimal_issue_json("m-5", "x")), "test")
+                .unwrap()
+                .remove(0),
+        );
+        assert!(serde_json::to_value(&issue).unwrap()["metadata"].is_null());
     }
 
     // ---- Issue normalizers (#1) -------------------------------------------------
@@ -557,7 +501,7 @@ mod tests {
         let json = minimal_issue_json("test-1", "Test");
         let json = json.replace(
             r#""dependencies":null"#,
-            r#""dependencies":[{"id":"test-2","dependency_type":"blocks"}]"#
+            r#""dependencies":[{"id":"test-2","dependency_type":"blocks"}]"#,
         );
         let issues = parse_issues_tolerant(&format!("[{}]", json), "test").unwrap();
         let issue = transform_issue(issues.into_iter().next().unwrap());
@@ -631,13 +575,10 @@ mod tests {
     #[test]
     fn transform_issue_dedupes_blocked_by() {
         let json = minimal_issue_json("test-1", "Test");
-        let json = json.replace(
-            r#""blocked_by":null"#,
-            r#""blocked_by":["test-2"]"#
-        );
+        let json = json.replace(r#""blocked_by":null"#, r#""blocked_by":["test-2"]"#);
         let json = json.replace(
             r#""dependencies":null"#,
-            r#""dependencies":[{"id":"test-2","dependency_type":"blocks"}]"#
+            r#""dependencies":[{"id":"test-2","dependency_type":"blocks"}]"#,
         );
         let issues = parse_issues_tolerant(&format!("[{}]", json), "test").unwrap();
         let issue = transform_issue(issues.into_iter().next().unwrap());
@@ -650,7 +591,7 @@ mod tests {
         let json = minimal_issue_json("test-1", "Test");
         let json = json.replace(
             r#""dependencies":null"#,
-            r#""dependencies":[{"id":"test-2","dependency_type":"related-to"}]"#
+            r#""dependencies":[{"id":"test-2","dependency_type":"related-to"}]"#,
         );
         let issues = parse_issues_tolerant(&format!("[{}]", json), "test").unwrap();
         let issue = transform_issue(issues.into_iter().next().unwrap());
@@ -660,6 +601,4 @@ mod tests {
         assert_eq!(relations[0].id, "test-2");
         assert_eq!(relations[0].relation_type, "related-to");
     }
-
-
 }

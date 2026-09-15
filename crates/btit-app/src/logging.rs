@@ -21,7 +21,7 @@ mod lifecycle;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -33,42 +33,9 @@ use tauri::Manager;
 
 use lifecycle::{ExitOutcome, LogLifecycle};
 
-// Global flags for logging
-pub(crate) static LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
-pub(crate) static VERBOSE_LOGGING: AtomicBool = AtomicBool::new(false);
-
-// Conditional logging macros
-macro_rules! log_info {
-    ($($arg:tt)*) => {
-        if $crate::logging::LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-            log::info!($($arg)*);
-        }
-    };
-}
-
-macro_rules! log_warn {
-    ($($arg:tt)*) => {
-        if $crate::logging::LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-            log::warn!($($arg)*);
-        }
-    };
-}
-
-macro_rules! log_error {
-    ($($arg:tt)*) => {
-        if $crate::logging::LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-            log::error!($($arg)*);
-        }
-    };
-}
-
-macro_rules! log_debug {
-    ($($arg:tt)*) => {
-        if $crate::logging::LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) && $crate::logging::VERBOSE_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
-            log::debug!($($arg)*);
-        }
-    };
-}
+// Global logging flags and the gated `log_*!` macros live in btit-beads (b-3); the
+// statics are re-exported so the debug commands below flip the switches every crate reads.
+pub(crate) use btit_beads::logging::{LOGGING_ENABLED, VERBOSE_LOGGING};
 
 // ============================================================================
 // Bridge lifecycle

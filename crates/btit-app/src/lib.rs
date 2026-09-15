@@ -1,8 +1,6 @@
 #[macro_use]
+extern crate btit_beads; // brings log_info!/log_warn!/log_error!/log_debug! into textual scope
 mod logging;
-mod issues;
-#[cfg(test)]
-pub(crate) mod test_support;
 mod cli;
 mod config;
 mod updates;
@@ -52,7 +50,7 @@ pub fn run() {
             match cli::probe_cli_binary(&binary) {
                 Some(p) => {
                     log::info!("[startup] {} found: {} ({})", binary, p.raw, cli::cli_client_name(p.client));
-                    for w in cli::cli_compatibility_warnings(p.client, p.version.map(Into::into)) {
+                    for w in cli::cli_compatibility_warnings(p.client, p.version) {
                         log::warn!("[startup] {}", w);
                     }
                 }

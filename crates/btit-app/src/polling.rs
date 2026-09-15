@@ -1,5 +1,5 @@
 use crate::cli::{execute_bd, project_uses_dolt, supports_list_all_flag, uses_jsonl_files};
-use crate::issues::{parse_issues_tolerant, transform_issue};
+use btit_beads::{issues::transform_issue, parse::parse_issues_tolerant};
 use crate::migration::sync_bd_database;
 use btit_types::{BdRawIssue, Issue};
 use std::fs;
@@ -42,7 +42,7 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
     // Fetch issues: single --all call for bd >= 0.55, fallback to 2 calls for older versions
     let (raw_open, raw_closed) = if supports_list_all_flag() {
         let all_output = execute_bd("list", &["--all".to_string(), "--limit=0".to_string()], cwd_ref)?;
-        let raw_all = parse_issues_tolerant(&all_output, "bd_poll_data_all")?;
+        let raw_all = parse_issues_tolerant(&all_output, "bd_poll_data_all").map_err(|e| e.to_string())?;
         let (open, closed): (Vec<_>, Vec<_>) = raw_all.into_iter()
             .partition(|issue: &BdRawIssue| issue.status != "closed");
         (open, closed)
@@ -50,14 +50,14 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
         let open_output = execute_bd("list", &["--limit=0".to_string()], cwd_ref)?;
         let closed_output = execute_bd("list", &["--status=closed".to_string(), "--limit=0".to_string()], cwd_ref)?;
         (
-            parse_issues_tolerant(&open_output, "bd_poll_data_open")?,
-            parse_issues_tolerant(&closed_output, "bd_poll_data_closed")?,
+            parse_issues_tolerant(&open_output, "bd_poll_data_open").map_err(|e| e.to_string())?,
+            parse_issues_tolerant(&closed_output, "bd_poll_data_closed").map_err(|e| e.to_string())?,
         )
     };
 
     // Fetch ready issues
     let ready_output = execute_bd("ready", &[], cwd_ref)?;
-    let raw_ready = parse_issues_tolerant(&ready_output, "bd_poll_data_ready")?;
+    let raw_ready = parse_issues_tolerant(&ready_output, "bd_poll_data_ready").map_err(|e| e.to_string())?;
 
     log_info!("[bd_poll_data] Batched poll done: {} open, {} closed, {} ready",
         raw_open.len(), raw_closed.len(), raw_ready.len());

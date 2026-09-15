@@ -1,6 +1,6 @@
 use crate::attachments::issue_short_id;
 use crate::cli::{execute_bd, get_cli_client_info, supports_delete_hard_flag, supports_list_all_flag};
-use crate::issues::{parse_issues_tolerant, priority_to_number, transform_issue};
+use btit_beads::{issues::{priority_to_number, transform_issue}, parse::parse_issues_tolerant};
 use crate::migration::sync_bd_database;
 use btit_types::{BdRawIssue, CliClient, CountResult, CreatePayload, CwdOptions, Issue, ListOptions, UpdatePayload};
 use std::collections::HashMap;
@@ -26,11 +26,11 @@ pub(crate) async fn bd_list(options: ListOptions) -> Result<Vec<Issue>, String> 
         fallback_args.push("--limit=0".to_string());
 
         let open_output = execute_bd("list", &fallback_args, options.cwd.as_deref())?;
-        let open_issues = parse_issues_tolerant(&open_output, "bd_list_open")?;
+        let open_issues = parse_issues_tolerant(&open_output, "bd_list_open").map_err(|e| e.to_string())?;
 
         fallback_args.push("--status=closed".to_string());
         let closed_output = execute_bd("list", &fallback_args, options.cwd.as_deref())?;
-        let closed_issues = parse_issues_tolerant(&closed_output, "bd_list_closed")?;
+        let closed_issues = parse_issues_tolerant(&closed_output, "bd_list_closed").map_err(|e| e.to_string())?;
 
         let mut all_issues = open_issues;
         all_issues.extend(closed_issues);
@@ -66,7 +66,7 @@ pub(crate) async fn bd_list(options: ListOptions) -> Result<Vec<Issue>, String> 
 
     let output = execute_bd("list", &args, options.cwd.as_deref())?;
 
-    let raw_issues = parse_issues_tolerant(&output, "bd_list")?;
+    let raw_issues = parse_issues_tolerant(&output, "bd_list").map_err(|e| e.to_string())?;
 
     log_info!("[bd_list] Found {} issues", raw_issues.len());
     Ok(raw_issues.into_iter().map(transform_issue).collect())
@@ -80,12 +80,12 @@ pub(crate) async fn bd_count(options: CwdOptions) -> Result<CountResult, String>
     // Fetch all issues: single --all call for bd >= 0.55, fallback to 2 calls for older versions
     let raw_issues = if supports_list_all_flag() {
         let all_output = execute_bd("list", &["--all".to_string(), "--limit=0".to_string()], options.cwd.as_deref())?;
-        parse_issues_tolerant(&all_output, "bd_count_all")?
+        parse_issues_tolerant(&all_output, "bd_count_all").map_err(|e| e.to_string())?
     } else {
         let open_output = execute_bd("list", &["--limit=0".to_string()], options.cwd.as_deref())?;
         let closed_output = execute_bd("list", &["--status=closed".to_string(), "--limit=0".to_string()], options.cwd.as_deref())?;
-        let mut issues = parse_issues_tolerant(&open_output, "bd_count_open")?;
-        issues.extend(parse_issues_tolerant(&closed_output, "bd_count_closed")?);
+        let mut issues = parse_issues_tolerant(&open_output, "bd_count_open").map_err(|e| e.to_string())?;
+        issues.extend(parse_issues_tolerant(&closed_output, "bd_count_closed").map_err(|e| e.to_string())?);
         issues
     };
 
@@ -138,7 +138,7 @@ pub(crate) async fn bd_ready(options: CwdOptions) -> Result<Vec<Issue>, String> 
 
     let output = execute_bd("ready", &[], options.cwd.as_deref())?;
 
-    let raw_issues = parse_issues_tolerant(&output, "bd_ready")?;
+    let raw_issues = parse_issues_tolerant(&output, "bd_ready").map_err(|e| e.to_string())?;
 
     log_info!("[bd_ready] Found {} ready issues", raw_issues.len());
     Ok(raw_issues.into_iter().map(transform_issue).collect())

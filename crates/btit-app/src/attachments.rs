@@ -1,6 +1,6 @@
 use crate::cli::execute_bd;
 use std::process::Command;
-use crate::issues::parse_issues_tolerant;
+use btit_beads::parse::parse_issues_tolerant;
 use btit_types::PurgeResult;
 use serde::Serialize;
 use std::env;
@@ -187,7 +187,7 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
     // Get list of all existing issue IDs via bd list --all
     let existing_ids: std::collections::HashSet<String> = {
         let output = execute_bd("list", &["--all".to_string(), "--limit=0".to_string()], Some(&abs_project_path.to_string_lossy()))?;
-        let issues = parse_issues_tolerant(&output, "purge_orphan_attachments")?;
+        let issues = parse_issues_tolerant(&output, "purge_orphan_attachments").map_err(|e| e.to_string())?;
         issues.into_iter().map(|i| i.id).collect()
     };
 

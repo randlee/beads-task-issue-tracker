@@ -276,7 +276,7 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
     }
 
     // Parse semver from version string
-    let current_tuple = parse_bd_version(&version_str)
+    let current_tuple = parse_bd_version(&version_str).map(<(u32, u32, u32)>::from)
         .ok_or_else(|| format!("Could not parse version from: {}", version_str))?;
     let current_version = format!("{}.{}.{}", current_tuple.0, current_tuple.1, current_tuple.2);
 
