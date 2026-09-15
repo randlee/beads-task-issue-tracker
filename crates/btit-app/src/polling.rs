@@ -1,7 +1,7 @@
-use crate::cli::{project_uses_dolt, uses_jsonl_files};
 use crate::backend;
+use btit_beads::backend::BeadsBackend;
 use btit_beads::issues::transform_issue;
-use crate::migration::sync_bd_database;
+use crate::migration::{cli_of, sync_bd_database};
 use btit_types::{BdRawIssue, Issue, ListQuery, ProjectRef};
 use std::fs;
 use serde::Serialize;
@@ -85,7 +85,16 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
 ///   .beads/dolt/<name>/.dolt/ (bd 0.52+ nested layout), and manifest files
 /// - SQLite backend: checks beads.db, beads.db-wal, and optionally issues.jsonl
 pub(crate) fn get_beads_mtime(beads_dir: &std::path::Path) -> Option<std::time::SystemTime> {
-    if project_uses_dolt(beads_dir) {
+    get_beads_mtime_with(backend::current().as_ref(), beads_dir)
+}
+
+/// Body of [`get_beads_mtime`] over an injected backend; the project is `beads_dir`'s parent.
+pub(crate) fn get_beads_mtime_with(
+    be: &dyn BeadsBackend,
+    beads_dir: &std::path::Path,
+) -> Option<std::time::SystemTime> {
+    let project = ProjectRef::local(beads_dir.parent().map(|p| p.to_string_lossy().into_owned()));
+    if be.project_uses_dolt(&project) {
         // Dolt backend: check directory mtimes and manifest files
         let mut times: Vec<std::time::SystemTime> = Vec::new();
 
@@ -142,7 +151,7 @@ pub(crate) fn get_beads_mtime(beads_dir: &std::path::Path) -> Option<std::time::
             beads_dir.join("beads.db"),
             beads_dir.join("beads.db-wal"),
         ];
-        if uses_jsonl_files() {
+        if cli_of(be, "mtime").map(|c| c.capabilities().uses_jsonl_files).unwrap_or(false) {
             paths.push(beads_dir.join("issues.jsonl"));
         }
         paths.iter()
@@ -226,5 +235,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
+    // ---- get_beads_mtime_with over a RecordingInvoker-backed BdCli (b-8) ----------
 
+    use crate::test_backend::{bd_invoker, recording_bd, FakeBackend, TempProject, BD_0_49_6, BD_1_0_4};
+    use std::time::{Duration, SystemTime};
+
+    /// Sets `path`'s mtime to `t` and returns the mtime the filesystem stored.
+    fn set_mtime(path: &std::path::Path, t: SystemTime) -> Result<SystemTime, String> {
+        let file = fs::File::options().write(true).open(path).map_err(|e| e.to_string())?;
+        file.set_modified(t).map_err(|e| e.to_string())?;
+        fs::metadata(path).and_then(|m| m.modified()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn mtime_sqlite_counts_jsonl_only_when_the_backend_uses_jsonl() -> Result<(), String> {
+        let project = TempProject::sqlite("mtime_sqlite")?;
+        project.write(".beads/issues.jsonl", "{}\n")?;
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let db_time = set_mtime(&project.beads_dir().join("beads.db"), base)?;
+        let jsonl_time = set_mtime(
+            &project.beads_dir().join("issues.jsonl"),
+            base + Duration::from_secs(60),
+        )?;
+
+        let (bd049, inv049) = recording_bd(bd_invoker(BD_0_49_6));
+        assert_eq!(get_beads_mtime_with(&bd049, &project.beads_dir()), Some(jsonl_time));
+        let (bd1, inv1) = recording_bd(bd_invoker(BD_1_0_4));
+        assert_eq!(get_beads_mtime_with(&bd1, &project.beads_dir()), Some(db_time));
+        let no_cli = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(get_beads_mtime_with(&no_cli, &project.beads_dir()), Some(db_time));
+
+        assert!(inv049.calls().is_empty() && inv1.calls().is_empty());
+        assert_eq!(inv049.probe_calls() + inv1.probe_calls(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn mtime_dolt_project_reads_the_dolt_layout() -> Result<(), String> {
+        let project = TempProject::dolt("mtime_dolt")?;
+        let (bd1, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        // No beads.db exists, so a SQLite reading would be None.
+        assert!(get_beads_mtime_with(&bd1, &project.beads_dir()).is_some());
+        let sqlite_view = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(get_beads_mtime_with(&sqlite_view, &project.beads_dir()), None);
+        assert!(inv.calls().is_empty());
+        Ok(())
+    }
 }

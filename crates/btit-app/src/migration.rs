@@ -1,13 +1,13 @@
 use crate::attachment_refs::is_real_external_ref;
 use btit_types::CliClient;
 use crate::attachments::issue_short_id;
-use crate::cli::{client_info, project_uses_dolt, supports_daemon_flag, uses_jsonl_files};
 use crate::backend;
+use btit_beads::backend::{BeadsBackend, CliBackend};
 use btit_beads::error::BeadsError;
-use btit_cli::{command::new_command, path::get_extended_path};
 use btit_types::ProjectRef;
-use crate::config::get_cli_binary;
+use std::collections::HashMap;
 use std::env;
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -15,6 +15,55 @@ use std::time::Instant;
 pub(crate) static LAST_SYNC_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 pub(crate) const SYNC_COOLDOWN_SECS: u64 = 10;
 
+/// The backend's CLI facet, or [`BeadsError::Unsupported`] for `operation` when it has none.
+///
+/// Every `_with` core reaches CLI facts (client, version, capabilities, `run_raw`)
+/// through this helper on its injected backend, never through the global slot.
+pub(crate) fn cli_of<'a>(
+    be: &'a dyn BeadsBackend,
+    operation: &'static str,
+) -> Result<&'a dyn CliBackend, BeadsError> {
+    be.cli().ok_or(BeadsError::Unsupported {
+        operation,
+        client: CliClient::Unknown,
+    })
+}
+
+/// The configured binary of `be`'s CLI, or `bd` without one (`config::get_cli_binary`'s rule).
+fn cli_binary(be: &dyn BeadsBackend) -> String {
+    be.cli().map_or_else(|| "bd".to_string(), |c| c.binary())
+}
+
+/// The command error for a failed `DoltOperations` call.
+///
+/// A spawn failure keeps the text the direct spawn produced (`Failed to run bd
+/// <subcommand>: <io error>`, literal `bd`); any other error keeps its `Display`.
+fn dolt_op_error(subcommand: &str, e: BeadsError) -> String {
+    match e {
+        BeadsError::Spawn { source, .. } => format!("Failed to run bd {subcommand}: {source}"),
+        other => other.to_string(),
+    }
+}
+
+/// The text a raw-invocation error contributes to a log line or error message.
+///
+/// A spawn failure yields the `io::Error` text the direct spawn printed; any other
+/// error keeps its `Display`.
+fn raw_error_text(e: &BeadsError) -> String {
+    match e {
+        BeadsError::Spawn { source, .. } => source.to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// [`BeadsError::Unsupported`] text for a Dolt project on a backend without `dolt()`.
+fn dolt_unsupported(be: &dyn BeadsBackend, operation: &'static str) -> String {
+    let client = be.cli().map_or(CliClient::Unknown, |c| c.client());
+    BeadsError::Unsupported { operation, client }.to_string()
+}
+
+/// Auto-run refs migration v3 (filesystem-only attachments) if needed.
+/// Called synchronously before br sync to prevent UNIQUE constraint errors.
 pub(crate) fn ensure_refs_migrated_v3(beads_dir: &std::path::Path, working_dir: &str) {
     if beads_dir.join(".migrated-attachments").exists() {
         return;
@@ -200,8 +249,10 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
         });
 
     // Dolt backend handles its own sync via git — skip bd sync
+    let be = backend::current();
+    let project = ProjectRef::local(Some(working_dir.clone()));
     let beads_dir = std::path::Path::new(&working_dir).join(".beads");
-    if project_uses_dolt(&beads_dir) {
+    if be.project_uses_dolt(&project) {
         log_info!("[sync] Skipping — Dolt backend handles sync via git");
         return;
     }
@@ -223,8 +274,8 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
     ensure_refs_migrated_v3(&beads_dir, &working_dir);
 
     // Run bd sync (bidirectional - exports local changes AND imports remote changes)
-    let binary = get_cli_binary();
-    match backend::current().sync(&ProjectRef::local(Some(working_dir.clone()))) {
+    let binary = cli_binary(be.as_ref());
+    match be.sync(&project) {
         Ok(()) => {
             log_info!("[sync] Sync completed successfully");
             // Update cooldown timestamp
@@ -263,16 +314,17 @@ pub(crate) async fn bd_sync(cwd: Option<String>) -> Result<(), String> {
         });
 
     // Dolt backend handles its own sync via git — skip bd sync
-    let beads_dir = std::path::Path::new(&working_dir).join(".beads");
-    if project_uses_dolt(&beads_dir) {
+    let be = backend::current();
+    let project = ProjectRef::local(Some(working_dir.clone()));
+    if be.project_uses_dolt(&project) {
         log_info!("[bd_sync] Skipping — Dolt backend handles sync via git");
         return Ok(());
     }
 
-    let binary = get_cli_binary();
+    let binary = cli_binary(be.as_ref());
     log_info!("[bd_sync] Manual sync requested for: {}", working_dir);
 
-    match backend::current().sync(&ProjectRef::local(Some(working_dir.clone()))) {
+    match be.sync(&project) {
         Ok(()) => {}
         Err(BeadsError::CommandFailed { stderr, .. }) => {
             log_error!("[bd_sync] Sync failed: {}", stderr.trim());
@@ -300,6 +352,17 @@ pub(crate) struct RepairResult {
 
 #[tauri::command]
 pub(crate) async fn bd_repair_database(cwd: Option<String>) -> Result<RepairResult, String> {
+    bd_repair_database_with(backend::current().as_ref(), cwd)
+}
+
+/// Body of [`bd_repair_database`] over an injected backend.
+///
+/// Dolt projects go through `DoltOperations::doctor_fix`; SQLite projects rebuild the
+/// database and verify it with a raw `list --limit=1 [--no-daemon] --json`.
+pub(crate) fn bd_repair_database_with(
+    be: &dyn BeadsBackend,
+    cwd: Option<String>,
+) -> Result<RepairResult, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
@@ -318,29 +381,26 @@ pub(crate) async fn bd_repair_database(cwd: Option<String>) -> Result<RepairResu
     }
 
     // Dolt backend: use `bd doctor --fix --yes`
-    if project_uses_dolt(&beads_dir) {
+    let project = ProjectRef::local(Some(working_dir.clone()));
+    if be.project_uses_dolt(&project) {
         log_info!("[bd_repair] Using Dolt-based repair strategy (bd >= 0.50.0): bd doctor --fix --yes");
-        let binary = get_cli_binary();
-        let output = new_command(&binary)
-            .args(&["doctor", "--fix", "--yes"])
-            .current_dir(&working_dir)
-            .env("PATH", get_extended_path())
-            .env("BEADS_PATH", &working_dir)
-            .output()
-            .map_err(|e| format!("Failed to run bd doctor: {}", e))?;
+        let Some(dolt) = be.dolt() else {
+            return Err(dolt_unsupported(be, "Dolt repair"));
+        };
+        let r = dolt
+            .doctor_fix(&project)
+            .map_err(|e| dolt_op_error("doctor", e))?;
 
-        return if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            log_info!("[bd_repair] Dolt repair successful: {}", stdout.trim());
+        return if r.success {
+            log_info!("[bd_repair] Dolt repair successful: {}", r.message);
             Ok(RepairResult {
                 success: true,
-                message: format!("Database repaired via bd doctor. {}", stdout.trim()),
+                message: format!("Database repaired via bd doctor. {}", r.message),
                 backup_path: None,
             })
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log_error!("[bd_repair] Dolt repair failed: {}", stderr.trim());
-            Err(format!("Repair failed: {}", stderr.trim()))
+            log_error!("[bd_repair] Dolt repair failed: {}", r.detail);
+            Err(format!("Repair failed: {}", r.detail))
         };
     }
 
@@ -358,8 +418,11 @@ pub(crate) async fn bd_repair_database(cwd: Option<String>) -> Result<RepairResu
         });
     }
 
+    // Every remaining step needs the CLI; resolve it before any file is touched.
+    let cli = cli_of(be, "SQLite repair").map_err(|e| e.to_string())?;
+
     // For bd < 0.50.0: require issues.jsonl for repair (db is rebuilt from JSONL)
-    if uses_jsonl_files() {
+    if cli.capabilities().uses_jsonl_files {
         let jsonl_size = std::fs::metadata(&jsonl_path)
             .map(|m| m.len())
             .unwrap_or(0);
@@ -387,19 +450,14 @@ pub(crate) async fn bd_repair_database(cwd: Option<String>) -> Result<RepairResu
 
     // Test that bd can now work (it will recreate the database)
     let mut test_args = vec!["list", "--limit=1"];
-    if supports_daemon_flag() {
+    if cli.capabilities().supports_daemon_flag {
         test_args.push("--no-daemon");
     }
     test_args.push("--json");
-    let test_output = new_command(&get_cli_binary())
-        .args(&test_args)
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output();
+    let test_output = cli.run_raw(&project, &test_args);
 
     match test_output {
-        Ok(output) if output.status.success() => {
+        Ok(output) if output.success => {
             log_info!("[bd_repair] Repair successful - database recreated");
             Ok(RepairResult {
                 success: true,
@@ -408,11 +466,12 @@ pub(crate) async fn bd_repair_database(cwd: Option<String>) -> Result<RepairResu
             })
         }
         Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = output.stderr;
             log_error!("[bd_repair] Repair verification failed: {}", stderr);
             Err(format!("Repair failed during verification: {}", stderr))
         }
         Err(e) => {
+            let e = raw_error_text(&e);
             log_error!("[bd_repair] Failed to verify repair: {}", e);
             Err(format!("Failed to verify repair: {}", e))
         }
@@ -470,6 +529,17 @@ pub(crate) struct MigrationStatus {
 
 #[tauri::command]
 pub(crate) async fn bd_check_needs_migration(cwd: Option<String>) -> Result<MigrationStatus, String> {
+    bd_check_needs_migration_with(backend::current().as_ref(), cwd)
+}
+
+/// Body of [`bd_check_needs_migration`] over an injected backend.
+///
+/// A backend without a CLI has no version, so it reports the same reason as a bd
+/// below 0.50.
+pub(crate) fn bd_check_needs_migration_with(
+    be: &dyn BeadsBackend,
+    cwd: Option<String>,
+) -> Result<MigrationStatus, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
@@ -488,8 +558,8 @@ pub(crate) async fn bd_check_needs_migration(cwd: Option<String>) -> Result<Migr
     }
 
     // Check bd version — only bd >= 0.50 requires Dolt
-    match client_info() {
-        (CliClient::Bd, Some(v)) if v.major > 0 || v.minor >= 50 => {
+    match cli_of(be, "Dolt migration check").map(|c| (c.client(), c.version())) {
+        Ok((CliClient::Bd, Some(v))) if v.major > 0 || v.minor >= 50 => {
             // bd >= 0.50: check if project is fully migrated
         }
         _ => {
@@ -501,7 +571,7 @@ pub(crate) async fn bd_check_needs_migration(cwd: Option<String>) -> Result<Migr
     }
 
     // Already fully using Dolt? (.beads/.dolt exists)
-    if project_uses_dolt(&beads_dir) {
+    if be.project_uses_dolt(&ProjectRef::local(Some(working_dir.clone()))) {
         return Ok(MigrationStatus {
             needs_migration: false,
             reason: "Already using Dolt backend".to_string(),
@@ -558,6 +628,17 @@ pub(crate) fn reprefix_id(id: &str, target_prefix: &str, prefix_counts: &std::co
 
 #[tauri::command]
 pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateResult, String> {
+    bd_migrate_to_dolt_with(backend::current().as_ref(), cwd)
+}
+
+/// Body of [`bd_migrate_to_dolt`] over an injected backend.
+///
+/// `migrate --to-dolt`, `init` and `import` go through `DoltOperations`; the label,
+/// dependency and comment restore steps are raw CLI invocations with today's argv.
+pub(crate) fn bd_migrate_to_dolt_with(
+    be: &dyn BeadsBackend,
+    cwd: Option<String>,
+) -> Result<MigrateResult, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
@@ -576,24 +657,33 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
     }
 
     // Already using Dolt?
-    if project_uses_dolt(&beads_dir) {
+    let project = ProjectRef::local(Some(working_dir.clone()));
+    if be.project_uses_dolt(&project) {
         return Ok(MigrateResult {
             success: true,
             message: "Project already uses the Dolt backend.".to_string(),
         });
     }
 
-    // Verify bd >= 0.50
-    match client_info() {
-        (_, Some(v)) if v.major == 0 && v.minor < 50 => {
+    // Verify bd >= 0.50 (a backend without a CLI has no version to verify)
+    let Ok(cli) = cli_of(be, "Dolt migration") else {
+        return Err("Could not determine bd version".to_string());
+    };
+    match cli.version() {
+        Some(v) if v.major == 0 && v.minor < 50 => {
             return Err(format!(
                 "bd version 0.50+ is required for Dolt migration (current: {}.{})",
                 v.major, v.minor
             ));
         }
-        (_, Some(_)) => {}
-        (_, None) => return Err("Could not determine bd version".to_string()),
+        Some(_) => {}
+        None => return Err("Could not determine bd version".to_string()),
     }
+
+    // Every step below needs Dolt operations; fail before any file is touched.
+    let Some(dolt) = be.dolt() else {
+        return Err(dolt_unsupported(be, "Dolt migration"));
+    };
 
     // Clean up partial migration if dolt/ directory exists
     let dolt_dir = beads_dir.join("dolt");
@@ -610,28 +700,22 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
     }
 
     // Try `bd migrate --to-dolt --yes` first
-    let binary = get_cli_binary();
-    let output = new_command(&binary)
-        .args(&["migrate", "--to-dolt", "--yes"])
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-        .map_err(|e| format!("Failed to run bd migrate: {}", e))?;
+    let migrate = dolt
+        .migrate_to_dolt(&project)
+        .map_err(|e| dolt_op_error("migrate", e))?;
 
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        log_info!("[bd_migrate] Migration via bd migrate successful: {}", stdout.trim());
+    if migrate.success {
+        log_info!("[bd_migrate] Migration via bd migrate successful: {}", migrate.message);
         return Ok(MigrateResult {
             success: true,
-            message: format!("Migration to Dolt completed successfully. {}", stdout.trim()),
+            message: format!("Migration to Dolt completed successfully. {}", migrate.message),
         });
     }
 
     // bd migrate failed (typically: corrupt SQLite, missing table, etc.)
     // Fallback: bd init + bd import from JSONL
-    let stderr_migrate = String::from_utf8_lossy(&output.stderr);
-    log_info!("[bd_migrate] bd migrate failed ({}), trying init+import fallback", stderr_migrate.trim());
+    let stderr_migrate = migrate.detail;
+    log_info!("[bd_migrate] bd migrate failed ({}), trying init+import fallback", stderr_migrate);
 
     let jsonl_path = beads_dir.join("issues.jsonl");
     if !jsonl_path.exists() || std::fs::metadata(&jsonl_path).map(|m| m.len()).unwrap_or(0) == 0 {
@@ -653,31 +737,26 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
                 }
             }
         }
-        let init_output = new_command(&binary)
-            .args(&["init", "--prefix", "project"])
-            .current_dir(&working_dir)
-            .env("PATH", get_extended_path())
-            .env("BEADS_PATH", &working_dir)
-            .output()
-            .map_err(|e| format!("Failed to run bd init: {}", e))?;
-        if init_output.status.success() {
+        let init_output = dolt
+            .init(&project, "project")
+            .map_err(|e| dolt_op_error("init", e))?;
+        if init_output.success {
             log_info!("[bd_migrate] Empty project initialized with Dolt backend");
             return Ok(MigrateResult {
                 success: true,
                 message: "Migration complete (empty project — initialized with Dolt backend)".to_string(),
             });
         }
-        let init_stderr = String::from_utf8_lossy(&init_output.stderr);
         return Err(format!(
             "Migration failed (empty project, bd init also failed): {}. Original error: {}",
-            init_stderr.trim(), stderr_migrate.trim()
+            init_output.detail, stderr_migrate
         ));
     }
 
     // Detect prefix from JSONL — use the most common prefix
     let jsonl_content = std::fs::read_to_string(&jsonl_path)
         .map_err(|e| format!("Failed to read issues.jsonl: {}", e))?;
-    let mut prefix_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut prefix_counts: HashMap<String, usize> = HashMap::new();
     for line in jsonl_content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
@@ -759,17 +838,12 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
     }
 
     // Step 1: bd init --prefix <prefix>
-    let init_output = new_command(&binary)
-        .args(&["init", "--prefix", &prefix])
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-        .map_err(|e| format!("Failed to run bd init: {}", e))?;
+    let init_output = dolt
+        .init(&project, &prefix)
+        .map_err(|e| dolt_op_error("init", e))?;
 
-    if !init_output.status.success() {
-        let stderr = String::from_utf8_lossy(&init_output.stderr);
-        return Err(format!("bd init failed: {}", stderr.trim()));
+    if !init_output.success {
+        return Err(format!("bd init failed: {}", init_output.detail));
     }
     log_info!("[bd_migrate] bd init successful");
 
@@ -867,20 +941,16 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
     }
 
     // Step 3: bd import -i <cleaned_jsonl>
-    let import_output = new_command(&binary)
-        .args(&["import", "-i", &temp_jsonl.to_string_lossy()])
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-        .map_err(|e| format!("Failed to run bd import: {}", e))?;
+    let import_output = dolt
+        .import_jsonl(&project, &temp_jsonl)
+        .map_err(|e| dolt_op_error("import", e))?;
 
     // Clean up temp file
     std::fs::remove_file(&temp_jsonl).ok();
 
-    if !import_output.status.success() {
-        let stderr = String::from_utf8_lossy(&import_output.stderr);
-        log_error!("[bd_migrate] Import failed: {}", stderr.trim());
+    if !import_output.success {
+        let stderr = &import_output.detail;
+        log_error!("[bd_migrate] Import failed: {}", stderr);
         // Clean up failed migration so the modal will reappear
         if dolt_dir.exists() {
             std::fs::remove_dir_all(&dolt_dir).ok();
@@ -888,11 +958,11 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
         if beads_dir.join("dolt-access.lock").exists() {
             std::fs::remove_file(beads_dir.join("dolt-access.lock")).ok();
         }
-        return Err(format!("Import failed: {}", stderr.trim()));
+        return Err(format!("Import failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&import_output.stdout);
-    log_info!("[bd_migrate] Import successful: {}", stdout.trim());
+    let stdout = &import_output.message;
+    log_info!("[bd_migrate] Import successful: {}", stdout);
 
     // Step 4: Restore labels (bd import doesn't preserve them)
     // Re-read JSONL to find issues with labels and apply them via bd update
@@ -926,29 +996,23 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
             };
 
             // bd update <id> --set-labels label1 --set-labels label2
-            let mut args = vec!["update".to_string(), issue_id.to_string()];
+            let mut args = vec!["update", issue_id];
             for label in &labels {
-                args.push("--set-labels".to_string());
-                args.push(label.clone());
+                args.push("--set-labels");
+                args.push(label);
             }
 
-            let label_output = new_command(&binary)
-                .args(&args.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-                .current_dir(&working_dir)
-                .env("PATH", get_extended_path())
-                .env("BEADS_PATH", &working_dir)
-                .output();
+            let label_output = cli.run_raw(&project, &args);
 
             match label_output {
-                Ok(o) if o.status.success() => {
+                Ok(o) if o.success => {
                     labels_restored += 1;
                 }
                 Ok(o) => {
-                    let stderr = String::from_utf8_lossy(&o.stderr);
-                    log_info!("[bd_migrate] Failed to restore labels for {}: {}", issue_id, stderr.trim());
+                    log_info!("[bd_migrate] Failed to restore labels for {}: {}", issue_id, o.stderr.trim());
                 }
                 Err(e) => {
-                    log_info!("[bd_migrate] Failed to run bd update for {}: {}", issue_id, e);
+                    log_info!("[bd_migrate] Failed to run bd update for {}: {}", issue_id, raw_error_text(&e));
                 }
             }
         }
@@ -991,21 +1055,18 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
                 let depends_on_id = reprefix_id(&depends_on_id, &prefix, &prefix_counts);
 
                 // bd dep add <issue_id> <depends_on_id> --type <type>
-                let dep_output = new_command(&binary)
-                    .args(&["dep", "add", &issue_id, &depends_on_id, "--type", &dep_type])
-                    .current_dir(&working_dir)
-                    .env("PATH", get_extended_path())
-                    .env("BEADS_PATH", &working_dir)
-                    .output();
+                let dep_output = cli.run_raw(
+                    &project,
+                    &["dep", "add", &issue_id, &depends_on_id, "--type", &dep_type],
+                );
 
                 match dep_output {
-                    Ok(o) if o.status.success() => { deps_restored += 1; }
+                    Ok(o) if o.success => { deps_restored += 1; }
                     Ok(o) => {
-                        let stderr = String::from_utf8_lossy(&o.stderr);
-                        log_info!("[bd_migrate] Failed to restore dep {} -> {}: {}", issue_id, depends_on_id, stderr.trim());
+                        log_info!("[bd_migrate] Failed to restore dep {} -> {}: {}", issue_id, depends_on_id, o.stderr.trim());
                     }
                     Err(e) => {
-                        log_info!("[bd_migrate] Failed to run bd dep add: {}", e);
+                        log_info!("[bd_migrate] Failed to run bd dep add: {}", raw_error_text(&e));
                     }
                 }
             }
@@ -1048,47 +1109,14 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
         if let Ok(output) = sqlite_output {
             if output.status.success() {
                 let json_str = String::from_utf8_lossy(&output.stdout);
-                if let Ok(rows) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                    for row in &rows {
-                        let issue_id = match row.get("issue_id").and_then(|v| v.as_str()) {
-                            Some(id) => id.to_string(),
-                            None => continue,
-                        };
-                        let author = row.get("author").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let text = match row.get("text").and_then(|v| v.as_str()) {
-                            Some(t) if !t.is_empty() => t,
-                            _ => continue,
-                        };
-
-                        // Re-prefix if needed
-                        let issue_id = reprefix_id(&issue_id, &prefix, &prefix_counts);
-
-                        // Write comment to temp file to handle multiline text
-                        let comment_file = beads_dir.join("_migrate_comment.txt");
-                        if std::fs::write(&comment_file, text).is_err() {
-                            continue;
-                        }
-
-                        let comment_output = new_command(&binary)
-                            .args(&["comments", "add", &issue_id, "-f", &comment_file.to_string_lossy(), "--author", author])
-                            .current_dir(&working_dir)
-                            .env("PATH", get_extended_path())
-                            .env("BEADS_PATH", &working_dir)
-                            .output();
-
-                        match comment_output {
-                            Ok(o) if o.status.success() => { comments_restored += 1; }
-                            Ok(o) => {
-                                let stderr = String::from_utf8_lossy(&o.stderr);
-                                log_info!("[bd_migrate] Failed to restore comment for {}: {}", issue_id, stderr.trim());
-                            }
-                            Err(e) => {
-                                log_info!("[bd_migrate] Failed to run bd comments add: {}", e);
-                            }
-                        }
-                        std::fs::remove_file(&comment_file).ok();
-                    }
-                }
+                comments_restored += restore_comments(
+                    cli,
+                    &project,
+                    &beads_dir,
+                    &json_str,
+                    &prefix,
+                    &prefix_counts,
+                );
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 log_info!("[bd_migrate] sqlite3 query failed: {}", stderr.trim());
@@ -1110,6 +1138,62 @@ pub(crate) async fn bd_migrate_to_dolt(cwd: Option<String>) -> Result<MigrateRes
             comments_restored,
         ),
     })
+}
+
+/// Step 6 of the init+import fallback: replays the comment rows `sqlite3 -json` printed.
+///
+/// Each row with an `issue_id` and a non-empty `text` is written to
+/// `_migrate_comment.txt` in `beads_dir` and sent as
+/// `comments add <id> -f <file> --author <author>`. Unparsable `rows_json` restores
+/// nothing. Returns how many comments were restored.
+fn restore_comments(
+    cli: &dyn CliBackend,
+    project: &ProjectRef,
+    beads_dir: &Path,
+    rows_json: &str,
+    prefix: &str,
+    prefix_counts: &HashMap<String, usize>,
+) -> u32 {
+    let mut comments_restored = 0u32;
+    if let Ok(rows) = serde_json::from_str::<Vec<serde_json::Value>>(rows_json) {
+        for row in &rows {
+            let issue_id = match row.get("issue_id").and_then(|v| v.as_str()) {
+                Some(id) => id.to_string(),
+                None => continue,
+            };
+            let author = row.get("author").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let text = match row.get("text").and_then(|v| v.as_str()) {
+                Some(t) if !t.is_empty() => t,
+                _ => continue,
+            };
+
+            // Re-prefix if needed
+            let issue_id = reprefix_id(&issue_id, prefix, prefix_counts);
+
+            // Write comment to temp file to handle multiline text
+            let comment_file = beads_dir.join("_migrate_comment.txt");
+            if std::fs::write(&comment_file, text).is_err() {
+                continue;
+            }
+
+            let comment_output = cli.run_raw(
+                project,
+                &["comments", "add", &issue_id, "-f", &comment_file.to_string_lossy(), "--author", author],
+            );
+
+            match comment_output {
+                Ok(o) if o.success => { comments_restored += 1; }
+                Ok(o) => {
+                    log_info!("[bd_migrate] Failed to restore comment for {}: {}", issue_id, o.stderr.trim());
+                }
+                Err(e) => {
+                    log_info!("[bd_migrate] Failed to run bd comments add: {}", raw_error_text(&e));
+                }
+            }
+            std::fs::remove_file(&comment_file).ok();
+        }
+    }
+    comments_restored
 }
 
 
@@ -1164,5 +1248,404 @@ mod tests {
         assert_eq!(result, "new-prefix-abc");
     }
 
+    // ---- _with cores over a RecordingInvoker-backed BdCli (b-8) ------------------
 
+    use crate::test_backend::{
+        bd_invoker, raw_fail, raw_ok, recording_bd, spawn_err, FakeBackend, TempProject,
+        BD_0_49_6, BD_1_0_4,
+    };
+
+    fn words(argv: &[&str]) -> Vec<String> {
+        argv.iter().map(ToString::to_string).collect()
+    }
+
+    // ---- error-text mapping ------------------------------------------------------
+
+    #[test]
+    fn dolt_op_error_keeps_spawn_texts() {
+        for sub in ["doctor", "migrate", "init", "import"] {
+            let e = BeadsError::Spawn {
+                binary: "/opt/custom/bd".to_string(),
+                operation: Some(sub.to_string()),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "nope"),
+            };
+            assert_eq!(dolt_op_error(sub, e), format!("Failed to run bd {sub}: nope"));
+        }
+        let other = BeadsError::Unsupported { operation: "x", client: CliClient::Bd };
+        let text = other.to_string();
+        assert_eq!(dolt_op_error("doctor", other), text);
+    }
+
+    #[test]
+    fn raw_error_text_is_the_io_error_for_spawns() {
+        let e = BeadsError::Spawn {
+            binary: "bd".to_string(),
+            operation: Some("update".to_string()),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "nope"),
+        };
+        assert_eq!(raw_error_text(&e), "nope");
+    }
+
+    // ---- bd_repair_database_with --------------------------------------------------
+
+    #[test]
+    fn repair_dolt_success_maps_trimmed_stdout() -> Result<(), String> {
+        let project = TempProject::dolt("repair_ok")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(raw_ok("  fixed 2 issues\n")));
+        let r = bd_repair_database_with(&be, project.cwd())?;
+        assert!(r.success);
+        assert_eq!(r.message, "Database repaired via bd doctor. fixed 2 issues");
+        assert_eq!(r.backup_path, None);
+        assert_eq!(inv.calls(), vec![words(&["doctor", "--fix", "--yes"])]);
+        Ok(())
+    }
+
+    #[test]
+    fn repair_dolt_failure_maps_trimmed_stderr() -> Result<(), String> {
+        let project = TempProject::dolt("repair_fail")?;
+        let (be, _inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(raw_fail(" lock held \n")));
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(r.err().as_deref(), Some("Repair failed: lock held"));
+        Ok(())
+    }
+
+    #[test]
+    fn repair_dolt_spawn_error_keeps_text() -> Result<(), String> {
+        let project = TempProject::dolt("repair_spawn")?;
+        let (be, _inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(spawn_err("doctor")));
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(r.err().as_deref(), Some("Failed to run bd doctor: nope"));
+        Ok(())
+    }
+
+    #[test]
+    fn repair_dolt_without_dolt_operations_is_unsupported() -> Result<(), String> {
+        let project = TempProject::dolt("repair_nodolt")?;
+        let (cli, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        let be = FakeBackend { uses_dolt: true, cli: Some(cli) };
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(r.err().as_deref(), Some("Dolt repair is not supported by the bd client"));
+        assert!(inv.calls().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_verifies_with_list_argv_on_bd_1() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_1")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        let r = bd_repair_database_with(&be, project.cwd())?;
+        assert!(r.success);
+        assert_eq!(r.backup_path, Some(project.beads_arg("beads.db.backup")));
+        assert!(project.exists(".beads/beads.db.backup"));
+        assert!(!project.exists(".beads/beads.db"));
+        assert_eq!(inv.calls(), vec![words(&["list", "--limit=1", "--json"])]);
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_verifies_with_no_daemon_on_bd_0_49() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_049")?;
+        project.write(".beads/issues.jsonl", "{\"id\":\"p-1\"}\n")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_0_49_6));
+        let r = bd_repair_database_with(&be, project.cwd())?;
+        assert!(r.success);
+        assert_eq!(inv.calls(), vec![words(&["list", "--limit=1", "--no-daemon", "--json"])]);
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_on_bd_0_49_requires_jsonl_before_touching_files() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_nojsonl")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_0_49_6));
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(
+            r.err().as_deref(),
+            Some("Cannot repair: issues.jsonl is missing or empty. Your data would be lost.")
+        );
+        assert!(project.exists(".beads/beads.db"));
+        assert!(inv.calls().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_verification_failure_keeps_untrimmed_stderr() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_fail")?;
+        let (be, _inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(raw_fail("boom\n")));
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(r.err().as_deref(), Some("Repair failed during verification: boom\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_verification_spawn_error_keeps_text() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_spawn")?;
+        let (be, _inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(spawn_err("list")));
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(r.err().as_deref(), Some("Failed to verify repair: nope"));
+        Ok(())
+    }
+
+    #[test]
+    fn repair_sqlite_without_cli_fails_before_touching_files() -> Result<(), String> {
+        let project = TempProject::sqlite("repair_sqlite_nocli")?;
+        let be = FakeBackend { uses_dolt: false, cli: None };
+        let r = bd_repair_database_with(&be, project.cwd());
+        assert_eq!(
+            r.err().as_deref(),
+            Some("SQLite repair is not supported by the unknown client")
+        );
+        assert!(project.exists(".beads/beads.db"));
+        assert!(!project.exists(".beads/beads.db.backup"));
+        Ok(())
+    }
+
+    // ---- bd_check_needs_migration_with --------------------------------------------
+
+    fn reason(be: &dyn BeadsBackend, project: &TempProject) -> Result<(bool, String), String> {
+        bd_check_needs_migration_with(be, project.cwd()).map(|s| (s.needs_migration, s.reason))
+    }
+
+    #[test]
+    fn check_needs_migration_reasons() -> Result<(), String> {
+        let dolt = TempProject::dolt("check_dolt")?;
+        let sqlite = TempProject::sqlite("check_sqlite")?;
+        sqlite.write(".beads/issues.jsonl", "{\"id\":\"p-1\"}\n")?;
+        let db_only = TempProject::sqlite("check_db_only")?;
+        let empty = TempProject::new("check_empty")?;
+
+        let (bd1, inv1) = recording_bd(bd_invoker(BD_1_0_4));
+        assert_eq!(reason(&bd1, &dolt)?, (false, "Already using Dolt backend".to_string()));
+        assert_eq!(
+            reason(&bd1, &sqlite)?,
+            (true, "SQLite/JSONL project needs Dolt migration".to_string())
+        );
+        assert_eq!(
+            reason(&bd1, &db_only)?,
+            (true, "SQLite project needs Dolt migration".to_string())
+        );
+        assert_eq!(reason(&bd1, &empty)?, (false, "Empty project".to_string()));
+        assert!(inv1.calls().is_empty());
+
+        let (bd049, _inv) = recording_bd(bd_invoker(BD_0_49_6));
+        assert_eq!(
+            reason(&bd049, &sqlite)?,
+            (false, "bd version does not require Dolt".to_string())
+        );
+        let no_cli = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(
+            reason(&no_cli, &sqlite)?,
+            (false, "bd version does not require Dolt".to_string())
+        );
+        Ok(())
+    }
+
+    // ---- bd_migrate_to_dolt_with --------------------------------------------------
+
+    #[test]
+    fn migrate_version_guards() -> Result<(), String> {
+        let project = TempProject::sqlite("migrate_guard")?;
+        let (bd049, inv) = recording_bd(bd_invoker(BD_0_49_6));
+        assert_eq!(
+            bd_migrate_to_dolt_with(&bd049, project.cwd()).err().as_deref(),
+            Some("bd version 0.50+ is required for Dolt migration (current: 0.49)")
+        );
+        assert!(inv.calls().is_empty());
+
+        let no_cli = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(
+            bd_migrate_to_dolt_with(&no_cli, project.cwd()).err().as_deref(),
+            Some("Could not determine bd version")
+        );
+
+        let (cli, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        let no_dolt = FakeBackend { uses_dolt: false, cli: Some(cli) };
+        assert_eq!(
+            bd_migrate_to_dolt_with(&no_dolt, project.cwd()).err().as_deref(),
+            Some("Dolt migration is not supported by the bd client")
+        );
+        assert!(inv.calls().is_empty());
+        assert!(project.exists(".beads/beads.db"));
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_on_dolt_project_spawns_nothing() -> Result<(), String> {
+        let project = TempProject::dolt("migrate_already")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        let r = bd_migrate_to_dolt_with(&be, project.cwd())?;
+        assert_eq!(r.message, "Project already uses the Dolt backend.");
+        assert!(inv.calls().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_success_maps_trimmed_stdout() -> Result<(), String> {
+        let project = TempProject::sqlite("migrate_ok")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(raw_ok(" migrated \n")));
+        let r = bd_migrate_to_dolt_with(&be, project.cwd())?;
+        assert!(r.success);
+        assert_eq!(r.message, "Migration to Dolt completed successfully. migrated");
+        assert_eq!(inv.calls(), vec![words(&["migrate", "--to-dolt", "--yes"])]);
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_spawn_error_keeps_text() -> Result<(), String> {
+        let project = TempProject::sqlite("migrate_spawn")?;
+        let (be, _inv) = recording_bd(bd_invoker(BD_1_0_4).reply_raw(spawn_err("migrate")));
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, project.cwd()).err().as_deref(),
+            Some("Failed to run bd migrate: nope")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_empty_project_init_paths() -> Result<(), String> {
+        let ok = TempProject::sqlite("migrate_empty_ok")?;
+        let (be, inv) = recording_bd(
+            bd_invoker(BD_1_0_4).reply_raw(raw_fail("m-err")).reply_raw(raw_ok("")),
+        );
+        let r = bd_migrate_to_dolt_with(&be, ok.cwd())?;
+        assert_eq!(r.message, "Migration complete (empty project — initialized with Dolt backend)");
+        assert_eq!(
+            inv.calls(),
+            vec![
+                words(&["migrate", "--to-dolt", "--yes"]),
+                words(&["init", "--prefix", "project"]),
+            ]
+        );
+        assert!(ok.exists(".beads/beads.db.backup"));
+
+        let failed = TempProject::sqlite("migrate_empty_fail")?;
+        let (be, _inv) = recording_bd(
+            bd_invoker(BD_1_0_4)
+                .reply_raw(raw_fail(" m-err \n"))
+                .reply_raw(raw_fail(" i-err \n")),
+        );
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, failed.cwd()).err().as_deref(),
+            Some("Migration failed (empty project, bd init also failed): i-err. Original error: m-err")
+        );
+
+        let spawn = TempProject::sqlite("migrate_empty_spawn")?;
+        let (be, _inv) = recording_bd(
+            bd_invoker(BD_1_0_4).reply_raw(raw_fail("m-err")).reply_raw(spawn_err("init")),
+        );
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, spawn.cwd()).err().as_deref(),
+            Some("Failed to run bd init: nope")
+        );
+        Ok(())
+    }
+
+    /// Two issues with labels and a relation. No `beads.db`, so no `.db.backup`
+    /// exists and the `sqlite3` comment step (a direct, non-beads spawn) never runs.
+    const FALLBACK_JSONL: &str = concat!(
+        "{\"id\":\"proj-1\",\"status\":\"open\",\"labels\":[\"a\",\"b c\"],",
+        "\"dependencies\":[{\"issue_id\":\"proj-1\",\"depends_on_id\":\"proj-2\",\"type\":\"related\"}]}\n",
+        "{\"id\":\"proj-2\",\"status\":\"open\"}\n",
+    );
+
+    fn fallback_project(tag: &str) -> Result<TempProject, String> {
+        let project = TempProject::new(tag)?;
+        project.write(".beads/issues.jsonl", FALLBACK_JSONL)?;
+        Ok(project)
+    }
+
+    #[test]
+    fn migrate_fallback_sends_exact_restore_argv() -> Result<(), String> {
+        let project = fallback_project("migrate_fallback")?;
+        let (be, inv) = recording_bd(
+            bd_invoker(BD_1_0_4)
+                .reply_raw(raw_fail("no such table"))
+                .reply_raw(raw_ok(""))
+                .reply_raw(raw_ok(" Imported 2 issues \n")),
+        );
+        let r = bd_migrate_to_dolt_with(&be, project.cwd())?;
+        assert_eq!(
+            r.message,
+            "Migration to Dolt completed (via init+import). Imported 2 issues Labels: 1. Deps: 1. Comments: 0."
+        );
+        let clean = project.beads_arg("_migrate_clean.jsonl");
+        assert_eq!(
+            inv.calls(),
+            vec![
+                words(&["migrate", "--to-dolt", "--yes"]),
+                words(&["init", "--prefix", "proj"]),
+                words(&["import", "-i", &clean]),
+                words(&["update", "proj-1", "--set-labels", "a", "--set-labels", "b c"]),
+                words(&["dep", "add", "proj-1", "proj-2", "--type", "related"]),
+            ]
+        );
+        assert!(!project.exists(".beads/_migrate_clean.jsonl"));
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_fallback_error_texts() -> Result<(), String> {
+        let init_fail = fallback_project("migrate_init_fail")?;
+        let (be, _inv) = recording_bd(
+            bd_invoker(BD_1_0_4).reply_raw(raw_fail("m")).reply_raw(raw_fail(" bad prefix \n")),
+        );
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, init_fail.cwd()).err().as_deref(),
+            Some("bd init failed: bad prefix")
+        );
+
+        let import_fail = fallback_project("migrate_import_fail")?;
+        let (be, inv) = recording_bd(
+            bd_invoker(BD_1_0_4)
+                .reply_raw(raw_fail("m"))
+                .reply_raw(raw_ok(""))
+                .reply_raw(raw_fail(" bad row \n")),
+        );
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, import_fail.cwd()).err().as_deref(),
+            Some("Import failed: bad row")
+        );
+        assert_eq!(inv.calls().len(), 3);
+
+        let import_spawn = fallback_project("migrate_import_spawn")?;
+        let (be, _inv) = recording_bd(
+            bd_invoker(BD_1_0_4)
+                .reply_raw(raw_fail("m"))
+                .reply_raw(raw_ok(""))
+                .reply_raw(spawn_err("import")),
+        );
+        assert_eq!(
+            bd_migrate_to_dolt_with(&be, import_spawn.cwd()).err().as_deref(),
+            Some("Failed to run bd import: nope")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn restore_comments_sends_exact_argv() -> Result<(), String> {
+        let project = TempProject::new("restore_comments")?;
+        let (be, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        let cli = cli_of(&be, "test").map_err(|e| e.to_string())?;
+        let rows = r#"[
+            {"issue_id": "old-1", "author": "ann", "text": "line one\nline two"},
+            {"issue_id": "proj-2", "text": "no author"},
+            {"issue_id": "proj-3", "author": "bob", "text": ""},
+            {"author": "carl", "text": "no issue"}
+        ]"#;
+        let counts = HashMap::from([("proj".to_string(), 1), ("old".to_string(), 1)]);
+        let project_ref = ProjectRef::local(project.cwd());
+        let restored =
+            restore_comments(cli, &project_ref, &project.beads_dir(), rows, "proj", &counts);
+        assert_eq!(restored, 2);
+        let file = project.beads_arg("_migrate_comment.txt");
+        assert_eq!(
+            inv.calls(),
+            vec![
+                words(&["comments", "add", "proj-1", "-f", &file, "--author", "ann"]),
+                words(&["comments", "add", "proj-2", "-f", &file, "--author", "unknown"]),
+            ]
+        );
+        assert!(!project.exists(".beads/_migrate_comment.txt"));
+        assert_eq!(restore_comments(cli, &project_ref, &project.beads_dir(), "not json", "proj", &counts), 0);
+        Ok(())
+    }
 }

@@ -1,4 +1,4 @@
-use crate::cli::{detect_cli_client, parse_bd_version};
+use btit_beads::detect::{detect_cli_client, parse_bd_version};
 use btit_cli::command::new_command;
 use crate::config::get_bd_version;
 use btit_types::CliClient;
@@ -283,14 +283,12 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
 
     // Determine the correct GitHub repo based on client type (bd vs br)
     let client_type = detect_cli_client(&version_str);
-    let api_url = match client_type {
-        CliClient::Br => "https://api.github.com/repos/Dicklesworthstone/beads_rust/releases/latest",
-        _ => "https://api.github.com/repos/steveyegge/beads/releases/latest",
+    let source = match client_type {
+        CliClient::Br => btit_br::BR_RELEASE_SOURCE,
+        _ => btit_bd::BD_RELEASE_SOURCE,
     };
-    let releases_url = match client_type {
-        CliClient::Br => "https://github.com/Dicklesworthstone/beads_rust/releases",
-        _ => "https://github.com/steveyegge/beads/releases",
-    };
+    let api_url = source.api_url;
+    let releases_url = source.releases_url;
 
     let client = github_client()?;
 

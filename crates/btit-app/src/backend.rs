@@ -55,29 +55,6 @@ impl Slot {
         }
     }
 
-    /// Replaces the slot's content with a backend built from `probe`.
-    fn install_with(&self, binary: &str, probe: Option<CliProbe>) {
-        let backend = build_backend_with(binary, probe);
-        *self.inner.write().unwrap_or_else(PoisonError::into_inner) = Some(backend);
-    }
-
-    /// Replaces the slot's content only while it still holds `expected_binary`.
-    ///
-    /// The check and the swap happen under one write lock, so a `replace` that
-    /// landed after `probe` was taken for `expected_binary` is never overwritten by a
-    /// backend built for the old binary. Returns whether the swap happened.
-    fn install_with_if(&self, expected_binary: &str, probe: Option<CliProbe>) -> bool {
-        let mut slot = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-        let same = slot
-            .as_ref()
-            .and_then(|b| b.cli().map(|c| c.binary() == expected_binary))
-            .unwrap_or(false);
-        if same {
-            *slot = Some(build_backend_with(expected_binary, probe));
-        }
-        same
-    }
-
     /// The installed backend, or a backend for [`DEFAULT_BINARY`] when none is installed yet.
     fn current(&self) -> Arc<dyn BeadsBackend> {
         if let Some(b) = self
@@ -164,6 +141,29 @@ impl Slot {
             searched_paths: extended_path_entries(),
             warnings,
         }
+    }
+
+    /// Replaces the slot's content with a backend built from `probe`.
+    fn install_with(&self, binary: &str, probe: Option<CliProbe>) {
+        let backend = build_backend_with(binary, probe);
+        *self.inner.write().unwrap_or_else(PoisonError::into_inner) = Some(backend);
+    }
+
+    /// Replaces the slot's content only while it still holds `expected_binary`.
+    ///
+    /// The check and the swap happen under one write lock, so a `replace` that
+    /// landed after `probe` was taken for `expected_binary` is never overwritten by a
+    /// backend built for the old binary. Returns whether the swap happened.
+    fn install_with_if(&self, expected_binary: &str, probe: Option<CliProbe>) -> bool {
+        let mut slot = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let same = slot
+            .as_ref()
+            .and_then(|b| b.cli().map(|c| c.binary() == expected_binary))
+            .unwrap_or(false);
+        if same {
+            *slot = Some(build_backend_with(expected_binary, probe));
+        }
+        same
     }
 }
 
