@@ -112,8 +112,9 @@ pub(crate) fn get_platform_string() -> &'static str {
     }
 }
 
-pub(crate) fn find_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
-    let suffix = if cfg!(target_os = "macos") {
+/// The release-asset filename suffix for the platform this binary was built for.
+pub(crate) fn platform_asset_suffix() -> &'static str {
+    if cfg!(target_os = "macos") {
         if cfg!(target_arch = "aarch64") {
             "_macOS-ARM64.dmg"
         } else {
@@ -123,9 +124,19 @@ pub(crate) fn find_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset
         "_Windows.msi"
     } else {
         "_Linux-amd64.AppImage"
-    };
+    }
+}
 
+/// Pure core of [`find_platform_asset`]: finds the first asset whose name ends with `suffix`.
+pub(crate) fn find_platform_asset_for<'a>(
+    assets: &'a [GitHubAsset],
+    suffix: &str,
+) -> Option<&'a GitHubAsset> {
     assets.iter().find(|a| a.name.ends_with(suffix))
+}
+
+pub(crate) fn find_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+    find_platform_asset_for(assets, platform_asset_suffix())
 }
 
 pub(crate) fn compare_versions(current: &str, latest: &str) -> bool {
@@ -134,7 +145,11 @@ pub(crate) fn compare_versions(current: &str, latest: &str) -> bool {
     let latest = latest.trim_start_matches('v');
 
     let parse_version = |v: &str| -> Vec<u32> {
-        v.split('.')
+        // Strip everything from the first '-' (pre-release suffix, e.g. "-rc.1")
+        // before splitting on '.', so "1.2.0-rc.1" parses as [1, 2, 0] instead of
+        // losing the "0" segment to a failed per-segment u32 parse.
+        let core = v.split('-').next().unwrap_or(v);
+        core.split('.')
             .filter_map(|s| s.parse::<u32>().ok())
             .collect()
     };
@@ -420,29 +435,25 @@ mod tests {
     }
 
     #[test]
-    fn find_platform_asset_matches_macos_arm64() {
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
+    fn find_platform_asset_for_matches_each_suffix() {
+        for suffix in ["_macOS-ARM64.dmg", "_macOS-Intel.dmg", "_Windows.msi", "_Linux-amd64.AppImage"] {
+            let name = format!("App{}", suffix);
             let assets = vec![GitHubAsset {
-                name: "App_macOS-ARM64.dmg".to_string(),
+                name: name.clone(),
                 browser_download_url: "https://example.com/download".to_string(),
             }];
-            let result = find_platform_asset(&assets);
-            assert!(result.is_some());
-            assert_eq!(result.unwrap().name, "App_macOS-ARM64.dmg");
+            let result = find_platform_asset_for(&assets, suffix);
+            assert_eq!(result.map(|a| a.name.as_str()), Some(name.as_str()));
         }
     }
 
     #[test]
-    fn find_platform_asset_returns_none_for_no_match() {
+    fn find_platform_asset_for_returns_none_without_match() {
         let assets = vec![GitHubAsset {
             name: "App_Unknown.dmg".to_string(),
             browser_download_url: "https://example.com/download".to_string(),
         }];
-        let result = find_platform_asset(&assets);
-        // On macOS it won't match because suffix doesn't match
-        #[cfg(target_os = "macos")]
-        assert!(result.is_none());
+        assert!(find_platform_asset_for(&assets, "_macOS-ARM64.dmg").is_none());
     }
 
     #[test]
@@ -480,12 +491,16 @@ mod tests {
     }
 
     #[test]
-    fn compare_versions_with_prerelease_parses_numeric_parts_only() {
-        // parse_version() uses filter_map(parse::<u32>) so "1.0.0-alpha" -> [1, 0, 0]
-        // and "1.0.0-beta" -> [1, 0, 0], so they compare equal
+    fn compare_versions_ignores_prerelease_suffix() {
+        // parse_version() strips everything from the first '-' before splitting,
+        // so "1.0.0-alpha" and "1.0.0-beta" both parse as [1, 0, 0] and compare equal.
         assert!(compare_versions("1.0.0-alpha", "1.0.0-beta") == false);
-        // But "1.0.0-alpha" < "1.1.0-beta"
         assert!(compare_versions("1.0.0-alpha", "1.1.0-beta") == true);
+        // An RC still compares equal to its own final release: it is not offered
+        // its own final release as an update (residual behaviour, recorded in
+        // Implementation Notes as the direction this review chose).
+        assert!(compare_versions("1.2.0-rc.1", "1.2.0") == false);
+        assert!(compare_versions("1.2.0-rc.1", "1.2.1") == true);
     }
 
 
