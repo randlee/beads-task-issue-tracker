@@ -92,7 +92,7 @@ pub enum ProbeState {
 
 /// Signature of the function that runs `<binary> --version` and returns its raw
 /// output, used by [`CliRunner`] and its `test-support` seam
-/// [`with_version_probe`](CliRunner::with_version_probe).
+/// `CliRunner::with_version_probe` (only available with the `test-support` feature).
 pub type VersionProbeFn = dyn Fn(&str) -> Result<CliOutput, BeadsError> + Send + Sync;
 
 /// One configured binary. Owned by `BdCli`/`BrCli`; the app holds one at a time.

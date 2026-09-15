@@ -32,6 +32,22 @@ fn beads_tmp(row: usize) -> PathBuf {
         .join(".beads")
 }
 
+/// Removes the temp project directory (the parent of the `.beads` path it wraps) on
+/// drop, so a panicking `assert_eq!` mid-row still cleans up instead of leaking the
+/// directory. `btit-bd` cannot depend on `btit-app`'s `TempProject`, so this is a
+/// small local equivalent.
+struct TempBeadsDir {
+    beads: PathBuf,
+}
+
+impl Drop for TempBeadsDir {
+    fn drop(&mut self) {
+        if let Some(project) = self.beads.parent() {
+            let _ = std::fs::remove_dir_all(project);
+        }
+    }
+}
+
 struct Row {
     metadata: Option<&'static str>,
     /// Maintainer's vault layout: a stale `dolt-server.port` and an `embeddeddolt/iron/` dir.
@@ -113,6 +129,9 @@ fn project_dolt_mode_follows_bd_get_dolt_mode() {
 
     for (index, row) in rows.iter().enumerate() {
         let beads = beads_tmp(index);
+        let _guard = TempBeadsDir {
+            beads: beads.clone(),
+        };
         std::fs::create_dir_all(&beads).unwrap_or_else(|e| panic!("create_dir_all failed: {e}"));
         if let Some(text) = row.metadata {
             std::fs::write(beads.join("metadata.json"), text)
@@ -132,10 +151,6 @@ fn project_dolt_mode_follows_bd_get_dolt_mode() {
             row.metadata,
             row.vault_extras
         );
-
-        if let Some(project) = beads.parent() {
-            let _ = std::fs::remove_dir_all(project);
-        }
     }
 }
 
@@ -145,6 +160,9 @@ fn project_dolt_mode_follows_bd_get_dolt_mode() {
 #[test]
 fn vault_layout_is_dolt_and_embedded() {
     let beads = beads_tmp(usize::MAX);
+    let _guard = TempBeadsDir {
+        beads: beads.clone(),
+    };
     std::fs::create_dir_all(beads.join("embeddeddolt").join("iron"))
         .unwrap_or_else(|e| panic!("create_dir_all failed: {e}"));
     std::fs::write(
@@ -160,8 +178,4 @@ fn vault_layout_is_dolt_and_embedded() {
         &beads
     ));
     assert_eq!(project_dolt_mode(&beads), Some(DoltMode::Embedded));
-
-    if let Some(project) = beads.parent() {
-        let _ = std::fs::remove_dir_all(project);
-    }
 }

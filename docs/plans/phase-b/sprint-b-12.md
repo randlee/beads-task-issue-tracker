@@ -197,4 +197,3 @@ No panic site changes any `Result<_, String>` shape or error text; every rewrite
 
 - RSH-001/RSH-002: the six `LAST_SYNC_TIME` / `LAST_KNOWN_MTIME` poison recoveries go through `logging::lock_recovering`, which logs at error level on the poisoned branch (plain `log::error!`, not gated by `LOGGING_ENABLED`) and calls `Mutex::clear_poison()`, so one record is written per poisoning. Test: `lock_recovering_returns_value_and_clears_poison`. Log-only, no result change.
 - ATM-QA-001/002: `issue_short_id`, `resolve_duplicate_filename` (Exact Targets `:310`, `:339`) and `has_url_scheme` use `.get(..)` instead of raw `&str` range slicing. Results are unchanged: `-`, `.` and `:` are one-byte ASCII, so the old indices were always char boundaries. Clippy's `indexing_slicing` does not cover `&str` ranges, which is why the workspace clippy gate was already green.
-

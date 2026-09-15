@@ -11,7 +11,19 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
-// Sync cooldown: skip redundant syncs within 10 seconds
+/// The instant [`sync_bd_database`] last completed a sync, used to skip redundant
+/// syncs within [`SYNC_COOLDOWN_SECS`].
+///
+/// Process-global rather than app state: `sync_bd_database` and the `bd_sync` Tauri
+/// command are free functions with no app-state parameter for it, matching every
+/// other backend/lock slot in this crate (see `backend.rs`'s `Slot`). It is
+/// deliberately global, not per-project — unlike `polling::LAST_KNOWN_MTIME`, the
+/// cooldown is not keyed by working directory, so switching projects shares the same
+/// timer (tracked in #9). `Mutex<Option<Instant>>` is the right primitive because
+/// the whole cycle is read-check-then-write on a single value. A poisoned lock (a
+/// panic while holding it) is recovered rather than propagated, via
+/// [`crate::logging::lock_recovering`], since losing the cached instant only costs
+/// one extra sync, not correctness.
 pub(crate) static LAST_SYNC_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 pub(crate) const SYNC_COOLDOWN_SECS: u64 = 10;
 
