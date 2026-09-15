@@ -10,7 +10,17 @@ use std::fs;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
-// Filesystem mtime tracking for change detection (per-project)
+/// The last-seen `.beads` mtime for each project, keyed by working directory.
+///
+/// Process-global rather than app state: the Tauri commands in this module
+/// (`bd_poll_data`, `bd_check_changed`, `bd_reset_mtime`) are free functions with no
+/// app-state parameter for it, matching every other backend/lock slot in this crate
+/// (see `backend.rs`'s `Slot`). `Mutex<HashMap<String, SystemTime>>` is the right
+/// primitive because entries are per-project (the frontend can poll several projects
+/// in one process) and reads/writes are brief map lookups, not long-held sections.
+/// A poisoned lock (a panic while holding it) is recovered rather than propagated,
+/// via [`crate::logging::lock_recovering`], since losing the cached mtimes only
+/// costs one extra "changed" report, not correctness.
 pub(crate) static LAST_KNOWN_MTIME: LazyLock<Mutex<HashMap<String, std::time::SystemTime>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
