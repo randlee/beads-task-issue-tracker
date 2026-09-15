@@ -71,16 +71,57 @@ pub trait CliInvoker: Send + Sync {
     fn run_raw(&self, project: &ProjectRef, args: &[&str]) -> Result<CliOutput, BeadsError>;
 }
 
+/// The cached state of a [`CliRunner`]'s `--version` probe.
+///
+/// `Unprobed` is the initial state; [`CliInvoker::client_info`] transitions it to
+/// exactly one of `Failed` or `Ok` on its first call, and every later call returns
+/// that cached state without spawning again. `Failed` covers a spawn failure, a
+/// non-zero exit, or a successful exit whose output could not be parsed into a
+/// version — all three are indistinguishable to callers, which see `None` from
+/// [`client_info`](CliInvoker::client_info) either way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeState {
+    /// No `--version` probe has run yet.
+    Unprobed,
+    /// The probe ran and did not produce a usable version; not retried until the
+    /// runner is replaced (e.g. a binary change or a compatibility recheck).
+    Failed,
+    /// The probe ran and produced this version information.
+    Ok(CliProbe),
+}
+
+/// Signature of the function that runs `<binary> --version` and returns its raw
+/// output, used by [`CliRunner`] and its `test-support` seam
+/// [`with_version_probe`](CliRunner::with_version_probe).
+pub type VersionProbeFn = dyn Fn(&str) -> Result<CliOutput, BeadsError> + Send + Sync;
+
 /// One configured binary. Owned by `BdCli`/`BrCli`; the app holds one at a time.
 ///
 /// The version probe runs lazily on the first [`client_info`](CliInvoker::client_info)
-/// call and only a parsed success is cached, so a failing binary is re-probed on
-/// every call until it answers.
-#[derive(Debug)]
+/// call. Both a parsed success and a failure (spawn error, non-zero exit or
+/// unparsable version) are cached: a failing binary is probed at most once per
+/// runner, not once per call. See [`ProbeState`].
 pub struct CliRunner {
     binary: String,
     locks: Arc<ProjectLocks>,
-    probe: Mutex<Option<CliProbe>>,
+    probe: Mutex<ProbeState>,
+    /// Runs `<binary> --version` and returns its raw output. Production runners use
+    /// [`crate::run::probe_version_output`]; the `test-support` seam
+    /// [`with_version_probe`](Self::with_version_probe) replaces it to count calls
+    /// without spawning a process.
+    version_probe: Box<VersionProbeFn>,
+}
+
+// `version_probe` is a `Box<dyn Fn>`, which is not `Debug`; this manual impl prints
+// only `binary` and the cached probe state, matching `#[derive(Debug)]`'s shape for
+// the fields that are meaningful to print.
+impl std::fmt::Debug for CliRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CliRunner")
+            .field("binary", &self.binary)
+            .field("probe", &*self.cached())
+            .finish_non_exhaustive()
+    }
 }
 
 impl CliRunner {
@@ -90,7 +131,8 @@ impl CliRunner {
         Self {
             binary: binary.into(),
             locks,
-            probe: Mutex::new(None),
+            probe: Mutex::new(ProbeState::Unprobed),
+            version_probe: Box::new(crate::run::probe_version_output),
         }
     }
 
@@ -105,11 +147,31 @@ impl CliRunner {
         Self {
             binary: binary.into(),
             locks,
-            probe: Mutex::new(Some(probe)),
+            probe: Mutex::new(ProbeState::Ok(probe)),
+            version_probe: Box::new(crate::run::probe_version_output),
         }
     }
 
-    fn cached(&self) -> MutexGuard<'_, Option<CliProbe>> {
+    /// A runner for `binary` whose `--version` probe is replaced by `f`.
+    ///
+    /// Test-only seam: lets tests count probe calls (e.g. with a captured
+    /// `AtomicUsize`) and simulate spawn failures without touching a real process.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn with_version_probe(
+        binary: impl Into<String>,
+        locks: Arc<ProjectLocks>,
+        f: Box<VersionProbeFn>,
+    ) -> Self {
+        Self {
+            binary: binary.into(),
+            locks,
+            probe: Mutex::new(ProbeState::Unprobed),
+            version_probe: f,
+        }
+    }
+
+    fn cached(&self) -> MutexGuard<'_, ProbeState> {
         self.probe.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -126,29 +188,35 @@ impl CliInvoker for CliRunner {
     fn client_info(&self) -> Option<CliProbe> {
         // The guard is held across the `--version` spawn on purpose, as in
         // cli.rs:326-338: concurrent callers wait for one probe instead of each
-        // spawning their own. Only parsed successes are cached, so a failed probe
-        // is retried by the next caller.
+        // spawning their own. Both a parsed success and a failure are cached, so a
+        // failing binary is probed at most once per runner (B13).
         let mut cached = self.cached();
-        if let Some(p) = cached.as_ref() {
-            return Some(p.clone());
+        match &*cached {
+            ProbeState::Ok(p) => return Some(p.clone()),
+            ProbeState::Failed => return None,
+            ProbeState::Unprobed => {}
         }
-        let output = crate::run::probe_version_output(&self.binary).ok()?; // spawn failure → None
+        let Ok(output) = (self.version_probe)(&self.binary) else {
+            *cached = ProbeState::Failed;
+            return None;
+        };
         if !output.success {
             log_warn!("[cli_detect] Failed to get version from {}", self.binary);
+            *cached = ProbeState::Failed;
             return None;
         }
         let probe = parse_cli_probe(&output.stdout);
-        // cache parsed successes only (cli.rs:351-360)
         if let Some(v) = probe.version {
             log_info!(
                 "[cli_detect] Detected {} client v{}",
                 cli_client_name(probe.client),
                 v
             );
-            *cached = Some(probe.clone());
+            *cached = ProbeState::Ok(probe.clone());
             Some(probe)
         } else {
             log_warn!("[cli_detect] Could not parse version from: {}", probe.raw);
+            *cached = ProbeState::Failed;
             None
         }
     }
@@ -204,10 +272,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_binary_has_no_client_info_and_is_not_cached() {
+    fn missing_binary_caches_failed_and_reports_unknown() {
         let runner = CliRunner::new(MISSING, Arc::new(ProjectLocks::new()));
         assert_eq!(runner.client_info(), None);
-        assert!(runner.cached().is_none());
+        assert_eq!(*runner.cached(), ProbeState::Failed);
         assert_eq!(runner.client(), CliClient::Unknown);
         assert_eq!(runner.capabilities(), BackendCapabilities::default());
     }
@@ -236,5 +304,89 @@ mod tests {
         let runner = CliRunner::new("bd", Arc::new(ProjectLocks::new()));
         let inv: &dyn CliInvoker = &runner;
         assert_eq!(inv.binary(), "bd");
+    }
+
+    // ---- B13: failed-probe caching, via the `with_version_probe` test seam --------
+
+    #[cfg(feature = "test-support")]
+    mod probe_cache {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// A `version_probe` closure that counts its calls and returns `make_output()`
+        /// on each one. A factory closure is used, rather than a stored `Result`,
+        /// because `BeadsError` (via its `std::io::Error` spawn source) is not `Clone`.
+        fn counting_probe(
+            make_output: impl Fn() -> Result<CliOutput, BeadsError> + Send + Sync + 'static,
+        ) -> (Box<VersionProbeFn>, Arc<AtomicUsize>) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let counted = Arc::clone(&calls);
+            let f: Box<VersionProbeFn> = Box::new(move |_binary: &str| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                make_output()
+            });
+            (f, calls)
+        }
+
+        fn spawn_error(binary: &str) -> BeadsError {
+            BeadsError::Spawn {
+                binary: binary.to_string(),
+                operation: None,
+                source: std::io::Error::other("no such binary"),
+            }
+        }
+
+        #[test]
+        fn probe_failure_is_cached_and_reports_unknown() {
+            let (f, calls) = counting_probe(|| Err(spawn_error(MISSING)));
+            let runner = CliRunner::with_version_probe(MISSING, Arc::new(ProjectLocks::new()), f);
+
+            assert_eq!(runner.capabilities(), BackendCapabilities::default());
+            assert_eq!(runner.capabilities(), BackendCapabilities::default());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(runner.client(), CliClient::Unknown);
+            assert_eq!(runner.version(), None);
+        }
+
+        #[test]
+        fn fresh_runner_probes_again() {
+            let (f1, calls1) = counting_probe(|| Err(spawn_error(MISSING)));
+            let locks = Arc::new(ProjectLocks::new());
+            let runner1 = CliRunner::with_version_probe(MISSING, Arc::clone(&locks), f1);
+            assert_eq!(runner1.client_info(), None);
+            assert_eq!(calls1.load(Ordering::SeqCst), 1);
+
+            let (f2, calls2) = counting_probe(|| Err(spawn_error(MISSING)));
+            let runner2 = CliRunner::with_version_probe(MISSING, locks, f2);
+            assert_eq!(runner2.client_info(), None);
+            assert_eq!(calls2.load(Ordering::SeqCst), 1);
+        }
+
+        #[test]
+        fn parsed_probe_is_cached_once() {
+            let (f, calls) = counting_probe(|| {
+                Ok(CliOutput {
+                    status: Some(0),
+                    success: true,
+                    stdout: "bd version 0.49.6".to_string(),
+                    stderr: String::new(),
+                })
+            });
+            let runner = CliRunner::with_version_probe("bd", Arc::new(ProjectLocks::new()), f);
+
+            assert_eq!(
+                runner.capabilities(),
+                capabilities_for(CliClient::Bd, Some((0, 49, 6).into()))
+            );
+            assert_eq!(
+                runner.capabilities(),
+                capabilities_for(CliClient::Bd, Some((0, 49, 6).into()))
+            );
+            assert_eq!(
+                runner.capabilities(),
+                capabilities_for(CliClient::Bd, Some((0, 49, 6).into()))
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }
     }
 }

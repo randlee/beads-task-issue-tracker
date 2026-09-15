@@ -2,8 +2,9 @@
 //!
 //! `btit-bd` (b-5), `btit-br` (b-6) and the app (b-7, b-8) build against this contract.
 //! It fails to compile if `CliInvoker` gains or changes a method, or if a signature of
-//! `CliRunner`, `ProjectLocks`, `run`, `probe`, `path`, `command`, `ops` or (with
-//! feature `test-support`) `testing::RecordingInvoker` changes.
+//! `CliRunner`, `ProjectLocks`, `run`, `probe`, `path`, `command`, `ops`, `ProbeState`
+//! or (with feature `test-support`) `testing::RecordingInvoker` /
+//! `CliRunner::with_version_probe` changes.
 
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ use btit_cli::run::{
     json_argv, json_invocation, probe_version_output, resolve_working_dir, run_json, run_raw,
     spawn_json,
 };
-use btit_cli::{CliInvoker, CliRunner, ProjectLocks};
+use btit_cli::{CliInvoker, CliRunner, ProbeState, ProjectLocks};
 use btit_types::{
     BackendCapabilities, BdRawIssue, CliClient, CliOutput, CliProbe, CliVersion, CreatePayload,
     ListQuery, ProjectRef, RelationType, UpdatePayload,
@@ -149,6 +150,24 @@ fn runner_constructors() {
     assert_eq!(seeded.binary(), "br");
 }
 
+/// Pins `ProbeState`'s three variants (B13).
+#[test]
+fn probe_state_variants() {
+    let probe = CliProbe {
+        client: CliClient::Bd,
+        version: Some((0, 49, 6).into()),
+        raw: "bd version 0.49.6".to_string(),
+    };
+    let states: [ProbeState; 3] = [
+        ProbeState::Unprobed,
+        ProbeState::Failed,
+        ProbeState::Ok(probe),
+    ];
+    assert_eq!(states.len(), 3);
+    assert_eq!(states[0], ProbeState::Unprobed);
+    assert_eq!(states[1], ProbeState::Failed);
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn recording_invoker_signatures() {
@@ -165,4 +184,23 @@ fn recording_invoker_signatures() {
     let _: &dyn CliInvoker = &inv;
     assert_send_sync::<RecordingInvoker>();
     assert_eq!(inv.calls(), Vec::<Vec<String>>::new());
+}
+
+/// Pins `CliRunner::with_version_probe`'s signature (B13 test-support seam).
+#[cfg(feature = "test-support")]
+#[test]
+fn with_version_probe_signature() {
+    use btit_cli::runner::VersionProbeFn;
+
+    let locks = Arc::new(ProjectLocks::new());
+    let f: Box<VersionProbeFn> = Box::new(|_binary: &str| {
+        Ok(CliOutput {
+            status: Some(0),
+            success: true,
+            stdout: "bd version 0.49.6".to_string(),
+            stderr: String::new(),
+        })
+    });
+    let runner: CliRunner = CliRunner::with_version_probe("bd", locks, f);
+    assert_eq!(runner.binary(), "bd");
 }

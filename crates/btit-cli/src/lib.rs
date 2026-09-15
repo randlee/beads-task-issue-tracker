@@ -37,4 +37,4 @@ pub mod testing;
 #[doc(inline)]
 pub use locks::ProjectLocks;
 #[doc(inline)]
-pub use runner::{CliInvoker, CliRunner};
+pub use runner::{CliInvoker, CliRunner, ProbeState};
