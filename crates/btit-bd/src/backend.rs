@@ -68,23 +68,18 @@ impl BdCli {
     pub fn with_invoker(inv: Box<dyn CliInvoker>) -> Self {
         Self { inv }
     }
-
-    /// `(client, major, minor, patch)` from the invoker's cached probe: the signature
-    /// [`crate::dolt::project_uses_dolt_for`] keeps so its tests move unchanged.
-    fn info_tuple(&self) -> Option<(CliClient, u32, u32, u32)> {
-        self.inv
-            .client_info()
-            .and_then(|p| p.version.map(|v| (p.client, v.major, v.minor, v.patch)))
-    }
 }
 
 impl BeadsBackend for BdCli {
     fn project_uses_dolt(&self, project: &ProjectRef) -> bool {
-        match resolve_working_dir(project, self.inv.client()) {
-            Ok(wd) => crate::dolt::project_uses_dolt_for(
-                self.info_tuple(),
-                &Path::new(&wd).join(".beads"),
-            ),
+        // One `client_info()` read feeds both the client and the version tuple: an
+        // unparsed or missing binary is re-probed on every read, and this runs on every
+        // poll tick (QA-1 RSH-001, b-7).
+        let info = self.inv.client_info();
+        let client = info.as_ref().map_or(CliClient::Unknown, |p| p.client);
+        let tuple = info.and_then(|p| p.version.map(|v| (p.client, v.major, v.minor, v.patch)));
+        match resolve_working_dir(project, client) {
+            Ok(wd) => crate::dolt::project_uses_dolt_for(tuple, &Path::new(&wd).join(".beads")),
             Err(_) => false,
         }
     }
