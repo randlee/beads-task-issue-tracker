@@ -2,9 +2,12 @@
 
 use btit_types::{BdRawIssue, ChildIssue, Comment, Issue, ParentIssue, Relation};
 
+/// The dependency type for a structural parent-child link (issue #69).
+const PARENT_CHILD: &str = "parent-child";
+
 /// Dependency types that carry structure (parent-child) or block work (bd's
 /// `conditional-blocks` and `waits-for` behave like `blocks`, B13).
-const STRUCTURAL_TYPES: [&str; 4] = ["blocks", "conditional-blocks", "waits-for", "parent-child"];
+const STRUCTURAL_TYPES: [&str; 4] = ["blocks", "conditional-blocks", "waits-for", PARENT_CHILD];
 
 /// Dependency types that block work and feed `blocked_by`/`blocks` (B13).
 const BLOCKING_TYPES: [&str; 3] = ["blocks", "conditional-blocks", "waits-for"];
@@ -78,7 +81,7 @@ pub fn transform_issue(raw: BdRawIssue) -> Issue {
         .as_ref()
         .map(|deps| {
             deps.iter()
-                .filter(|d| d.dependency_type.as_deref() == Some("parent-child") && d.id.is_some())
+                .filter(|d| d.dependency_type.as_deref() == Some(PARENT_CHILD) && d.id.is_some())
                 .map(|c| ChildIssue {
                     id: c.id.clone().unwrap_or_default(),
                     title: c.title.clone().unwrap_or_default(),

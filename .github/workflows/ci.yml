@@ -109,12 +109,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br
+        run: cargo fmt --check --all
 
       - name: Clippy
-        run: |
-          cargo clippy -p btit-types -p btit-beads --all-targets -- -D warnings
-          cargo clippy -p btit-cli -p btit-bd -p btit-br --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Rustdoc missing-docs
         run: |
