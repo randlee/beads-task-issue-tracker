@@ -1,7 +1,7 @@
 ---
 id: b-12
 title: App crate hardening — workspace lints, no panics, fmt/clippy clean, A2; phase docs
-status: planned
+status: in_progress
 branch: feature/sprint-b-12-app-hardening
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-12-app-hardening
 target: integrate/phase-b
@@ -139,3 +139,56 @@ pub(crate) fn base64_encode(data: &[u8]) -> String {
 - `pnpm tauri:build` (manual: the app launches, lists issues, and writes the JSONL log)
 - command-signature gate (1) and frontend invoke-subset gate (2) from `plan-phase-b.md` "Command contract gates"
 - `git diff --check`
+
+## Implementation Notes
+
+### Panic-site inventory (before → after)
+
+All in `crates/btit-app/src/`, deny-set clean (`cargo clippy -p beads-issue-tracker --all-targets -- -D warnings` finds none) and `! grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-app/src` finds nothing.
+
+| Site | Before | After |
+| --- | --- | --- |
+| `migration.rs` `LAST_SYNC_TIME.lock()` (×3) | `.unwrap()` | `.unwrap_or_else(std::sync::PoisonError::into_inner)` |
+| `polling.rs` `LAST_KNOWN_MTIME.lock()` (×3) | `.unwrap()` | `.unwrap_or_else(std::sync::PoisonError::into_inner)` |
+| `issue_commands.rs` `bd_count` by-type/by-priority counters | `*by_type.get_mut(&k).unwrap() += 1` | `if let Some(count) = by_type.get_mut(&k) { *count += 1; }` (same by-type/by-priority semantics: a key not in the fixed five-entry map is silently not counted, as today) |
+| `issue_commands.rs` `last_updated` comparison | `last_updated.is_none() \|\| issue.updated_at > *last_updated.as_ref().unwrap()` | `last_updated.as_ref().is_none_or(\|last\| issue.updated_at > *last)` |
+| `attachments.rs` `base64_encode` | `buf[..chunk.len()]` slice write + `ALPHABET[n as usize & 0x3F]` indexing | the sprint doc's exact `chunks`/`.get(..).unwrap_or(0)`/`ALPHABET.get(..).copied().unwrap_or(b'A')` form; all five existing `base64_encode_*` tests pass unchanged (same output for every input reached today) |
+| `attachments.rs` `sanitize_filename` | `filename[..pos]` / `filename[pos+1..]` after `rfind('.')` | `filename.get(..pos).unwrap_or(filename)` / `filename.get(pos+1..).unwrap_or("")` (`'.'` is ASCII, so `pos`/`pos+1` are always char boundaries — behaviourally identical, no panic possible either way) |
+| `migration.rs` `reprefix_id` | `&id[..last_dash]` / `&id[last_dash..]` | `id.get(..last_dash)` / `id.get(last_dash..)`, guarded by `if let (Some(_), Some(_))` |
+| `migration.rs` `bd_migrate_to_dolt_with` prefix detection (×2 sites: prefix-counting scan, per-issue re-prefix) | `&id[..last_dash]` / `&id[last_dash+1..]` / `&id[last_dash..]` / `&val[old_prefix.len()..]` | `.get(..)`/`.get(..)` pairs, `unwrap_or` fallbacks for the dependency-value slice |
+| `migration.rs` `ensure_refs_migrated_v3` JSONL rewrite | `v["external_ref"] = ...` (`serde_json::Value` index-assign) | `if let Some(obj) = v.as_object_mut() { obj.insert(...) }` |
+| `migration.rs` `bd_migrate_to_dolt_with` re-prefix / truncate steps | `v.as_object_mut().unwrap()` (×2), `v["external_ref"].as_str().unwrap()` | `if let Some(obj) = v.as_object_mut() { ... }`, `v.get("external_ref").and_then(\|e\| e.as_str()).unwrap_or_default()` |
+| `updates.rs` / `attachments.rs` `use std::process::Command` (A2) | platform-gated `use`, unused (and previously stripped by `cargo fix`) on non-matching targets | removed; macOS/Linux/Windows call sites all fully-qualify `std::process::Command::new(..)` / `btit_cli::command::new_command(..)`, matching the existing Windows call site's style |
+
+No panic site changes any `Result<_, String>` shape or error text; every rewrite gives the same result as the code reaches today (verified by the unchanged 106 `btit-app` tests plus the workspace's 412 after-tests).
+
+### Gate outputs
+
+- Command-signature gate (1) vs `develop@94e44d3` (`/tmp/btit-baseline-94e44d3`): `diff` — empty.
+- Frontend invoke-subset gate (2): `comm -23` — prints nothing.
+- Test-preservation gate: `IMPLEMENTATION_BASELINE=94e44d3`, `BASELINE_TEST_COUNT=155` (baseline list confirmed non-vacuous at exactly 155 lines); replacement lists are the b-9 (3 names), b-10 (4 names) and b-11 (4 names) tables from their own sprint docs, 11 names total after `sort -u`; after-list (workspace, `--all-features`) = 412 lines; `comm -23 <(grep -vxFf replaced.txt baseline-tests.txt) after-tests.txt` — empty. List files kept in the session scratchpad, not `/tmp/replaced.txt`; stderr not suppressed on any gate command.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` — `0`.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — clean.
+- `cargo fmt --check --all` — clean (after the dedicated `style(app): cargo fmt` commit).
+- `RUSTFLAGS="-D warnings" PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` — clean.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin clippy --workspace --target x86_64-pc-windows-msvc --all-targets -- -D warnings` — clean after one fix (see Deviations: the Windows/Linux `open_image_file` blocks' `format!` calls, invisible to native macOS clippy since `cfg`-gated code for other targets is stripped on the host).
+- `cargo test --workspace` — all green (106 `btit-app` tests unchanged; workspace total 412 after-tests including the phase-a crates).
+- `for c in btit-types btit-beads btit-cli btit-bd btit-br; do cargo rustdoc -p "$c" -- -D missing-docs; done` — all five pass (`btit-cli` prints one pre-existing `broken_intra_doc_links` warning, not gated by `-D missing-docs` and not touched by this sprint).
+- `pnpm test` — 366 passed (20 files).
+- `npx vue-tsc --noEmit` — clean.
+- `python3 scripts/check_version_sync.py` — OK (app 1.24.5, toolchain 1.98.1).
+- `git diff --check` — clean.
+- `pnpm tauri:build` — not run (manual AC, left for the team-lead per the task's hard constraints; the app was not launched).
+
+### Deviations from the sprint doc
+
+- The doc's exact-code sample for `base64_encode` is used verbatim.
+- `too_many_lines` on `ensure_refs_migrated_v3` and `bd_migrate_to_dolt_with`, `needless_pass_by_value` on the three `watcher.rs` Tauri commands (`tauri::AppHandle`/`tauri::State` are the required command parameter types), and `unnecessary_wraps` on three test-only helpers (`test_backend.rs::raw_ok`/`raw_fail`/`cwd`, whose Result/Option shape mirrors what their production callers and `reply_raw` expect) are `#[expect(clippy::…, reason = "...")]`, never `#[allow]`. No other pedantic override was needed.
+- `cargo xwin clippy` (not just `cargo xwin check`) found one lint the doc's Required Validation list doesn't explicitly run: `clippy::uninlined_format_args` in the `#[cfg(target_os = "windows")]` and `#[cfg(target_os = "linux")]` blocks of `attachments.rs::open_image_file`, invisible to native clippy on macOS because cfg-gated code for other targets is stripped for the host target. Fixed (`format!("...{}", e)` → `format!("...{e}")`); no behaviour change. Recorded here since it is additional evidence for A2 beyond the doc's own gate list.
+- `PollData`'s fields were renamed (`open_issues`/`closed_issues`/`ready_issues` → `open`/`closed`/`ready`, clippy's `struct_field_names`) with their `#[serde(rename = "openIssues"/...)]` attributes kept verbatim, so the JSON the frontend receives is unchanged; this is a Rust-internal rename only, not covered by the command-signature gate (which compares header text, not struct bodies) but confirmed not to change `PollData`'s serialized shape.
+- Issue #69 (deliverable 10): `crates/btit-beads/src/issues.rs` gained `const PARENT_CHILD: &str = "parent-child"`, used by `STRUCTURAL_TYPES` and `transform_issue`'s child filter; `grep -c '"parent-child"' crates/btit-beads/src/issues.rs` outside `#[cfg(test)]`/comments is 1.
+
+### Ambiguities resolved
+
+- The doc's disposition-table instruction ("append it to `docs/crate-split-refactor-issues.md`") did not specify exact column names or ordering; used `Item | Disposition | Sprint | Closing test or doc`, matching the plan's own issue-inventory table shape, and kept the existing A/B numbering and headings unchanged (no restructuring).
+- The nine follow-up issue numbers (#55, #65, #67, #68, #70, #73, #74, #76, #77) and the two upstream `sc-observability` issues are not textually referenced by any phase-b sprint doc except #55 (plan headroom notes) and #67 (`sprint-b-8.md`'s "not the #67 decomposition" aside); the rest are recorded as given, with topic-based (not doc-cited) correspondence noted as "related in theme" rather than "closes", per the "no speculative content" rule.
