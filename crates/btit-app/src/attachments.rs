@@ -57,7 +57,7 @@ pub(crate) async fn open_image_file(path: String) -> Result<(), String> {
         btit_cli::command::new_command("cmd")
             .args(["/C", "start", "", &path])
             .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+            .map_err(|e| format!("Failed to open file: {e}"))?;
     }
 
     #[cfg(target_os = "linux")]
@@ -65,7 +65,7 @@ pub(crate) async fn open_image_file(path: String) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(&path)
             .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+            .map_err(|e| format!("Failed to open file: {e}"))?;
     }
 
     Ok(())
