@@ -109,19 +109,32 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --check -p btit-types
+        run: cargo fmt --check -p btit-types -p btit-beads
 
       - name: Clippy
-        run: cargo clippy -p btit-types --all-targets -- -D warnings
+        run: cargo clippy -p btit-types -p btit-beads --all-targets -- -D warnings
 
       - name: Rustdoc missing-docs
-        run: cargo rustdoc -p btit-types -- -D missing-docs
+        run: |
+          cargo rustdoc -p btit-types -- -D missing-docs
+          cargo rustdoc -p btit-beads -- -D missing-docs
 
-      # Data-only crate: dependency graph gate, host-independent so it runs once, on Linux.
+      # Dependency graph and source gates, host-independent so they run once, on Linux.
       - name: Dependency graph
         if: runner.os == 'Linux'
         shell: bash
-        run: cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')
+        run: |
+          cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')
+          cargo tree -e normal -p btit-beads --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-types\nlog\nserde_json\n')
+
+      # btit-beads: no process/fs/Tauri/bridge use, only the two logging statics, no allow() of the deny set.
+      - name: btit-beads source gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          test -z "$(grep -rnE 'std::(process|fs)|tauri|sc_observability' crates/btit-beads/src)"
+          test "$(grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-beads/src | grep -oE 'static [A-Z_]+' | sort | tr '\n' ' ')" = "static LOGGING_ENABLED static VERBOSE_LOGGING "
+          test -z "$(grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-beads/src)"
 
   crates:
     name: crates (${{ matrix.os }})
