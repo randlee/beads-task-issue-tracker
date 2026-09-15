@@ -109,15 +109,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --check -p btit-types -p btit-beads
+        run: cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br
 
       - name: Clippy
-        run: cargo clippy -p btit-types -p btit-beads --all-targets -- -D warnings
+        run: |
+          cargo clippy -p btit-types -p btit-beads --all-targets -- -D warnings
+          cargo clippy -p btit-cli -p btit-bd -p btit-br --all-targets --all-features -- -D warnings
 
       - name: Rustdoc missing-docs
         run: |
           cargo rustdoc -p btit-types -- -D missing-docs
           cargo rustdoc -p btit-beads -- -D missing-docs
+          cargo rustdoc -p btit-cli -- -D missing-docs
+          cargo rustdoc -p btit-bd -- -D missing-docs
+          cargo rustdoc -p btit-br -- -D missing-docs
 
       # Dependency graph and source gates, host-independent so they run once, on Linux.
       - name: Dependency graph
@@ -126,6 +131,11 @@ jobs:
         run: |
           cargo tree -e normal -p btit-types --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-types\nserde\nserde_json\n')
           cargo tree -e normal -p btit-beads --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-types\nlog\nserde_json\n')
+          cargo tree -e normal -p btit-cli --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          cargo tree -e normal -p btit-bd --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-bd\nbtit-beads\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          cargo tree -e normal -p btit-br --depth 1 --prefix none --format '{p}' | sed -E 's/ v.*//' | sort | diff - <(printf 'btit-beads\nbtit-br\nbtit-cli\nbtit-types\nlog\nserde_json\n' | sort)
+          # test-support stays out of the app's normal build
+          test "$(cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support)" = 0
 
       # btit-beads: no process/fs/Tauri/bridge use, only the two logging statics, no allow() of the deny set.
       - name: btit-beads source gates
@@ -135,6 +145,15 @@ jobs:
           test -z "$(grep -rnE 'std::(process|fs)|tauri|sc_observability' crates/btit-beads/src)"
           test "$(grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-beads/src | grep -oE 'static [A-Z_]+' | sort | tr '\n' ' ')" = "static LOGGING_ENABLED static VERBOSE_LOGGING "
           test -z "$(grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-beads/src)"
+
+      # btit-cli, btit-bd, btit-br: no Tauri/bridge use, no process-global statics, no allow() of the deny set.
+      - name: btit-cli, btit-bd, btit-br source gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          test -z "$(grep -rn 'tauri\|sc_observability' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
+          test -z "$(grep -rnE '^\s*(pub(\(crate\))? )?static ' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
+          test -z "$(grep -rnE 'allow\(clippy::(unwrap_used|expect_used|panic|unreachable|todo|unimplemented|indexing_slicing)' crates/btit-cli/src crates/btit-bd/src crates/btit-br/src)"
 
   crates:
     name: crates (${{ matrix.os }})
