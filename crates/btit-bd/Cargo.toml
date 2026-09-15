@@ -1,0 +1,24 @@
+[package]
+name = "btit-bd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "bd (steveyegge/beads) backend: BeadsBackend, CliBackend, DoltOperations."
+publish = false
+
+[dependencies]
+btit-types = { path = "../btit-types" }
+btit-beads = { path = "../btit-beads" }
+btit-cli = { path = "../btit-cli" }
+serde_json.workspace = true
+log.workspace = true
+
+[features]
+test-support = ["btit-cli/test-support"]   # enables BdCli::with_invoker for this crate's and the app's tests
+
+[dev-dependencies]
+btit-cli = { path = "../btit-cli", features = ["test-support"] }
+
+[lints]
+workspace = true

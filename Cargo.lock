@@ -171,9 +171,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "btit-bd"
+version = "1.24.5"
+dependencies = [
+ "btit-beads",
+ "btit-cli",
+ "btit-types",
+ "log",
+ "serde_json",
+]
+
+[[package]]
 name = "btit-beads"
 version = "1.24.5"
 dependencies = [
+ "btit-types",
+ "log",
+ "serde_json",
+]
+
+[[package]]
+name = "btit-br"
+version = "1.24.5"
+dependencies = [
+ "btit-beads",
+ "btit-cli",
+ "btit-types",
+ "log",
+ "serde_json",
+]
+
+[[package]]
+name = "btit-cli"
+version = "1.24.5"
+dependencies = [
+ "btit-beads",
  "btit-types",
  "log",
  "serde_json",

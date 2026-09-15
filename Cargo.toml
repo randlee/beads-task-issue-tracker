@@ -5,9 +5,12 @@
 # own version and are exempt from that check.
 [workspace]
 members = [
-    "crates/btit-app",   # b-4..b-6 append btit-cli, btit-bd, btit-br
+    "crates/btit-app",
     "crates/btit-types",
     "crates/btit-beads",
+    "crates/btit-cli",   # b-4; btit-bd and btit-br are b-4 skeletons filled by b-5 and b-6
+    "crates/btit-bd",
+    "crates/btit-br",
     "crates/sc-observability-log",                 # phase-a crates, in-tree at 0.1.0 (OQ-3 resolved)
     "crates/sc-observability-log-macros",
     "crates/sc-observability-log-consumer-check",
@@ -28,6 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 btit-types = { path = "crates/btit-types" }   # data-only shared types (b-2)
 btit-beads = { path = "crates/btit-beads" }   # backend traits, BeadsError, pure beads logic, log gate (b-3)
+btit-cli = { path = "crates/btit-cli" }       # process transport, CliInvoker/CliRunner, ops (b-4)
 # `std` enables log::set_boxed_logger (cfg(feature = "alloc") in log-0.4.34); `kv` is used by the app and the bridge.
 log = { version = "0.4", features = ["std", "kv"] }
 sc-observability-log = { path = "crates/sc-observability-log" }   # in-tree for all of phase-b (OQ-3)

@@ -1,0 +1,29 @@
+[package]
+name = "btit-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Process transport shared by the bd and br backends: extended PATH, per-project lock, --json invocation and the shared issue-operation bodies."
+publish = false
+
+[dependencies]
+btit-types.workspace = true
+btit-beads.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[features]
+# Enables `btit_cli::testing::RecordingInvoker` for this crate's, btit-bd's, btit-br's and the app's tests.
+test-support = []
+
+[[test]]
+name = "ops_argv"
+required-features = ["test-support"]
+
+[[test]]
+name = "ops_behaviour"
+required-features = ["test-support"]
+
+[lints]
+workspace = true
