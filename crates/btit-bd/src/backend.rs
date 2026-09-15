@@ -254,8 +254,8 @@ mod tests {
     use super::*;
     use btit_cli::testing::RecordingInvoker;
 
-    // `BdCli::project_uses_dolt_false_without_beads_dir` spawned `bd --version`
-    // through a fresh `CliRunner`; b-10 (B10) replaced it with
+    // The wrapper test moved from btit-app spawned `bd --version` through a fresh
+    // `CliRunner`; b-10 (B10) replaced it with
     // `dolt::tests::project_uses_dolt_for_is_false_for_dir_without_beads_layout`,
     // which calls the pure core. This test keeps the wrapper covered over a scripted
     // probe, so it spawns nothing either.
