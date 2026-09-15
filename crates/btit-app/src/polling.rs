@@ -94,7 +94,21 @@ pub(crate) fn get_beads_mtime_with(
     beads_dir: &std::path::Path,
 ) -> Option<std::time::SystemTime> {
     let project = ProjectRef::local(beads_dir.parent().map(|p| p.to_string_lossy().into_owned()));
-    if be.project_uses_dolt(&project) {
+    let uses_dolt = be.project_uses_dolt(&project);
+    let uses_jsonl = !uses_dolt
+        && cli_of(be, "mtime").map(|c| c.capabilities().uses_jsonl_files).unwrap_or(false);
+    get_beads_mtime_for(uses_dolt, uses_jsonl, beads_dir)
+}
+
+/// Pure core of [`get_beads_mtime_with`]: computes the latest mtime for a beads
+/// project given whether it uses Dolt and whether SQLite reads should also
+/// check `issues.jsonl`. Performs no backend or CLI calls.
+pub(crate) fn get_beads_mtime_for(
+    uses_dolt: bool,
+    uses_jsonl: bool,
+    beads_dir: &std::path::Path,
+) -> Option<std::time::SystemTime> {
+    if uses_dolt {
         // Dolt backend: check directory mtimes and manifest files
         let mut times: Vec<std::time::SystemTime> = Vec::new();
 
@@ -151,7 +165,7 @@ pub(crate) fn get_beads_mtime_with(
             beads_dir.join("beads.db"),
             beads_dir.join("beads.db-wal"),
         ];
-        if cli_of(be, "mtime").map(|c| c.capabilities().uses_jsonl_files).unwrap_or(false) {
+        if uses_jsonl {
             paths.push(beads_dir.join("issues.jsonl"));
         }
         paths.iter()
@@ -223,16 +237,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_beads_mtime_returns_none_without_beads_dir() {
+    fn get_beads_mtime_for_returns_none_for_empty_dir() {
+        // A path that does not exist on disk: no `.beads` directory, no
+        // database or manifest files, so both backend kinds must return
+        // `None` without touching the filesystem in a way that could succeed.
         let temp_dir = std::env::temp_dir().join(format!("beads_test_mtime_{}", std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
-        let _ = std::fs::create_dir_all(&temp_dir);
 
-        let result = get_beads_mtime(&temp_dir);
-        // Should be None since there's no .beads dir and not using dolt
-        assert!(result.is_some() || result.is_none()); // behavior depends on project_uses_dolt
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        assert_eq!(get_beads_mtime_for(false, false, &temp_dir), None);
+        assert_eq!(get_beads_mtime_for(true, false, &temp_dir), None);
     }
 
     // ---- get_beads_mtime_with over a RecordingInvoker-backed BdCli (b-8) ----------
