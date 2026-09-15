@@ -12,6 +12,8 @@ mod migration;
 mod polling;
 mod issue_commands;
 mod fs_commands;
+#[cfg(test)]
+mod test_backend;
 
 use std::io::Write as _;
 use std::sync::Mutex;

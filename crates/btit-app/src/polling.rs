@@ -235,5 +235,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
+    // ---- get_beads_mtime_with over a RecordingInvoker-backed BdCli (b-8) ----------
 
+    use crate::test_backend::{bd_invoker, recording_bd, FakeBackend, TempProject, BD_0_49_6, BD_1_0_4};
+    use std::time::{Duration, SystemTime};
+
+    /// Sets `path`'s mtime to `t` and returns the mtime the filesystem stored.
+    fn set_mtime(path: &std::path::Path, t: SystemTime) -> Result<SystemTime, String> {
+        let file = fs::File::options().write(true).open(path).map_err(|e| e.to_string())?;
+        file.set_modified(t).map_err(|e| e.to_string())?;
+        fs::metadata(path).and_then(|m| m.modified()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn mtime_sqlite_counts_jsonl_only_when_the_backend_uses_jsonl() -> Result<(), String> {
+        let project = TempProject::sqlite("mtime_sqlite")?;
+        project.write(".beads/issues.jsonl", "{}\n")?;
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let db_time = set_mtime(&project.beads_dir().join("beads.db"), base)?;
+        let jsonl_time = set_mtime(
+            &project.beads_dir().join("issues.jsonl"),
+            base + Duration::from_secs(60),
+        )?;
+
+        let (bd049, inv049) = recording_bd(bd_invoker(BD_0_49_6));
+        assert_eq!(get_beads_mtime_with(&bd049, &project.beads_dir()), Some(jsonl_time));
+        let (bd1, inv1) = recording_bd(bd_invoker(BD_1_0_4));
+        assert_eq!(get_beads_mtime_with(&bd1, &project.beads_dir()), Some(db_time));
+        let no_cli = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(get_beads_mtime_with(&no_cli, &project.beads_dir()), Some(db_time));
+
+        assert!(inv049.calls().is_empty() && inv1.calls().is_empty());
+        assert_eq!(inv049.probe_calls() + inv1.probe_calls(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn mtime_dolt_project_reads_the_dolt_layout() -> Result<(), String> {
+        let project = TempProject::dolt("mtime_dolt")?;
+        let (bd1, inv) = recording_bd(bd_invoker(BD_1_0_4));
+        // No beads.db exists, so a SQLite reading would be None.
+        assert!(get_beads_mtime_with(&bd1, &project.beads_dir()).is_some());
+        let sqlite_view = FakeBackend { uses_dolt: false, cli: None };
+        assert_eq!(get_beads_mtime_with(&sqlite_view, &project.beads_dir()), None);
+        assert!(inv.calls().is_empty());
+        Ok(())
+    }
 }
