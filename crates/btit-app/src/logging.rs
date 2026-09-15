@@ -28,6 +28,28 @@ use lifecycle::{ExitOutcome, LogLifecycle};
 // statics are re-exported so the debug commands below flip the switches every crate reads.
 pub(crate) use btit_beads::logging::{LOGGING_ENABLED, VERBOSE_LOGGING};
 
+/// Locks `mutex`, recovering the value if an earlier panic poisoned it.
+///
+/// Recovery is logged at error level through the plain `log` macro (not gated by
+/// `LOGGING_ENABLED`), so a panic that happened while the lock was held still leaves
+/// a trace in the log. The poison flag is then cleared, so the record is written once
+/// per poisoning rather than on every later lock.
+pub(crate) fn lock_recovering<'a, T>(
+    mutex: &'a std::sync::Mutex<T>,
+    name: &str,
+) -> std::sync::MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!(
+                "[lock] {name} was poisoned by an earlier panic; continuing with the recovered value"
+            );
+            mutex.clear_poison();
+            poisoned.into_inner()
+        }
+    }
+}
+
 // ============================================================================
 // Bridge lifecycle
 // ============================================================================
@@ -510,6 +532,33 @@ pub(crate) async fn log_frontend(level: String, message: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A poisoned lock yields its value, and the poison flag is cleared so the
+    /// recovery is logged once (QA-1 RSH-001/RSH-002, b-12).
+    #[test]
+    fn lock_recovering_returns_value_and_clears_poison() -> Result<(), TestError> {
+        let mutex = std::sync::Arc::new(std::sync::Mutex::new(7_u32));
+        let held = std::sync::Arc::clone(&mutex);
+        let joined = std::thread::spawn(move || {
+            let _guard = held.lock();
+            // `resume_unwind` poisons the held lock without running the panic hook.
+            std::panic::resume_unwind(Box::new("poison the lock"));
+        })
+        .join();
+        if joined.is_ok() || !mutex.is_poisoned() {
+            return Err(TestError(
+                "the helper thread did not poison the lock".to_owned(),
+            ));
+        }
+        let value = *lock_recovering(&mutex, "TEST_LOCK");
+        if value != 7 || mutex.is_poisoned() {
+            return Err(TestError(format!(
+                "value {value}, still poisoned: {}",
+                mutex.is_poisoned()
+            )));
+        }
+        Ok(())
+    }
 
     /// A test-local error: setup/teardown failures fail the test via `?`
     /// (returning `Result` from a `#[test]` fn) rather than panicking, so this

@@ -12,7 +12,9 @@ fn has_url_scheme(t: &str) -> bool {
     let Some(colon) = t.find(':') else {
         return false;
     };
-    let scheme = &t[..colon];
+    let (Some(scheme), Some(rest)) = (t.get(..colon), t.get(colon..)) else {
+        return false;
+    };
     let mut chars = scheme.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -23,7 +25,7 @@ fn has_url_scheme(t: &str) -> bool {
     if !chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-') {
         return false;
     }
-    t[colon..].starts_with("://")
+    rest.starts_with("://")
 }
 
 /// Returns `true` if `t` is a Windows absolute path (`X:\`, `X:/`, or `\\server\share`).

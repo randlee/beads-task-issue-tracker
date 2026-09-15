@@ -75,9 +75,7 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
         let beads_dir = std::path::Path::new(&working_dir).join(".beads");
 
         if let Some(mtime) = get_beads_mtime(&beads_dir) {
-            let mut map = LAST_KNOWN_MTIME
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut map = crate::logging::lock_recovering(&LAST_KNOWN_MTIME, "LAST_KNOWN_MTIME");
             map.insert(working_dir, mtime);
         }
     }
@@ -203,9 +201,7 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
     let beads_dir = std::path::Path::new(&working_dir).join(".beads");
     let current_mtime = get_beads_mtime(&beads_dir);
 
-    let mut map = LAST_KNOWN_MTIME
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut map = crate::logging::lock_recovering(&LAST_KNOWN_MTIME, "LAST_KNOWN_MTIME");
     let previous = map.get(&working_dir).copied();
 
     match (current_mtime, previous) {
@@ -239,9 +235,7 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
 /// Called from the frontend when switching projects to force a fresh poll.
 #[tauri::command]
 pub(crate) async fn bd_reset_mtime(cwd: Option<String>) -> Result<(), String> {
-    let mut map = LAST_KNOWN_MTIME
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut map = crate::logging::lock_recovering(&LAST_KNOWN_MTIME, "LAST_KNOWN_MTIME");
     if let Some(path) = cwd {
         log_info!("[bd_reset_mtime] Resetting mtime for: {}", path);
         map.remove(&path);

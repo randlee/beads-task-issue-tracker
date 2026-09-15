@@ -301,9 +301,7 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
 
     // Check cooldown — skip if synced recently
     {
-        let last = LAST_SYNC_TIME
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let last = crate::logging::lock_recovering(&LAST_SYNC_TIME, "LAST_SYNC_TIME");
         if let Some(t) = *last {
             if t.elapsed().as_secs() < SYNC_COOLDOWN_SECS {
                 log_info!(
@@ -326,9 +324,7 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
         Ok(()) => {
             log_info!("[sync] Sync completed successfully");
             // Update cooldown timestamp
-            let mut last = LAST_SYNC_TIME
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut last = crate::logging::lock_recovering(&LAST_SYNC_TIME, "LAST_SYNC_TIME");
             *last = Some(Instant::now());
         }
         Err(BeadsError::CommandFailed { stderr, .. }) => {
@@ -380,9 +376,7 @@ pub(crate) async fn bd_sync(cwd: Option<String>) -> Result<(), String> {
 
     log_info!("[bd_sync] Sync completed successfully");
     // Reset cooldown so subsequent reads pick up the fresh sync
-    let mut last = LAST_SYNC_TIME
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut last = crate::logging::lock_recovering(&LAST_SYNC_TIME, "LAST_SYNC_TIME");
     *last = Some(Instant::now());
     Ok(())
 }

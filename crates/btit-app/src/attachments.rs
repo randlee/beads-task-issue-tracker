@@ -346,10 +346,10 @@ pub(crate) fn issue_short_id(full_id: &str) -> &str {
     // But "kybio-front-nuxt-4-466d": after last '-' is "466d" ✓
     // "kybio-front-nuxt-4": after last '-' is "4" which could be a short ID or prefix part.
     // Since we only call this with real issue IDs (not project names), the last segment is always the short ID.
-    match full_id.rfind('-') {
-        Some(pos) => &full_id[pos + 1..],
-        None => full_id,
-    }
+    full_id
+        .rfind('-')
+        .and_then(|pos| full_id.get(pos + 1..))
+        .unwrap_or(full_id)
 }
 
 /// Resolve the attachment directory for an issue.
@@ -381,10 +381,10 @@ pub(crate) fn resolve_duplicate_filename(dir: &std::path::Path, name: &str) -> S
     if !dir.join(name).exists() {
         return name.to_string();
     }
-    let (stem, ext) = match name.rfind('.') {
-        Some(pos) => (&name[..pos], &name[pos..]),
-        None => (name, ""),
-    };
+    let (stem, ext) = name
+        .rfind('.')
+        .and_then(|pos| Some((name.get(..pos)?, name.get(pos..)?)))
+        .unwrap_or((name, ""));
     for i in 1..1000 {
         let candidate = format!("{stem}-{i}{ext}");
         if !dir.join(&candidate).exists() {
