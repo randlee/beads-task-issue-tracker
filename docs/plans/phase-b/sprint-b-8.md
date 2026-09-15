@@ -168,9 +168,9 @@ is not merged in.
 **Gate outputs** (`IMPLEMENTATION_BASELINE=94e44d3`, worktree `/tmp/btit-baseline-94e44d3`)
 
 - `cargo check --workspace --all-targets`: clean, 0 warnings.
-- `cargo test --workspace`: all green. There are 27 new app tests: 24 in `migration::tests` and 2 in
-  `polling::tests`, plus the 5 `reprefix_id_*` tests and `get_beads_mtime_returns_none_without_beads_dir`, which
-  are unchanged.
+- `cargo test --workspace`: all green. There are 23 new app tests: 21 in `migration::tests` and 2 in
+  `polling::tests`. The 5 `reprefix_id_*` tests and `get_beads_mtime_returns_none_without_beads_dir` are
+  unchanged.
 - `cargo test -p beads-issue-tracker`: all green (102 lib tests).
 - `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets`: 0 errors. The lib reports 9 warnings,
   down from 17 at `cb8a7de`, because the direct spawns' `.args(&[..])` needless borrows are gone. The lib-test
