@@ -20,7 +20,7 @@ pub fn cli_compatibility_warnings(client: CliClient, version: Option<CliVersion>
                  Legacy versions may work but are not supported; please upgrade bd.",
                 major, minor, patch, MIN_SUPPORTED_BD_MAJOR
             ));
-            if major == 0 && minor >= 50 {
+            if major == 0 && minor >= 51 {
                 warnings.push(
                     "bd 0.50-0.56 removed the daemon and JSONL files in favor of Dolt server mode; \
                      change detection falls back to polling."
@@ -105,7 +105,9 @@ mod tests {
 
     #[test]
     fn warnings_for_0_50_through_0_56_include_dolt_note() {
-        for v in [(0, 50, 0), (0, 53, 2), (0, 56, 9), (0, 99, 0)] {
+        // B5: the Dolt-note cutoff moved to 0.51.0; the out-of-range (0, 99, 0) case is
+        // dropped (B13) since bd has not shipped past 0.56.x.
+        for v in [(0, 51, 0), (0, 53, 2), (0, 56, 9)] {
             let w = cli_compatibility_warnings(CliClient::Bd, Some(v.into()));
             assert_eq!(w.len(), 2, "{v:?}: {w:?}");
             assert!(
