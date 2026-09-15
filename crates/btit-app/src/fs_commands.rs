@@ -1,5 +1,5 @@
-use crate::cli::project_uses_dolt;
-use btit_types::{DirectoryEntry, FsListResult};
+use crate::backend;
+use btit_types::{DirectoryEntry, FsListResult, ProjectRef};
 use std::path::PathBuf;
 
 #[tauri::command]
@@ -10,6 +10,8 @@ pub(crate) async fn fs_exists(path: String) -> Result<bool, String> {
 #[tauri::command]
 pub(crate) async fn fs_list(path: Option<String>) -> Result<FsListResult, String> {
     use std::fs;
+
+    let be = backend::current();
 
     let target_path = match path {
         Some(p) if p == "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
@@ -47,7 +49,8 @@ pub(crate) async fn fs_list(path: Option<String>) -> Result<FsListResult, String
             let full_path = entry.path();
             let beads_path = full_path.join(".beads");
             let has_beads = beads_path.is_dir();
-            let uses_dolt = has_beads && project_uses_dolt(&beads_path);
+            let uses_dolt = has_beads
+                && be.project_uses_dolt(&ProjectRef::local(Some(full_path.to_string_lossy().into_owned())));
 
             directories.push(DirectoryEntry {
                 name,
@@ -70,7 +73,8 @@ pub(crate) async fn fs_list(path: Option<String>) -> Result<FsListResult, String
 
     let current_beads_path = target_path.join(".beads");
     let current_has_beads = current_beads_path.is_dir();
-    let current_uses_dolt = current_has_beads && project_uses_dolt(&current_beads_path);
+    let current_uses_dolt = current_has_beads
+        && be.project_uses_dolt(&ProjectRef::local(Some(target_path.to_string_lossy().into_owned())));
 
     Ok(FsListResult {
         current_path: target_path.to_string_lossy().to_string(),

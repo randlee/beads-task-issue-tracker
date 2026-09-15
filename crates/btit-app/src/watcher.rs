@@ -1,4 +1,5 @@
-use crate::cli::project_uses_dolt;
+use crate::backend;
+use btit_types::ProjectRef;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ pub(crate) fn start_watching(
     app: tauri::AppHandle,
     state: tauri::State<'_, Mutex<WatcherState>>,
 ) -> Result<(), String> {
+    let be = backend::current();
     let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     // Stop existing watcher if any
@@ -83,7 +85,7 @@ pub(crate) fn start_watching(
     // Watch .beads/ directory
     // Dolt backend: recursive (changes happen in .dolt/ subdirectories)
     // SQLite backend: non-recursive (all target files are at root level)
-    let watch_mode = if project_uses_dolt(&beads_dir) {
+    let watch_mode = if be.project_uses_dolt(&ProjectRef::local(Some(path.clone()))) {
         notify::RecursiveMode::Recursive
     } else {
         notify::RecursiveMode::NonRecursive

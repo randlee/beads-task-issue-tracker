@@ -36,7 +36,8 @@ dotenvy.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-# b-7 backend-slot seam tests: RecordingInvoker and BdCli::with_invoker (dev-only; never in the normal graph)
+# b-7/b-8 backend seam tests: RecordingInvoker and BdCli/BrCli::with_invoker (dev-only; never in the normal graph)
 btit-cli = { workspace = true, features = ["test-support"] }
 btit-bd = { path = "../btit-bd", features = ["test-support"] }
+btit-br = { path = "../btit-br", features = ["test-support"] }
 # no [lints] until b-12

@@ -2,7 +2,6 @@
 extern crate btit_beads; // brings log_info!/log_warn!/log_error!/log_debug! into textual scope
 mod logging;
 mod backend;
-mod cli;
 mod config;
 mod updates;
 mod attachments;

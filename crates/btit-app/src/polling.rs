@@ -1,7 +1,7 @@
-use crate::cli::{project_uses_dolt, uses_jsonl_files};
 use crate::backend;
+use btit_beads::backend::BeadsBackend;
 use btit_beads::issues::transform_issue;
-use crate::migration::sync_bd_database;
+use crate::migration::{cli_of, sync_bd_database};
 use btit_types::{BdRawIssue, Issue, ListQuery, ProjectRef};
 use std::fs;
 use serde::Serialize;
@@ -85,7 +85,16 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
 ///   .beads/dolt/<name>/.dolt/ (bd 0.52+ nested layout), and manifest files
 /// - SQLite backend: checks beads.db, beads.db-wal, and optionally issues.jsonl
 pub(crate) fn get_beads_mtime(beads_dir: &std::path::Path) -> Option<std::time::SystemTime> {
-    if project_uses_dolt(beads_dir) {
+    get_beads_mtime_with(backend::current().as_ref(), beads_dir)
+}
+
+/// Body of [`get_beads_mtime`] over an injected backend; the project is `beads_dir`'s parent.
+pub(crate) fn get_beads_mtime_with(
+    be: &dyn BeadsBackend,
+    beads_dir: &std::path::Path,
+) -> Option<std::time::SystemTime> {
+    let project = ProjectRef::local(beads_dir.parent().map(|p| p.to_string_lossy().into_owned()));
+    if be.project_uses_dolt(&project) {
         // Dolt backend: check directory mtimes and manifest files
         let mut times: Vec<std::time::SystemTime> = Vec::new();
 
@@ -142,7 +151,7 @@ pub(crate) fn get_beads_mtime(beads_dir: &std::path::Path) -> Option<std::time::
             beads_dir.join("beads.db"),
             beads_dir.join("beads.db-wal"),
         ];
-        if uses_jsonl_files() {
+        if cli_of(be, "mtime").map(|c| c.capabilities().uses_jsonl_files).unwrap_or(false) {
             paths.push(beads_dir.join("issues.jsonl"));
         }
         paths.iter()
