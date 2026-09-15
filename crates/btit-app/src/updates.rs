@@ -1,4 +1,5 @@
-use crate::cli::{detect_cli_client, new_command, parse_bd_version};
+use crate::cli::{detect_cli_client, parse_bd_version};
+use btit_cli::command::new_command;
 use crate::config::get_bd_version;
 use btit_types::CliClient;
 use std::process::Command;

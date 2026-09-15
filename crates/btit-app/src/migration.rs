@@ -1,7 +1,10 @@
 use crate::attachment_refs::is_real_external_ref;
 use btit_types::CliClient;
 use crate::attachments::issue_short_id;
-use crate::cli::{get_cli_client_info, get_extended_path, new_command, project_uses_dolt, supports_daemon_flag, uses_jsonl_files};
+use crate::cli::{get_cli_client_info, project_uses_dolt, supports_daemon_flag, uses_jsonl_files, AppInvoker};
+use btit_beads::error::BeadsError;
+use btit_cli::{command::new_command, ops, path::get_extended_path};
+use btit_types::ProjectRef;
 use crate::config::get_cli_binary;
 use std::env;
 use std::sync::Mutex;
@@ -220,29 +223,22 @@ pub(crate) fn sync_bd_database(cwd: Option<&str>) {
 
     // Run bd sync (bidirectional - exports local changes AND imports remote changes)
     let binary = get_cli_binary();
-    let mut sync_args = vec!["sync"];
-    if supports_daemon_flag() {
-        sync_args.push("--no-daemon");
-    }
-    match new_command(&binary)
-        .args(&sync_args)
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
+    match ops::sync(&AppInvoker, &ProjectRef::local(Some(working_dir.clone())), supports_daemon_flag()) {
+        Ok(()) => {
             log_info!("[sync] Sync completed successfully");
             // Update cooldown timestamp
             let mut last = LAST_SYNC_TIME.lock().unwrap();
             *last = Some(Instant::now());
         }
-        Ok(output) => {
+        Err(BeadsError::CommandFailed { stderr, .. }) => {
             log_warn!(
                 "[sync] {} sync failed: {}",
                 binary,
-                String::from_utf8_lossy(&output.stderr)
+                stderr
             );
+        }
+        Err(BeadsError::Spawn { source, .. }) => {
+            log_error!("[sync] Failed to run {} sync: {}", binary, source);
         }
         Err(e) => {
             log_error!("[sync] Failed to run {} sync: {}", binary, e);
@@ -275,22 +271,16 @@ pub(crate) async fn bd_sync(cwd: Option<String>) -> Result<(), String> {
     let binary = get_cli_binary();
     log_info!("[bd_sync] Manual sync requested for: {}", working_dir);
 
-    let mut sync_args = vec!["sync"];
-    if supports_daemon_flag() {
-        sync_args.push("--no-daemon");
-    }
-    let output = new_command(&binary)
-        .args(&sync_args)
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-        .map_err(|e| format!("Failed to run {} sync: {}", binary, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log_error!("[bd_sync] Sync failed: {}", stderr.trim());
-        return Err(format!("Sync failed: {}", stderr.trim()));
+    match ops::sync(&AppInvoker, &ProjectRef::local(Some(working_dir.clone())), supports_daemon_flag()) {
+        Ok(()) => {}
+        Err(BeadsError::CommandFailed { stderr, .. }) => {
+            log_error!("[bd_sync] Sync failed: {}", stderr.trim());
+            return Err(format!("Sync failed: {}", stderr.trim()));
+        }
+        Err(BeadsError::Spawn { source, .. }) => {
+            return Err(format!("Failed to run {} sync: {}", binary, source));
+        }
+        Err(e) => return Err(e.to_string()),
     }
 
     log_info!("[bd_sync] Sync completed successfully");

@@ -99,6 +99,7 @@ name = "beads-issue-tracker"
 version = "1.24.5"
 dependencies = [
  "btit-beads",
+ "btit-cli",
  "btit-types",
  "dirs",
  "dotenvy",

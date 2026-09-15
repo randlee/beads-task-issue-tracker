@@ -1,4 +1,5 @@
-use crate::cli::{default_cli_binary, get_extended_path, new_command, reset_bd_version_cache};
+use crate::cli::reset_bd_version_cache;
+use btit_cli::{command::new_command, path::get_extended_path};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -9,8 +10,13 @@ pub(crate) static CLI_BINARY: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct AppConfig {
-    #[serde(default = "crate::cli::default_cli_binary")]
+    #[serde(default = "default_cli_binary")]
     pub(crate) cli_binary: String,
+}
+
+/// Serde default for `AppConfig::cli_binary`: auto-detects the CLI (`btit_cli::probe::default_cli_binary`).
+fn default_cli_binary() -> String {
+    btit_cli::probe::default_cli_binary()
 }
 
 impl Default for AppConfig {

@@ -1,142 +1,32 @@
 use crate::config::get_cli_binary;
-use crate::logging::VERBOSE_LOGGING;
-use btit_types::{CliClient, CliProbe, CompatibilityInfo};
+use btit_beads::error::BeadsError;
+use btit_cli::command::new_command;
+use btit_cli::path::get_extended_path;
+use btit_cli::{run, CliInvoker, ProjectLocks};
+use btit_types::{CliClient, CliOutput, CliProbe, CompatibilityInfo, ProjectRef};
 // Pure detection, compatibility and gate logic lives in btit-beads (b-3); re-exported so
 // config.rs, updates.rs, migration.rs, issue_commands.rs, polling.rs and lib.rs keep their paths.
 pub(crate) use btit_beads::compat::cli_compatibility_warnings;
 pub(crate) use btit_beads::detect::{
-    cli_client_name, detect_cli_client, is_legacy_bd, parse_bd_version, parse_cli_probe,
-    select_default_binary, CLI_CANDIDATES, CLI_FALLBACK, MIN_SUPPORTED_BD_MAJOR,
+    cli_client_name, detect_cli_client, is_legacy_bd, parse_bd_version, MIN_SUPPORTED_BD_MAJOR,
 };
 pub(crate) use btit_beads::gates::{
     supports_daemon_flag_for, supports_delete_hard_flag_for, supports_list_all_flag_for,
     uses_dolt_backend_for, uses_jsonl_files_for,
 };
-use std::collections::HashMap;
-use std::env;
-use std::process::Command;
-use std::sync::atomic::Ordering;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 // Per-project mutex to prevent concurrent bd/Dolt access.
 // bd 0.55 uses embedded Dolt which crashes (SIGSEGV) when two bd processes
 // access the same database simultaneously. This serializes all bd calls per project.
-pub(crate) static BD_PROJECT_LOCKS: LazyLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+// Transitional (b-4): shared with btit-cli's invocations through AppInvoker; removed in b-7.
+pub(crate) static PROJECT_LOCKS: LazyLock<Arc<ProjectLocks>> =
+    LazyLock::new(|| Arc::new(ProjectLocks::default()));
 
 // Cached CLI client info — detected once on first use
 // Stores: (client_type, major, minor, patch)
 pub(crate) static CLI_CLIENT_INFO: LazyLock<Mutex<Option<(CliClient, u32, u32, u32)>>> =
     LazyLock::new(|| Mutex::new(None));
-
-pub(crate) fn get_extended_path() -> String {
-    let current_path = env::var("PATH").unwrap_or_default();
-
-    #[cfg(target_os = "windows")]
-    {
-        let userprofile = env::var("USERPROFILE").unwrap_or_default();
-        let localappdata = env::var("LOCALAPPDATA").unwrap_or_default();
-        let mut extra_paths = vec![
-            format!(r"{}\AppData\Local\bin", userprofile),
-            format!(r"{}\.local\bin", userprofile),
-            format!(r"{}\Programs", localappdata),
-            // `go install` and `cargo install` targets (bd / br)
-            format!(r"{}\go\bin", userprofile),
-            format!(r"{}\.cargo\bin", userprofile),
-        ];
-        extra_paths.extend(current_path.split(';').map(String::from));
-        extra_paths.join(";")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let home = env::var("HOME").unwrap_or_default();
-        let gopath = env::var("GOPATH").unwrap_or_else(|_| format!("{}/go", home));
-        let mut extra_paths = vec![
-            "/opt/homebrew/bin".to_string(),
-            "/usr/local/bin".to_string(),
-            "/home/linuxbrew/.linuxbrew/bin".to_string(),
-            "/usr/bin".to_string(),
-            "/bin".to_string(),
-            format!("{}/.local/bin", home),
-            format!("{}/bin", home),
-            // `go install` and `cargo install` targets (bd / br)
-            format!("{}/bin", gopath),
-            format!("{}/.cargo/bin", home),
-        ];
-        extra_paths.extend(current_path.split(':').map(String::from));
-        extra_paths.join(":")
-    }
-}
-
-/// Creates a Command with platform-specific flags.
-/// On Windows, sets CREATE_NO_WINDOW to prevent console popups.
-pub(crate) fn new_command(program: &str) -> Command {
-    #[allow(unused_mut)]
-    let mut cmd = Command::new(program);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    cmd
-}
-
-/// Run `bin --version` and parse it. `None` when the binary is missing,
-/// not executable, or exits non-zero.
-/// Runs with the extended PATH so GUI launches (Finder/Dock, minimal PATH)
-/// can still resolve Homebrew / Go / Cargo installs, and from the temp dir so
-/// bd never auto-migrates a project as a side effect of the probe.
-pub(crate) fn probe_cli_binary(bin: &str) -> Option<CliProbe> {
-    let output = new_command(bin)
-        .arg("--version")
-        .current_dir(std::env::temp_dir())
-        .env("PATH", get_extended_path())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(parse_cli_probe(&String::from_utf8_lossy(&output.stdout)))
-}
-
-/// Directories the CLI probe searches, in order, without duplicates.
-/// Uses the platform PATH separator (`;` on Windows, `:` elsewhere).
-pub(crate) fn extended_path_entries() -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    std::env::split_paths(&get_extended_path())
-        .map(|p| p.to_string_lossy().to_string())
-        .filter(|p| !p.is_empty())
-        .filter(|p| seen.insert(p.clone()))
-        .collect()
-}
-
-pub(crate) fn default_cli_binary() -> String {
-    let selection = select_default_binary(CLI_CANDIDATES, CLI_FALLBACK, probe_cli_binary);
-    match selection.probe() {
-        Some(p) => {
-            log::info!(
-                "[cli_detect] Auto-selected {} ({} {})",
-                selection.binary(),
-                cli_client_name(p.client),
-                p.raw
-            );
-            if selection.is_legacy() {
-                log::warn!(
-                    "[cli_detect] {} is below the supported bd {}.x floor; running in legacy mode",
-                    p.raw,
-                    MIN_SUPPORTED_BD_MAJOR
-                );
-            }
-        }
-        None => log::warn!(
-            "[cli_detect] No CLI found (tried {}); defaulting to {}. Searched: {}",
-            CLI_CANDIDATES.join(", "),
-            selection.binary(),
-            extended_path_entries().join(if cfg!(windows) { ";" } else { ":" })
-        ),
-    }
-    selection.binary().to_string()
-}
 
 
 /// Detect and cache the CLI client type and version. Runs `binary --version` once.
@@ -276,81 +166,51 @@ pub(crate) fn reset_bd_version_cache() {
     *cached = None;
 }
 
+/// `CliInvoker` over the app's process-global client state (`CLI_BINARY`, `CLI_CLIENT_INFO`,
+/// `PROJECT_LOCKS`), so `btit_cli::ops` run through the same statics as before.
+/// Transitional (b-4); deleted by b-7 when the backend slot replaces the statics.
+pub(crate) struct AppInvoker;
+
+impl CliInvoker for AppInvoker {
+    fn binary(&self) -> String {
+        get_cli_binary()
+    }
+
+    fn probe(&self) -> Option<CliProbe> {
+        btit_cli::probe::probe_cli_binary(&get_cli_binary())
+    }
+
+    fn client_info(&self) -> Option<CliProbe> {
+        get_cli_client_info().map(|(client, major, minor, patch)| CliProbe {
+            client,
+            version: Some((major, minor, patch).into()),
+            raw: String::new(),
+        })
+    }
+
+    fn run_json(&self, project: &ProjectRef, command: &str, args: &[String]) -> Result<String, BeadsError> {
+        // The client only labels the error of a non-local project, so no extra probe is spent on it;
+        // `supports_daemon_flag()` is the one `get_cli_client_info()` read `execute_bd` made.
+        let wd = run::resolve_working_dir(project, CliClient::Unknown)?;
+        run::run_json(&get_cli_binary(), supports_daemon_flag(), &PROJECT_LOCKS, &wd, command, args)
+    }
+
+    fn run_raw(&self, project: &ProjectRef, args: &[&str]) -> Result<CliOutput, BeadsError> {
+        let wd = run::resolve_working_dir(project, CliClient::Unknown)?;
+        run::run_raw(&get_cli_binary(), &wd, args)
+    }
+}
+
+/// Transitional wrapper over `btit_cli::run::run_json` through [`AppInvoker`] (b-4); deleted by b-7.
+#[expect(dead_code, reason = "b-4 transitional wrapper: every former caller now runs btit_cli::ops through AppInvoker")]
 pub(crate) fn execute_bd(command: &str, args: &[String], cwd: Option<&str>) -> Result<String, String> {
-    let working_dir = cwd
-        .map(String::from)
-        .or_else(|| env::var("BEADS_PATH").ok())
-        .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
-        });
-
-    // Split command by spaces to handle subcommands like "comments add"
-    let mut full_args: Vec<&str> = command.split_whitespace().collect();
-    for arg in args {
-        full_args.push(arg);
-    }
-    if supports_daemon_flag() {
-        full_args.push("--no-daemon");
-    }
-    full_args.push("--json");
-
-    let binary = get_cli_binary();
-    log_info!("[bd] {} {} | cwd: {}", binary, full_args.join(" "), working_dir);
-
-    // Acquire per-project lock to prevent concurrent Dolt access (causes SIGSEGV).
-    let project_lock = {
-        let mut locks = BD_PROJECT_LOCKS.lock().unwrap();
-        locks.entry(working_dir.clone())
-            .or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
-            .clone()
-    };
-    let _guard = project_lock.lock().unwrap();
-
-    let output = new_command(&binary)
-        .args(&full_args)
-        .current_dir(&working_dir)
-        .env("PATH", get_extended_path())
-        .env("BEADS_PATH", &working_dir)
-        .output()
-        .map_err(|e| {
-            log_error!("[bd] Failed to execute {}: {}", binary, e);
-            format!("Failed to execute {}: {}", binary, e)
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log_error!("[bd] Command failed | status: {} | stderr: {}", output.status, stderr);
-
-        // Detect schema migration failure (bd 0.49.4 migration bug)
-        if stderr.contains("no such column: spec_id") {
-            log_error!("[bd] Schema migration failure detected - database needs repair");
-            return Err("SCHEMA_MIGRATION_ERROR: Database schema is incompatible. Please use the repair function to fix this issue.".to_string());
-        }
-
-        if !stderr.is_empty() {
-            return Err(stderr.to_string());
-        }
-        return Err(format!("bd command failed with status: {}", output.status));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    log_info!("[bd] OK | {} bytes", stdout.len());
-
-    // Log output preview only if verbose mode is enabled
-    if VERBOSE_LOGGING.load(Ordering::Relaxed) {
-        let preview: String = stdout.chars().take(500).collect();
-        log_debug!("[bd] Output: {}", preview);
-    }
-
-    Ok(stdout)
+    AppInvoker.run_json(&ProjectRef::local(cwd.map(String::from)), command, args).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo {
     let binary = get_cli_binary();
-    let probe = probe_cli_binary(&binary);
+    let probe = btit_cli::probe::probe_cli_binary(&binary);
 
     let (found, version_string, client, tuple) = match &probe {
         Some(p) => (true, p.raw.clone(), p.client, p.version.map(Into::into)),
@@ -386,7 +246,7 @@ pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo {
         uses_jsonl_files: uses_jsonl_files(),
         uses_dolt_backend: uses_dolt_backend(),
         supports_list_all_flag: supports_list_all_flag(),
-        searched_paths: extended_path_entries(),
+        searched_paths: btit_cli::path::extended_path_entries(),
         warnings,
     }
 }
@@ -397,110 +257,6 @@ pub(crate) async fn check_bd_compatibility() -> CompatibilityInfo {
 mod tests {
     use super::*;
 
-    // ---- CLI auto-detection -------------------------------------------------
-
-    #[test]
-    fn probe_returns_none_for_nonexistent_binary() {
-        assert!(probe_cli_binary("definitely-not-a-real-cli-binary-xyz").is_none());
-    }
-
-
-    #[test]
-    fn extended_path_entries_are_nonempty_and_deduplicated() {
-        let entries = extended_path_entries();
-        assert!(!entries.is_empty());
-        assert!(entries.iter().all(|e| !e.is_empty()));
-        let mut sorted = entries.clone();
-        sorted.sort();
-        sorted.dedup();
-        assert_eq!(sorted.len(), entries.len(), "duplicates present: {entries:?}");
-        // Split on the platform separator, not a hardcoded one
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        assert!(entries.iter().all(|e| !e.contains(sep)), "entry contains separator: {entries:?}");
-    }
-
-    #[test]
-    fn extended_path_includes_gui_launch_locations() {
-        let path = get_extended_path();
-        #[cfg(not(target_os = "windows"))]
-        {
-            for needle in ["/opt/homebrew/bin", "/usr/local/bin", "/.cargo/bin", "/.local/bin"] {
-                assert!(path.contains(needle), "extended PATH missing {needle}: {path}");
-            }
-            assert!(path.contains("go/bin") || env::var("GOPATH").is_ok(), "extended PATH missing go bin dir: {path}");
-            let ambient = env::var("PATH").unwrap_or_default();
-            assert!(ambient.is_empty() || path.ends_with(&ambient));
-        }
-        #[cfg(target_os = "windows")]
-        {
-            for needle in [r"\go\bin", r"\.cargo\bin", r"\.local\bin"] {
-                assert!(path.contains(needle), "extended PATH missing {needle}: {path}");
-            }
-        }
-    }
-
-    #[test]
-    fn extended_path_entries_contain_platform_install_dirs_in_order() {
-        let entries = extended_path_entries();
-        assert!(entries.iter().all(|e| !e.is_empty()), "empty entry: {entries:?}");
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            let idx = |needle: &str| {
-                entries
-                    .iter()
-                    .position(|e| e == needle)
-                    .unwrap_or_else(|| panic!("missing {needle}: {entries:?}"))
-            };
-            let homebrew = idx("/opt/homebrew/bin");
-            let usr_local = idx("/usr/local/bin");
-            let usr_bin = idx("/usr/bin");
-            assert!(homebrew < usr_local, "order not preserved: {entries:?}");
-            assert!(usr_local < usr_bin, "order not preserved: {entries:?}");
-            assert!(entries.iter().any(|e| e.ends_with("/.cargo/bin")), "{entries:?}");
-            assert!(
-                entries.iter().any(|e| e.ends_with("/bin") && (e.contains("/go/") || env::var("GOPATH").is_ok())),
-                "missing go bin dir: {entries:?}"
-            );
-        }
-        #[cfg(target_os = "windows")]
-        {
-            assert!(entries.iter().any(|e| e.ends_with(r"\go\bin")), "{entries:?}");
-            assert!(entries.iter().any(|e| e.ends_with(r"\.cargo\bin")), "{entries:?}");
-            assert!(entries.iter().any(|e| e.ends_with(r"\.local\bin")), "{entries:?}");
-            let go = entries.iter().position(|e| e.ends_with(r"\go\bin")).unwrap();
-            let cargo = entries.iter().position(|e| e.ends_with(r"\.cargo\bin")).unwrap();
-            assert!(go < cargo, "order not preserved: {entries:?}");
-        }
-    }
-
-    #[test]
-    fn extended_path_entries_precede_ambient_path() {
-        // The extra install dirs must come before whatever PATH the process
-        // inherited, so a GUI launch with a minimal PATH still finds bd.
-        let entries = extended_path_entries();
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(entries.first().map(String::as_str), Some("/opt/homebrew/bin"));
-        #[cfg(target_os = "windows")]
-        assert!(entries.first().map(|e| e.ends_with(r"\AppData\Local\bin")).unwrap_or(false), "{entries:?}");
-    }
-
-
-    #[test]
-    fn probe_returns_none_for_nonexistent_relative_path() {
-        // A candidate containing a path separator bypasses PATH lookup entirely,
-        // so this is None on every platform regardless of what is installed.
-        assert!(probe_cli_binary("./definitely/not/here").is_none());
-        #[cfg(target_os = "windows")]
-        assert!(probe_cli_binary(r".\definitely\not\here.exe").is_none());
-        #[cfg(not(target_os = "windows"))]
-        assert!(probe_cli_binary("/definitely/not/here").is_none());
-    }
-
-    #[test]
-    fn probe_returns_none_for_empty_binary_name() {
-        assert!(probe_cli_binary("").is_none());
-    }
     // ---- Filesystem-local helpers (#6) ------------------------------------------
 
     #[test]

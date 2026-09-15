@@ -20,6 +20,7 @@ serde_json.workspace = true
 serde.workspace = true
 btit-types.workspace = true
 btit-beads.workspace = true
+btit-cli.workspace = true
 log.workspace = true
 sc-observability-log.workspace = true
 tauri.workspace = true

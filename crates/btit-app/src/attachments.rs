@@ -1,7 +1,7 @@
-use crate::cli::execute_bd;
+use crate::cli::AppInvoker;
 use std::process::Command;
-use btit_beads::parse::parse_issues_tolerant;
-use btit_types::PurgeResult;
+use btit_cli::ops;
+use btit_types::{ListQuery, ProjectRef, PurgeResult};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -47,7 +47,7 @@ pub(crate) async fn open_image_file(path: String) -> Result<(), String> {
     {
         // Fully qualified: a `use` for this Windows-only call site is "unused" on
         // other targets and gets stripped by cargo fix, which broke the Windows build.
-        crate::cli::new_command("cmd")
+        btit_cli::command::new_command("cmd")
             .args(["/C", "start", "", &path])
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
@@ -186,8 +186,9 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
 
     // Get list of all existing issue IDs via bd list --all
     let existing_ids: std::collections::HashSet<String> = {
-        let output = execute_bd("list", &["--all".to_string(), "--limit=0".to_string()], Some(&abs_project_path.to_string_lossy()))?;
-        let issues = parse_issues_tolerant(&output, "purge_orphan_attachments").map_err(|e| e.to_string())?;
+        let project = ProjectRef::local(Some(abs_project_path.to_string_lossy().to_string()));
+        let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
+        let issues = ops::list(&AppInvoker, &project, &all).map_err(|e| e.to_string())?;
         issues.into_iter().map(|i| i.id).collect()
     };
 

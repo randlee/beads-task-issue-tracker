@@ -35,7 +35,7 @@ pub fn run() {
 
             // Log startup info
             log::info!("=== Beads Task-Issue Tracker starting ===");
-            log::info!("[startup] Extended PATH: {}", cli::get_extended_path());
+            log::info!("[startup] Extended PATH: {}", btit_cli::path::get_extended_path());
 
             // Load config and set CLI binary (auto-detects br→bd if no config exists)
             let config = config::load_config();
@@ -47,7 +47,7 @@ pub fn run() {
             // Check if CLI binary is accessible
             // IMPORTANT: Run from /tmp to avoid bd auto-migrating projects in cwd
             let binary = config::get_cli_binary();
-            match cli::probe_cli_binary(&binary) {
+            match btit_cli::probe::probe_cli_binary(&binary) {
                 Some(p) => {
                     log::info!("[startup] {} found: {} ({})", binary, p.raw, cli::cli_client_name(p.client));
                     for w in cli::cli_compatibility_warnings(p.client, p.version) {
@@ -58,7 +58,7 @@ pub fn run() {
                     log::error!(
                         "[startup] {} not found or not executable. Searched: {}",
                         binary,
-                        cli::extended_path_entries().join(if cfg!(windows) { "; " } else { ":" })
+                        btit_cli::path::extended_path_entries().join(if cfg!(windows) { "; " } else { ":" })
                     );
                 }
             }
