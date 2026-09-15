@@ -1,8 +1,11 @@
 use crate::attachments::issue_short_id;
 use crate::backend;
-use btit_beads::issues::transform_issue;
 use crate::migration::sync_bd_database;
-use btit_types::{CountResult, CreatePayload, CwdOptions, Issue, ListOptions, ListQuery, ProjectRef, UpdatePayload};
+use btit_beads::issues::transform_issue;
+use btit_types::{
+    CountResult, CreatePayload, CwdOptions, Issue, ListOptions, ListQuery, ProjectRef,
+    UpdatePayload,
+};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -15,7 +18,9 @@ pub(crate) async fn bd_list(options: ListOptions) -> Result<Vec<Issue>, String> 
     // Sync database before reading to ensure data is up-to-date
     sync_bd_database(options.cwd.as_deref());
 
-    let raw_issues = backend::current().list(&ProjectRef::local(options.cwd), &options.query).map_err(|e| e.to_string())?;
+    let raw_issues = backend::current()
+        .list(&ProjectRef::local(options.cwd), &options.query)
+        .map_err(|e| e.to_string())?;
     Ok(raw_issues.into_iter().map(transform_issue).collect())
 }
 
@@ -25,8 +30,13 @@ pub(crate) async fn bd_count(options: CwdOptions) -> Result<CountResult, String>
     sync_bd_database(options.cwd.as_deref());
 
     // Fetch all issues: single --all call for bd >= 0.55, fallback to 2 calls for older versions
-    let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
-    let raw_issues = backend::current().list(&ProjectRef::local(options.cwd), &all).map_err(|e| e.to_string())?;
+    let all = ListQuery {
+        include_all: Some(true),
+        ..ListQuery::default()
+    };
+    let raw_issues = backend::current()
+        .list(&ProjectRef::local(options.cwd), &all)
+        .map_err(|e| e.to_string())?;
 
     let mut by_type: HashMap<String, usize> = HashMap::new();
     by_type.insert("bug".to_string(), 0);
@@ -55,7 +65,9 @@ pub(crate) async fn bd_count(options: CwdOptions) -> Result<CountResult, String>
             *count += 1;
         }
 
-        let is_newer = last_updated.as_ref().is_none_or(|last| issue.updated_at > *last);
+        let is_newer = last_updated
+            .as_ref()
+            .is_none_or(|last| issue.updated_at > *last);
         if is_newer {
             last_updated = Some(issue.updated_at.clone());
         }
@@ -76,7 +88,9 @@ pub(crate) async fn bd_ready(options: CwdOptions) -> Result<Vec<Issue>, String> 
     // Sync database before reading to ensure data is up-to-date
     sync_bd_database(options.cwd.as_deref());
 
-    let raw_issues = backend::current().ready(&ProjectRef::local(options.cwd)).map_err(|e| e.to_string())?;
+    let raw_issues = backend::current()
+        .ready(&ProjectRef::local(options.cwd))
+        .map_err(|e| e.to_string())?;
 
     log_info!("[bd_ready] Found {} ready issues", raw_issues.len());
     Ok(raw_issues.into_iter().map(transform_issue).collect())
@@ -84,24 +98,34 @@ pub(crate) async fn bd_ready(options: CwdOptions) -> Result<Vec<Issue>, String> 
 
 #[tauri::command]
 pub(crate) async fn bd_status(options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().status(&ProjectRef::local(options.cwd)).map_err(|e| e.to_string())
+    backend::current()
+        .status(&ProjectRef::local(options.cwd))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub(crate) async fn bd_show(id: String, options: CwdOptions) -> Result<Option<Issue>, String> {
-    log_info!("[bd_show] Called for issue: {} with cwd: {:?}", id, options.cwd);
+    log_info!(
+        "[bd_show] Called for issue: {} with cwd: {:?}",
+        id,
+        options.cwd
+    );
 
     // Sync database before reading to ensure data is up-to-date
     sync_bd_database(options.cwd.as_deref());
 
-    let raw_issue = backend::current().show(&ProjectRef::local(options.cwd), &id).map_err(|e| e.to_string())?;
+    let raw_issue = backend::current()
+        .show(&ProjectRef::local(options.cwd), &id)
+        .map_err(|e| e.to_string())?;
     Ok(raw_issue.map(transform_issue))
 }
 
 #[tauri::command]
 pub(crate) async fn bd_create(payload: CreatePayload) -> Result<Option<Issue>, String> {
     log_info!("[bd_create] Creating issue: {:?}", payload.title);
-    let raw_issue = backend::current().create(&ProjectRef::local(payload.cwd.clone()), &payload).map_err(|e| e.to_string())?;
+    let raw_issue = backend::current()
+        .create(&ProjectRef::local(payload.cwd.clone()), &payload)
+        .map_err(|e| e.to_string())?;
 
     Ok(Some(transform_issue(raw_issue)))
 }
@@ -109,48 +133,92 @@ pub(crate) async fn bd_create(payload: CreatePayload) -> Result<Option<Issue>, S
 #[tauri::command]
 pub(crate) async fn bd_update(id: String, updates: UpdatePayload) -> Result<Option<Issue>, String> {
     // Always log update calls for debugging (regardless of LOGGING_ENABLED)
-    log::info!("[bd_update] Updating issue: {} with cwd: {:?}", id, updates.cwd);
-    log::info!("[bd_update] Updates: status={:?}, title={:?}, type={:?}", updates.status, updates.title, updates.issue_type);
+    log::info!(
+        "[bd_update] Updating issue: {} with cwd: {:?}",
+        id,
+        updates.cwd
+    );
+    log::info!(
+        "[bd_update] Updates: status={:?}, title={:?}, type={:?}",
+        updates.status,
+        updates.title,
+        updates.issue_type
+    );
 
-    let raw_issue = backend::current().update(&ProjectRef::local(updates.cwd.clone()), &id, &updates).map_err(|e| e.to_string())?;
+    let raw_issue = backend::current()
+        .update(&ProjectRef::local(updates.cwd.clone()), &id, &updates)
+        .map_err(|e| e.to_string())?;
 
     Ok(raw_issue.map(transform_issue))
 }
 
 #[tauri::command]
 pub(crate) async fn bd_close(id: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    log_info!("[bd_close] Closing issue: {} with cwd: {:?}", id, options.cwd);
+    log_info!(
+        "[bd_close] Closing issue: {} with cwd: {:?}",
+        id,
+        options.cwd
+    );
 
     // br's backend passes --suggest-next for showing newly unblocked issues
-    backend::current().close(&ProjectRef::local(options.cwd), &id).map_err(|e| e.to_string())
+    backend::current()
+        .close(&ProjectRef::local(options.cwd), &id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub(crate) async fn bd_search(query: String, options: CwdOptions) -> Result<Vec<Issue>, String> {
-    log_info!("[bd_search] Searching for: {} with cwd: {:?}", query, options.cwd);
+    log_info!(
+        "[bd_search] Searching for: {} with cwd: {:?}",
+        query,
+        options.cwd
+    );
 
-    let raw = backend::current().search(&ProjectRef::local(options.cwd), &query).map_err(|e| e.to_string())?;
+    let raw = backend::current()
+        .search(&ProjectRef::local(options.cwd), &query)
+        .map_err(|e| e.to_string())?;
 
     Ok(raw.into_iter().map(transform_issue).collect())
 }
 
 #[tauri::command]
-pub(crate) async fn bd_label_add(id: String, label: String, options: CwdOptions) -> Result<(), String> {
+pub(crate) async fn bd_label_add(
+    id: String,
+    label: String,
+    options: CwdOptions,
+) -> Result<(), String> {
     log_info!("[bd_label_add] Adding label '{}' to issue {}", label, id);
-    backend::current().label_add(&ProjectRef::local(options.cwd), &id, &label).map_err(|e| e.to_string())?;
+    backend::current()
+        .label_add(&ProjectRef::local(options.cwd), &id, &label)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn bd_label_remove(id: String, label: String, options: CwdOptions) -> Result<(), String> {
-    log_info!("[bd_label_remove] Removing label '{}' from issue {}", label, id);
-    backend::current().label_remove(&ProjectRef::local(options.cwd), &id, &label).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_label_remove(
+    id: String,
+    label: String,
+    options: CwdOptions,
+) -> Result<(), String> {
+    log_info!(
+        "[bd_label_remove] Removing label '{}' from issue {}",
+        label,
+        id
+    );
+    backend::current()
+        .label_remove(&ProjectRef::local(options.cwd), &id, &label)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn bd_delete(id: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().delete(&ProjectRef::local(options.cwd.clone()), &id).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_delete(
+    id: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .delete(&ProjectRef::local(options.cwd.clone()), &id)
+        .map_err(|e| e.to_string())?;
 
     // Sync after delete to push deletion to remote and prevent resurrection
     sync_bd_database(options.cwd.as_deref());
@@ -170,12 +238,18 @@ pub(crate) async fn bd_delete(id: String, options: CwdOptions) -> Result<serde_j
 
     if let Some(path) = abs_project_path {
         if let Ok(abs_path) = path.canonicalize() {
-            let att_dir = abs_path.join(".beads").join("attachments").join(issue_short_id(&id));
+            let att_dir = abs_path
+                .join(".beads")
+                .join("attachments")
+                .join(issue_short_id(&id));
             if att_dir.exists() && att_dir.is_dir() {
                 if let Err(e) = fs::remove_dir_all(&att_dir) {
                     log::warn!("[bd_delete] Failed to remove attachments folder: {e}");
                 } else {
-                    log::info!("[bd_delete] Removed attachments folder: {}", att_dir.display());
+                    log::info!(
+                        "[bd_delete] Removed attachments folder: {}",
+                        att_dir.display()
+                    );
                 }
             }
         }
@@ -185,43 +259,85 @@ pub(crate) async fn bd_delete(id: String, options: CwdOptions) -> Result<serde_j
 }
 
 #[tauri::command]
-pub(crate) async fn bd_comments_add(id: String, content: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().comment_add(&ProjectRef::local(options.cwd), &id, &content).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_comments_add(
+    id: String,
+    content: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .comment_add(&ProjectRef::local(options.cwd), &id, &content)
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-pub(crate) async fn bd_dep_add(issue_id: String, blocker_id: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().dep_add(&ProjectRef::local(options.cwd), &issue_id, &blocker_id, None).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_dep_add(
+    issue_id: String,
+    blocker_id: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .dep_add(
+            &ProjectRef::local(options.cwd),
+            &issue_id,
+            &blocker_id,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-pub(crate) async fn bd_dep_remove(issue_id: String, blocker_id: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().dep_remove(&ProjectRef::local(options.cwd), &issue_id, &blocker_id).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_dep_remove(
+    issue_id: String,
+    blocker_id: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .dep_remove(&ProjectRef::local(options.cwd), &issue_id, &blocker_id)
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-pub(crate) async fn bd_dep_add_relation(id1: String, id2: String, relation_type: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().dep_add(&ProjectRef::local(options.cwd), &id1, &id2, Some(&relation_type)).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_dep_add_relation(
+    id1: String,
+    id2: String,
+    relation_type: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .dep_add(
+            &ProjectRef::local(options.cwd),
+            &id1,
+            &id2,
+            Some(&relation_type),
+        )
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-pub(crate) async fn bd_dep_remove_relation(id1: String, id2: String, options: CwdOptions) -> Result<serde_json::Value, String> {
-    backend::current().dep_remove(&ProjectRef::local(options.cwd), &id1, &id2).map_err(|e| e.to_string())?;
+pub(crate) async fn bd_dep_remove_relation(
+    id1: String,
+    id2: String,
+    options: CwdOptions,
+) -> Result<serde_json::Value, String> {
+    backend::current()
+        .dep_remove(&ProjectRef::local(options.cwd), &id1, &id2)
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
 pub(crate) async fn bd_available_relation_types() -> Vec<serde_json::Value> {
-    backend::current().relation_types()
+    backend::current()
+        .relation_types()
         .into_iter()
         .map(|t| serde_json::json!({ "value": t.value, "label": t.label }))
         .collect()

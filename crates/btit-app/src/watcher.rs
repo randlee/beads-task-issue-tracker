@@ -17,7 +17,6 @@ pub(crate) struct WatcherState {
     watched_path: Option<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BeadsChangedPayload {
     path: String,
@@ -42,14 +41,20 @@ pub(crate) fn start_watching(
 
     // Stop existing watcher if any
     if watcher_state.debouncer.is_some() {
-        log::info!("[watcher] Stopping previous watcher for: {:?}", watcher_state.watched_path);
+        log::info!(
+            "[watcher] Stopping previous watcher for: {:?}",
+            watcher_state.watched_path
+        );
         watcher_state.debouncer = None;
         watcher_state.watched_path = None;
     }
 
     let beads_dir = PathBuf::from(&path).join(".beads");
     if !beads_dir.exists() {
-        return Err(format!(".beads directory not found at: {}", beads_dir.display()));
+        return Err(format!(
+            ".beads directory not found at: {}",
+            beads_dir.display()
+        ));
     }
 
     let project_path = path.clone();
@@ -62,13 +67,21 @@ pub(crate) fn start_watching(
                 Ok(events) => {
                     // Filter: only emit if we have actual data-change events
                     let has_data_events = events.iter().any(|e| {
-                        matches!(e.kind, DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous)
+                        matches!(
+                            e.kind,
+                            DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous
+                        )
                     });
                     if has_data_events {
-                        log::info!("[watcher] Change detected in .beads/ ({} events)", events.len());
+                        log::info!(
+                            "[watcher] Change detected in .beads/ ({} events)",
+                            events.len()
+                        );
                         let _ = app_handle.emit(
                             "beads-changed",
-                            BeadsChangedPayload { path: project_path.clone() },
+                            BeadsChangedPayload {
+                                path: project_path.clone(),
+                            },
                         );
                     }
                 }
@@ -77,7 +90,8 @@ pub(crate) fn start_watching(
                 }
             }
         },
-    ).map_err(|e| format!("Failed to create watcher: {e}"))?;
+    )
+    .map_err(|e| format!("Failed to create watcher: {e}"))?;
 
     // Watch .beads/ directory
     // Dolt backend: recursive (changes happen in .dolt/ subdirectories)
@@ -87,10 +101,10 @@ pub(crate) fn start_watching(
     } else {
         notify::RecursiveMode::NonRecursive
     };
-    debouncer.watcher().watch(
-        beads_dir.as_path(),
-        watch_mode,
-    ).map_err(|e| format!("Failed to watch .beads/: {e}"))?;
+    debouncer
+        .watcher()
+        .watch(beads_dir.as_path(), watch_mode)
+        .map_err(|e| format!("Failed to watch .beads/: {e}"))?;
 
     log::info!("[watcher] Started watching: {}", beads_dir.display());
     watcher_state.debouncer = Some(debouncer);
@@ -104,13 +118,14 @@ pub(crate) fn start_watching(
     reason = "tauri::State is the Tauri command parameter type; the IPC-facing signature is frozen"
 )]
 #[tauri::command]
-pub(crate) fn stop_watching(
-    state: tauri::State<'_, Mutex<WatcherState>>,
-) -> Result<(), String> {
+pub(crate) fn stop_watching(state: tauri::State<'_, Mutex<WatcherState>>) -> Result<(), String> {
     let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
 
     if watcher_state.debouncer.is_some() {
-        log::info!("[watcher] Stopped watching: {:?}", watcher_state.watched_path);
+        log::info!(
+            "[watcher] Stopped watching: {:?}",
+            watcher_state.watched_path
+        );
         watcher_state.debouncer = None;
         watcher_state.watched_path = None;
     }
@@ -140,4 +155,3 @@ pub(crate) fn get_watcher_status(
         watched_path: watcher_state.watched_path.clone(),
     })
 }
-

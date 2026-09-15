@@ -9,10 +9,14 @@ use std::path::PathBuf;
 
 /// Returns `true` if `t` starts with a URL scheme (`^[A-Za-z][A-Za-z0-9+.-]*://`).
 fn has_url_scheme(t: &str) -> bool {
-    let Some(colon) = t.find(':') else { return false };
+    let Some(colon) = t.find(':') else {
+        return false;
+    };
     let scheme = &t[..colon];
     let mut chars = scheme.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_ascii_alphabetic() {
         return false;
     }
@@ -29,7 +33,9 @@ fn is_windows_absolute(t: &str) -> bool {
     }
     let mut chars = t.chars();
     match (chars.next(), chars.next(), chars.next()) {
-        (Some(drive), Some(':'), Some(sep)) => drive.is_ascii_alphabetic() && (sep == '\\' || sep == '/'),
+        (Some(drive), Some(':'), Some(sep)) => {
+            drive.is_ascii_alphabetic() && (sep == '\\' || sep == '/')
+        }
         _ => false,
     }
 }
@@ -38,9 +44,15 @@ fn is_windows_absolute(t: &str) -> bool {
 /// Returns false for att: refs, local file paths, cleared: sentinels.
 pub(crate) fn is_real_external_ref(r: &str) -> bool {
     let trimmed = r.trim();
-    if trimmed.is_empty() { return false; }
-    if trimmed.starts_with("cleared:") { return false; }
-    if trimmed.starts_with("att:") { return false; }
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with("cleared:") {
+        return false;
+    }
+    if trimmed.starts_with("att:") {
+        return false;
+    }
     // A URL scheme is real, even if it happens to contain "/attachments/" or "/.beads/".
     if has_url_scheme(trimmed) {
         return true;
@@ -50,10 +62,16 @@ pub(crate) fn is_real_external_ref(r: &str) -> bool {
         return false;
     }
     // Local file paths (absolute or relative .beads/)
-    if trimmed.starts_with('/') { return false; }
-    if trimmed.starts_with(".beads/") { return false; }
+    if trimmed.starts_with('/') {
+        return false;
+    }
+    if trimmed.starts_with(".beads/") {
+        return false;
+    }
     // Anything with path separators inside .beads or attachments is local
-    if trimmed.contains("/attachments/") || trimmed.contains("/.beads/") { return false; }
+    if trimmed.contains("/attachments/") || trimmed.contains("/.beads/") {
+        return false;
+    }
     true
 }
 
@@ -77,7 +95,9 @@ pub(crate) struct MigrateRefsResult {
 /// keeping only real external refs (Redmine, GitHub, URLs).
 /// Returns quickly if the .migrated-attachments marker file exists.
 #[tauri::command]
-pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigrationStatus, String> {
+pub(crate) async fn check_refs_migration(
+    cwd: Option<String>,
+) -> Result<RefsMigrationStatus, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
@@ -86,7 +106,11 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
 
     let beads_dir = PathBuf::from(&working_dir).join(".beads");
     if !beads_dir.exists() {
-        return Ok(RefsMigrationStatus { needs_migration: false, ref_count: 0, just_migrated: false });
+        return Ok(RefsMigrationStatus {
+            needs_migration: false,
+            ref_count: 0,
+            just_migrated: false,
+        });
     }
 
     // Already migrated to v3?
@@ -97,13 +121,21 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
         if just_migrated {
             let _ = std::fs::remove_file(&notify_path);
         }
-        return Ok(RefsMigrationStatus { needs_migration: false, ref_count: 0, just_migrated });
+        return Ok(RefsMigrationStatus {
+            needs_migration: false,
+            ref_count: 0,
+            just_migrated,
+        });
     }
 
     let jsonl_path = beads_dir.join("issues.jsonl");
     if !jsonl_path.exists() {
         let _ = std::fs::write(beads_dir.join(".migrated-attachments"), "");
-        return Ok(RefsMigrationStatus { needs_migration: false, ref_count: 0, just_migrated: false });
+        return Ok(RefsMigrationStatus {
+            needs_migration: false,
+            ref_count: 0,
+            just_migrated: false,
+        });
     }
 
     // Scan JSONL for refs that need cleanup (non-real external refs)
@@ -113,13 +145,17 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
     let mut ref_count: u32 = 0;
 
     for line in content.lines() {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let v: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => continue,
         };
         if let Some(ext_ref) = v.get("external_ref").and_then(|r| r.as_str()) {
-            if ext_ref.is_empty() { continue; }
+            if ext_ref.is_empty() {
+                continue;
+            }
             let refs: Vec<&str> = ext_ref.split(['\n', '|']).collect();
             for r in &refs {
                 let trimmed = r.trim();
@@ -137,7 +173,9 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
     if attachments_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&attachments_dir) {
             for entry in entries.flatten() {
-                if !entry.path().is_dir() { continue; }
+                if !entry.path().is_dir() {
+                    continue;
+                }
                 let name = entry.file_name().to_string_lossy().to_string();
                 if issue_short_id(&name) != name {
                     folder_work_count += 1;
@@ -149,18 +187,32 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
     let total = ref_count + folder_work_count;
     if total == 0 {
         let _ = std::fs::write(beads_dir.join(".migrated-attachments"), "");
-        return Ok(RefsMigrationStatus { needs_migration: false, ref_count: 0, just_migrated: false });
+        return Ok(RefsMigrationStatus {
+            needs_migration: false,
+            ref_count: 0,
+            just_migrated: false,
+        });
     }
 
-    log_info!("[refs_migration_v3] Project needs migration: {} ref(s) to clean, {} folder(s) to update", ref_count, folder_work_count);
-    Ok(RefsMigrationStatus { needs_migration: true, ref_count: total, just_migrated: false })
+    log_info!(
+        "[refs_migration_v3] Project needs migration: {} ref(s) to clean, {} folder(s) to update",
+        ref_count,
+        folder_work_count
+    );
+    Ok(RefsMigrationStatus {
+        needs_migration: true,
+        ref_count: total,
+        just_migrated: false,
+    })
 }
 
 /// Perform the attachment refs migration v3 (filesystem-only).
 /// Delegates to `ensure_refs_migrated_v3` which handles backup, cleanup, dedup, and marker.
 /// The br sync is NOT called here — it will happen naturally after via `sync_bd_database`.
 #[tauri::command]
-pub(crate) async fn migrate_attachment_refs(cwd: Option<String>) -> Result<MigrateRefsResult, String> {
+pub(crate) async fn migrate_attachment_refs(
+    cwd: Option<String>,
+) -> Result<MigrateRefsResult, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
@@ -169,9 +221,11 @@ pub(crate) async fn migrate_attachment_refs(cwd: Option<String>) -> Result<Migra
 
     let beads_dir = PathBuf::from(&working_dir).join(".beads");
     ensure_refs_migrated_v3(&beads_dir, &working_dir);
-    Ok(MigrateRefsResult { success: true, refs_updated: 0 })
+    Ok(MigrateRefsResult {
+        success: true,
+        refs_updated: 0,
+    })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -213,7 +267,9 @@ mod tests {
 
     #[test]
     fn is_real_external_ref_accepts_urls_containing_attachments_segment() {
-        assert!(is_real_external_ref("https://redmine.example/attachments/download/1"));
+        assert!(is_real_external_ref(
+            "https://redmine.example/attachments/download/1"
+        ));
     }
 
     #[test]

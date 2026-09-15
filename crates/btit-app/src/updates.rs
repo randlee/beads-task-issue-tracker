@@ -1,6 +1,6 @@
+use crate::config::get_bd_version;
 use btit_beads::detect::{detect_cli_client, parse_bd_version};
 use btit_cli::command::new_command;
-use crate::config::get_bd_version;
 use btit_types::CliClient;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -60,7 +60,8 @@ pub struct BdCliUpdateInfo {
 // ============================================================================
 
 pub(crate) const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub(crate) const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/w3dev33/beads-task-issue-tracker/releases/latest";
+pub(crate) const GITHUB_RELEASES_URL: &str =
+    "https://api.github.com/repos/w3dev33/beads-task-issue-tracker/releases/latest";
 
 /// Get a GitHub token from `gh auth token` (if gh CLI is installed and authenticated).
 /// Raises the API rate limit from 60/hour (anonymous) to 5,000/hour (authenticated).
@@ -72,10 +73,7 @@ pub(crate) fn get_github_token() -> Option<String> {
         }
     }
     // Fall back to gh CLI
-    let output = new_command("gh")
-        .args(["auth", "token"])
-        .output()
-        .ok()?;
+    let output = new_command("gh").args(["auth", "token"]).output().ok()?;
     if output.status.success() {
         let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !token.is_empty() {
@@ -203,8 +201,7 @@ pub(crate) async fn check_for_updates() -> Result<UpdateInfo, String> {
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = compare_versions(CURRENT_VERSION, &latest_version);
 
-    let download_url = find_platform_asset(&release.assets)
-        .map(|a| a.browser_download_url.clone());
+    let download_url = find_platform_asset(&release.assets).map(|a| a.browser_download_url.clone());
 
     // Fetch CHANGELOG.md via GitHub API (raw.githubusercontent CDN ignores query params for caching)
     let changelog = with_github_auth(
@@ -252,8 +249,7 @@ pub(crate) async fn check_for_updates_demo() -> Result<UpdateInfo, String> {
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
 
-    let download_url = find_platform_asset(&release.assets)
-        .map(|a| a.browser_download_url.clone());
+    let download_url = find_platform_asset(&release.assets).map(|a| a.browser_download_url.clone());
 
     // Fetch CHANGELOG.md via GitHub API (raw.githubusercontent CDN ignores query params for caching)
     let changelog = with_github_auth(
@@ -291,9 +287,13 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
     }
 
     // Parse semver from version string
-    let current_tuple = parse_bd_version(&version_str).map(<(u32, u32, u32)>::from)
+    let current_tuple = parse_bd_version(&version_str)
+        .map(<(u32, u32, u32)>::from)
         .ok_or_else(|| format!("Could not parse version from: {version_str}"))?;
-    let current_version = format!("{}.{}.{}", current_tuple.0, current_tuple.1, current_tuple.2);
+    let current_version = format!(
+        "{}.{}.{}",
+        current_tuple.0, current_tuple.1, current_tuple.2
+    );
 
     // Determine the correct GitHub repo based on client type (bd vs br)
     let client_type = detect_cli_client(&version_str);
@@ -353,14 +353,10 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
         })?;
 
     log::info!("[download_update] Sending GET request...");
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| {
-            log::error!("[download_update] HTTP request failed: {e} (url: {download_url})");
-            format!("Failed to download update: {e}")
-        })?;
+    let response = client.get(&download_url).send().await.map_err(|e| {
+        log::error!("[download_update] HTTP request failed: {e} (url: {download_url})");
+        format!("Failed to download update: {e}")
+    })?;
 
     let status = response.status();
     let final_url = response.url().to_string();
@@ -372,32 +368,35 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
     }
 
     log::info!("[download_update] Reading response bytes...");
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| {
-            log::error!("[download_update] Failed to read response bytes: {e}");
-            format!("Failed to read download bytes: {e}")
-        })?;
+    let bytes = response.bytes().await.map_err(|e| {
+        log::error!("[download_update] Failed to read response bytes: {e}");
+        format!("Failed to read download bytes: {e}")
+    })?;
     log::info!("[download_update] Downloaded {} bytes", bytes.len());
 
     // Save to ~/Downloads
-    let download_dir = dirs::download_dir()
-        .ok_or_else(|| {
-            log::error!("[download_update] Could not find Downloads directory");
-            "Could not find Downloads directory".to_string()
-        })?;
+    let download_dir = dirs::download_dir().ok_or_else(|| {
+        log::error!("[download_update] Could not find Downloads directory");
+        "Could not find Downloads directory".to_string()
+    })?;
 
     let dest_path = download_dir.join(&filename);
     log::info!("[download_update] Saving to: {}", dest_path.display());
-    fs::write(&dest_path, &bytes)
-        .map_err(|e| {
-            log::error!("[download_update] Failed to save file to {}: {}", dest_path.display(), e);
-            format!("Failed to save file: {e}")
-        })?;
+    fs::write(&dest_path, &bytes).map_err(|e| {
+        log::error!(
+            "[download_update] Failed to save file to {}: {}",
+            dest_path.display(),
+            e
+        );
+        format!("Failed to save file: {e}")
+    })?;
 
     let dest_str = dest_path.to_string_lossy().to_string();
-    log::info!("[download_update] Saved successfully: {} ({} bytes)", dest_str, bytes.len());
+    log::info!(
+        "[download_update] Saved successfully: {} ({} bytes)",
+        dest_str,
+        bytes.len()
+    );
 
     // On macOS, mount the DMG
     #[cfg(target_os = "macos")]
@@ -420,8 +419,6 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
     Ok(dest_str)
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,13 +429,20 @@ mod tests {
     fn get_platform_string_returns_non_empty() {
         let platform = get_platform_string();
         assert!(!platform.is_empty());
-        assert!((platform == "macos" || platform == "windows" || platform == "linux"),
-            "platform must be one of macos, windows, linux, got: {platform}");
+        assert!(
+            (platform == "macos" || platform == "windows" || platform == "linux"),
+            "platform must be one of macos, windows, linux, got: {platform}"
+        );
     }
 
     #[test]
     fn find_platform_asset_for_matches_each_suffix() {
-        for suffix in ["_macOS-ARM64.dmg", "_macOS-Intel.dmg", "_Windows.msi", "_Linux-amd64.AppImage"] {
+        for suffix in [
+            "_macOS-ARM64.dmg",
+            "_macOS-Intel.dmg",
+            "_Windows.msi",
+            "_Linux-amd64.AppImage",
+        ] {
             let name = format!("App{suffix}");
             let assets = vec![GitHubAsset {
                 name: name.clone(),
@@ -504,6 +508,4 @@ mod tests {
         assert!(!compare_versions("1.2.0-rc.1", "1.2.0"));
         assert!(compare_versions("1.2.0-rc.1", "1.2.1"));
     }
-
-
 }

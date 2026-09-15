@@ -1,19 +1,19 @@
 #[macro_use]
 extern crate btit_beads; // brings log_info!/log_warn!/log_error!/log_debug! into textual scope
-mod logging;
+mod attachment_refs;
+mod attachments;
 mod backend;
 mod config;
-mod updates;
-mod attachments;
-mod attachment_refs;
-mod watcher;
-mod probe;
+mod fs_commands;
+mod issue_commands;
+mod logging;
 mod migration;
 mod polling;
-mod issue_commands;
-mod fs_commands;
+mod probe;
 #[cfg(test)]
 mod test_backend;
+mod updates;
+mod watcher;
 
 use std::io::Write as _;
 use std::sync::Mutex;
@@ -37,7 +37,10 @@ pub fn run() {
 
             // Log startup info
             log::info!("=== Beads Task-Issue Tracker starting ===");
-            log::info!("[startup] Extended PATH: {}", btit_cli::path::get_extended_path());
+            log::info!(
+                "[startup] Extended PATH: {}",
+                btit_cli::path::get_extended_path()
+            );
 
             // Load config and install the backend for its CLI binary (auto-detects bd→br if no config exists)
             let config = config::load_config();

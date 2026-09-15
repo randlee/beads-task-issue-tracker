@@ -53,8 +53,7 @@ pub(crate) fn save_config(config: &AppConfig) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {e}"))?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write config: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write config: {e}"))?;
     Ok(())
 }
 
@@ -90,7 +89,11 @@ pub(crate) async fn get_cli_binary_path() -> String {
 
 #[tauri::command]
 pub(crate) async fn set_cli_binary_path(path: String) -> Result<String, String> {
-    let binary = if path.trim().is_empty() { "bd".to_string() } else { path.trim().to_string() };
+    let binary = if path.trim().is_empty() {
+        "bd".to_string()
+    } else {
+        path.trim().to_string()
+    };
 
     // Validate the binary first
     let version = validate_cli_binary_internal(&binary)?;
@@ -109,14 +112,20 @@ pub(crate) async fn set_cli_binary_path(path: String) -> Result<String, String> 
 
 #[tauri::command]
 pub(crate) async fn validate_cli_binary(path: String) -> Result<String, String> {
-    let binary = if path.trim().is_empty() { "bd".to_string() } else { path.trim().to_string() };
+    let binary = if path.trim().is_empty() {
+        "bd".to_string()
+    } else {
+        path.trim().to_string()
+    };
     validate_cli_binary_internal(&binary)
 }
 
 pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, String> {
     // Security: reject shell metacharacters — Command::new() doesn't use a shell,
     // but defense-in-depth prevents any future misuse
-    let forbidden = [';', '|', '&', '$', '`', '>', '<', '(', ')', '{', '}', '!', '\n', '\r'];
+    let forbidden = [
+        ';', '|', '&', '$', '`', '>', '<', '(', ')', '{', '}', '!', '\n', '\r',
+    ];
     if binary.chars().any(|c| forbidden.contains(&c)) {
         return Err("Invalid binary path: contains shell metacharacters".to_string());
     }
@@ -135,17 +144,22 @@ pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, Strin
         }
         Ok(output) => {
             let stderr = output.stderr.trim().to_string();
-            Err(format!("'{}' failed: {}", binary, if stderr.is_empty() { "unknown error".to_string() } else { stderr }))
+            Err(format!(
+                "'{}' failed: {}",
+                binary,
+                if stderr.is_empty() {
+                    "unknown error".to_string()
+                } else {
+                    stderr
+                }
+            ))
         }
         Err(BeadsError::Spawn { source, .. }) => {
             Err(format!("'{binary}' not found or not executable: {source}"))
         }
-        Err(e) => {
-            Err(format!("'{binary}' not found or not executable: {e}"))
-        }
+        Err(e) => Err(format!("'{binary}' not found or not executable: {e}")),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -164,11 +178,12 @@ mod tests {
     #[test]
     fn get_config_path_uses_path_components() {
         let path = get_config_path();
-        let components: Vec<_> = path.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+        let components: Vec<_> = path
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
         assert!(components.len() >= 2);
         assert_eq!(components[components.len() - 1], "settings.json");
         assert_eq!(components[components.len() - 2], "com.beads.manager");
     }
-
-
 }

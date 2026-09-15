@@ -1,12 +1,12 @@
 use crate::backend;
+use crate::migration::{cli_of, sync_bd_database};
 use btit_beads::backend::BeadsBackend;
 use btit_beads::issues::transform_issue;
-use crate::migration::{cli_of, sync_bd_database};
 use btit_types::{BdRawIssue, Issue, ListQuery, ProjectRef};
-use std::fs;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
@@ -42,17 +42,25 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
 
     // Fetch issues: single --all call for bd >= 0.55, fallback to 2 calls for older versions
     let project = ProjectRef::local(cwd.clone());
-    let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
+    let all = ListQuery {
+        include_all: Some(true),
+        ..ListQuery::default()
+    };
     let backend = backend::current();
     let raw_all = backend.list(&project, &all).map_err(|e| e.to_string())?;
-    let (raw_open, raw_closed): (Vec<_>, Vec<_>) = raw_all.into_iter()
+    let (raw_open, raw_closed): (Vec<_>, Vec<_>) = raw_all
+        .into_iter()
         .partition(|issue: &BdRawIssue| issue.status != "closed");
 
     // Fetch ready issues
     let raw_ready = backend.ready(&project).map_err(|e| e.to_string())?;
 
-    log_info!("[bd_poll_data] Batched poll done: {} open, {} closed, {} ready",
-        raw_open.len(), raw_closed.len(), raw_ready.len());
+    log_info!(
+        "[bd_poll_data] Batched poll done: {} open, {} closed, {} ready",
+        raw_open.len(),
+        raw_closed.len(),
+        raw_ready.len()
+    );
 
     // Update mtime AFTER our commands ran, so the next bd_check_changed
     // only detects EXTERNAL changes (not our own poll's side effects)
@@ -61,12 +69,15 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
             .map(String::from)
             .or_else(|| env::var("BEADS_PATH").ok())
             .unwrap_or_else(|| {
-            env::current_dir().map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
-        });
+                env::current_dir()
+                    .map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
+            });
         let beads_dir = std::path::Path::new(&working_dir).join(".beads");
 
         if let Some(mtime) = get_beads_mtime(&beads_dir) {
-            let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut map = LAST_KNOWN_MTIME
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             map.insert(working_dir, mtime);
         }
     }
@@ -93,8 +104,8 @@ pub(crate) fn get_beads_mtime_with(
 ) -> Option<std::time::SystemTime> {
     let project = ProjectRef::local(beads_dir.parent().map(|p| p.to_string_lossy().into_owned()));
     let uses_dolt = be.project_uses_dolt(&project);
-    let uses_jsonl = !uses_dolt
-        && cli_of(be, "mtime").is_ok_and(|c| c.capabilities().uses_jsonl_files);
+    let uses_jsonl =
+        !uses_dolt && cli_of(be, "mtime").is_ok_and(|c| c.capabilities().uses_jsonl_files);
     get_beads_mtime_for(uses_dolt, uses_jsonl, beads_dir)
 }
 
@@ -112,7 +123,9 @@ pub(crate) fn get_beads_mtime_for(
 
         // .beads/ dir mtime
         if let Ok(m) = fs::metadata(beads_dir) {
-            if let Ok(t) = m.modified() { times.push(t); }
+            if let Ok(t) = m.modified() {
+                times.push(t);
+            }
         }
 
         // Collect all .dolt/ directories to check:
@@ -140,12 +153,16 @@ pub(crate) fn get_beads_mtime_for(
         // Check mtime of each .dolt/ dir and its manifest files
         for dolt_dir in &dolt_dirs {
             if let Ok(m) = fs::metadata(dolt_dir) {
-                if let Ok(t) = m.modified() { times.push(t); }
+                if let Ok(t) = m.modified() {
+                    times.push(t);
+                }
             }
             for name in &["manifest", "noms/manifest"] {
                 let p = dolt_dir.join(name);
                 if let Ok(m) = fs::metadata(&p) {
-                    if let Ok(t) = m.modified() { times.push(t); }
+                    if let Ok(t) = m.modified() {
+                        times.push(t);
+                    }
                 }
             }
         }
@@ -153,20 +170,20 @@ pub(crate) fn get_beads_mtime_for(
         // Also check issues.jsonl (Dolt exports to it for git sync)
         let jsonl_path = beads_dir.join("issues.jsonl");
         if let Ok(m) = fs::metadata(&jsonl_path) {
-            if let Ok(t) = m.modified() { times.push(t); }
+            if let Ok(t) = m.modified() {
+                times.push(t);
+            }
         }
 
         times.into_iter().max()
     } else {
         // SQLite backend: check db, WAL, and optionally JSONL
-        let mut paths = vec![
-            beads_dir.join("beads.db"),
-            beads_dir.join("beads.db-wal"),
-        ];
+        let mut paths = vec![beads_dir.join("beads.db"), beads_dir.join("beads.db-wal")];
         if uses_jsonl {
             paths.push(beads_dir.join("issues.jsonl"));
         }
-        paths.iter()
+        paths
+            .iter()
             .filter_map(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
             .max()
     }
@@ -186,7 +203,9 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
     let beads_dir = std::path::Path::new(&working_dir).join(".beads");
     let current_mtime = get_beads_mtime(&beads_dir);
 
-    let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut map = LAST_KNOWN_MTIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let previous = map.get(&working_dir).copied();
 
     match (current_mtime, previous) {
@@ -207,7 +226,10 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
         }
         (None, _) => {
             // No database file found
-            log_warn!("[bd_check_changed] No beads database found in {}", working_dir);
+            log_warn!(
+                "[bd_check_changed] No beads database found in {}",
+                working_dir
+            );
             Ok(true) // Report changed to let caller handle missing db
         }
     }
@@ -217,7 +239,9 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
 /// Called from the frontend when switching projects to force a fresh poll.
 #[tauri::command]
 pub(crate) async fn bd_reset_mtime(cwd: Option<String>) -> Result<(), String> {
-    let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut map = LAST_KNOWN_MTIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(path) = cwd {
         log_info!("[bd_reset_mtime] Resetting mtime for: {}", path);
         map.remove(&path);
@@ -237,8 +261,13 @@ mod tests {
         // A path that does not exist on disk: no `.beads` directory, no
         // database or manifest files, so both backend kinds must return
         // `None` without touching the filesystem in a way that could succeed.
-        let temp_dir = std::env::temp_dir().join(format!("beads_test_mtime_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "beads_test_mtime_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
 
         assert_eq!(get_beads_mtime_for(false, false, &temp_dir), None);
         assert_eq!(get_beads_mtime_for(true, false, &temp_dir), None);
@@ -246,14 +275,21 @@ mod tests {
 
     // ---- get_beads_mtime_with over a RecordingInvoker-backed BdCli (b-8) ----------
 
-    use crate::test_backend::{bd_invoker, recording_bd, FakeBackend, TempProject, BD_0_49_6, BD_1_0_4};
+    use crate::test_backend::{
+        bd_invoker, recording_bd, FakeBackend, TempProject, BD_0_49_6, BD_1_0_4,
+    };
     use std::time::{Duration, SystemTime};
 
     /// Sets `path`'s mtime to `t` and returns the mtime the filesystem stored.
     fn set_mtime(path: &std::path::Path, t: SystemTime) -> Result<SystemTime, String> {
-        let file = fs::File::options().write(true).open(path).map_err(|e| e.to_string())?;
+        let file = fs::File::options()
+            .write(true)
+            .open(path)
+            .map_err(|e| e.to_string())?;
         file.set_modified(t).map_err(|e| e.to_string())?;
-        fs::metadata(path).and_then(|m| m.modified()).map_err(|e| e.to_string())
+        fs::metadata(path)
+            .and_then(|m| m.modified())
+            .map_err(|e| e.to_string())
     }
 
     #[test]
@@ -268,11 +304,23 @@ mod tests {
         )?;
 
         let (bd049, inv049) = recording_bd(bd_invoker(BD_0_49_6));
-        assert_eq!(get_beads_mtime_with(&bd049, &project.beads_dir()), Some(jsonl_time));
+        assert_eq!(
+            get_beads_mtime_with(&bd049, &project.beads_dir()),
+            Some(jsonl_time)
+        );
         let (bd1, inv1) = recording_bd(bd_invoker(BD_1_0_4));
-        assert_eq!(get_beads_mtime_with(&bd1, &project.beads_dir()), Some(db_time));
-        let no_cli = FakeBackend { uses_dolt: false, cli: None };
-        assert_eq!(get_beads_mtime_with(&no_cli, &project.beads_dir()), Some(db_time));
+        assert_eq!(
+            get_beads_mtime_with(&bd1, &project.beads_dir()),
+            Some(db_time)
+        );
+        let no_cli = FakeBackend {
+            uses_dolt: false,
+            cli: None,
+        };
+        assert_eq!(
+            get_beads_mtime_with(&no_cli, &project.beads_dir()),
+            Some(db_time)
+        );
 
         assert!(inv049.calls().is_empty() && inv1.calls().is_empty());
         assert_eq!(inv049.probe_calls() + inv1.probe_calls(), 0);
@@ -285,8 +333,14 @@ mod tests {
         let (bd1, inv) = recording_bd(bd_invoker(BD_1_0_4));
         // No beads.db exists, so a SQLite reading would be None.
         assert!(get_beads_mtime_with(&bd1, &project.beads_dir()).is_some());
-        let sqlite_view = FakeBackend { uses_dolt: false, cli: None };
-        assert_eq!(get_beads_mtime_with(&sqlite_view, &project.beads_dir()), None);
+        let sqlite_view = FakeBackend {
+            uses_dolt: false,
+            cli: None,
+        };
+        assert_eq!(
+            get_beads_mtime_with(&sqlite_view, &project.beads_dir()),
+            None
+        );
         assert!(inv.calls().is_empty());
         Ok(())
     }

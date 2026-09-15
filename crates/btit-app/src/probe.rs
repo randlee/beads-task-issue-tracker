@@ -27,12 +27,19 @@ pub(crate) async fn fetch_external_data(url: String) -> Result<String, String> {
         .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
-        let err = format!("HTTP {}: {}", response.status().as_u16(), response.status().canonical_reason().unwrap_or("Unknown"));
+        let err = format!(
+            "HTTP {}: {}",
+            response.status().as_u16(),
+            response.status().canonical_reason().unwrap_or("Unknown")
+        );
         log_error!("[probe] GET failed: {}", err);
         return Err(err);
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -74,7 +81,10 @@ pub(crate) async fn post_external_data(url: String, body: String) -> Result<Stri
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -98,7 +108,10 @@ pub(crate) async fn delete_external_data(url: String) -> Result<String, String> 
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -124,7 +137,10 @@ pub(crate) async fn patch_external_data(url: String, body: String) -> Result<Str
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))
 }
 
 // ============================================================================
@@ -170,5 +186,3 @@ pub(crate) async fn launch_probe(port: u16) -> Result<String, String> {
     log_info!("[probe] Launched on port {}", port);
     Ok("launched".to_string())
 }
-
-

@@ -10,9 +10,13 @@ pub(crate) async fn open_image_file(path: String) -> Result<(), String> {
     log_info!("[open_image_file] Opening: {}", path);
 
     // Security: Only allow image file extensions
-    let allowed_extensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif"];
+    let allowed_extensions = [
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif",
+    ];
     let path_lower = path.to_lowercase();
-    let is_image = allowed_extensions.iter().any(|ext| path_lower.ends_with(&format!(".{ext}")));
+    let is_image = allowed_extensions
+        .iter()
+        .any(|ext| path_lower.ends_with(&format!(".{ext}")));
 
     if !is_image {
         return Err("Only image files are allowed".to_string());
@@ -24,11 +28,16 @@ pub(crate) async fn open_image_file(path: String) -> Result<(), String> {
     }
 
     // Security: Canonicalize to resolve symlinks/.. and verify inside .beads/attachments/
-    let canonical = std::path::Path::new(&path).canonicalize()
+    let canonical = std::path::Path::new(&path)
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy();
     if !canonical_str.contains("/.beads/attachments/") {
-        log_warn!("[open_image_file] Refusing to open file outside attachments: {} (resolved: {})", path, canonical_str);
+        log_warn!(
+            "[open_image_file] Refusing to open file outside attachments: {} (resolved: {})",
+            path,
+            canonical_str
+        );
         return Err("Can only open files inside .beads/attachments/".to_string());
     }
 
@@ -103,11 +112,16 @@ pub(crate) async fn read_image_file(path: String) -> Result<ImageData, String> {
     }
 
     // Security: Canonicalize to resolve symlinks/.. and verify inside .beads/attachments/
-    let canonical = std::path::Path::new(&path).canonicalize()
+    let canonical = std::path::Path::new(&path)
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy();
     if !canonical_str.contains("/.beads/attachments/") {
-        log_warn!("[read_image_file] Refusing to read file outside attachments: {} (resolved: {})", path, canonical_str);
+        log_warn!(
+            "[read_image_file] Refusing to read file outside attachments: {} (resolved: {})",
+            path,
+            canonical_str
+        );
         return Err("Can only read files inside .beads/attachments/".to_string());
     }
 
@@ -121,12 +135,14 @@ pub(crate) async fn read_image_file(path: String) -> Result<ImageData, String> {
 pub(crate) fn base64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     // `n & 0x3F` is always < 64: the fallback is unreachable but non-panicking.
-    let sym = |n: u32| -> char { ALPHABET.get((n & 0x3F) as usize).copied().unwrap_or(b'A') as char };
+    let sym =
+        |n: u32| -> char { ALPHABET.get((n & 0x3F) as usize).copied().unwrap_or(b'A') as char };
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let mut it = chunk.iter().copied();
         let (b0, b1, b2) = (it.next().unwrap_or(0), it.next(), it.next());
-        let n = (u32::from(b0) << 16) | (u32::from(b1.unwrap_or(0)) << 8) | u32::from(b2.unwrap_or(0));
+        let n =
+            (u32::from(b0) << 16) | (u32::from(b1.unwrap_or(0)) << 8) | u32::from(b2.unwrap_or(0));
         out.push(sym(n >> 18));
         out.push(sym(n >> 12));
         out.push(if b1.is_some() { sym(n >> 6) } else { '=' });
@@ -145,8 +161,8 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
     } else {
         let p = PathBuf::from(&project_path);
         if p.is_relative() {
-            let cwd = env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {e}"))?;
+            let cwd =
+                env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?;
             cwd.join(&p)
         } else {
             p
@@ -172,12 +188,20 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
     // Get list of all existing issue IDs via bd list --all
     let existing_ids: std::collections::HashSet<String> = {
         let project = ProjectRef::local(Some(abs_project_path.to_string_lossy().to_string()));
-        let all = ListQuery { include_all: Some(true), ..ListQuery::default() };
-        let issues = backend::current().list(&project, &all).map_err(|e| e.to_string())?;
+        let all = ListQuery {
+            include_all: Some(true),
+            ..ListQuery::default()
+        };
+        let issues = backend::current()
+            .list(&project, &all)
+            .map_err(|e| e.to_string())?;
         issues.into_iter().map(|i| i.id).collect()
     };
 
-    log::info!("[purge_orphan_attachments] Found {} existing issues", existing_ids.len());
+    log::info!(
+        "[purge_orphan_attachments] Found {} existing issues",
+        existing_ids.len()
+    );
 
     // List all subdirectories in attachments folder
     let entries = fs::read_dir(&attachments_dir)
@@ -197,7 +221,9 @@ pub(crate) async fn purge_orphan_attachments(project_path: String) -> Result<Pur
         };
 
         // Check if this folder corresponds to an existing issue (folders use short IDs)
-        let is_owned = existing_ids.iter().any(|id| issue_short_id(id) == folder_name);
+        let is_owned = existing_ids
+            .iter()
+            .any(|id| issue_short_id(id) == folder_name);
         if !is_owned {
             log::info!("[purge_orphan_attachments] Deleting orphan folder: {folder_name}");
             if let Err(e) = fs::remove_dir_all(&path) {
@@ -225,7 +251,9 @@ fn sanitize_segment(segment: &str) -> String {
     let mut sanitized = String::with_capacity(segment.len());
     for c in segment.chars() {
         let replacement = match c {
-            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => "a",
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => {
+                "a"
+            }
             'è' | 'é' | 'ê' | 'ë' | 'È' | 'É' | 'Ê' | 'Ë' => "e",
             'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' | 'Î' | 'Ï' => "i",
             'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' => "o",
@@ -236,9 +264,18 @@ fn sanitize_segment(segment: &str) -> String {
             'æ' | 'Æ' => "ae",
             'œ' | 'Œ' => "oe",
             'ý' | 'ÿ' | 'Ý' => "y",
-            'A'..='Z' => { sanitized.push(c.to_ascii_lowercase()); continue; },
-            'a'..='z' | '0'..='9' => { sanitized.push(c); continue; },
-            '-' | ' ' | '_' | '.' => { sanitized.push('-'); continue; },
+            'A'..='Z' => {
+                sanitized.push(c.to_ascii_lowercase());
+                continue;
+            }
+            'a'..='z' | '0'..='9' => {
+                sanitized.push(c);
+                continue;
+            }
+            '-' | ' ' | '_' | '.' => {
+                sanitized.push('-');
+                continue;
+            }
             _ => "-",
         };
         sanitized.push_str(replacement);
@@ -277,7 +314,11 @@ pub(crate) fn sanitize_filename(filename: &str) -> String {
 
     let sanitized_stem = sanitize_segment(stem);
     let sanitized_ext = sanitize_segment(ext);
-    let stem_part = if sanitized_stem.is_empty() { "file".to_string() } else { sanitized_stem };
+    let stem_part = if sanitized_stem.is_empty() {
+        "file".to_string()
+    } else {
+        sanitized_stem
+    };
 
     if sanitized_ext.is_empty() {
         stem_part
@@ -287,7 +328,9 @@ pub(crate) fn sanitize_filename(filename: &str) -> String {
 }
 
 /// Image file extensions supported for attachment preview
-pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif"];
+pub(crate) const IMAGE_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif",
+];
 
 /// Markdown file extensions supported for attachment preview
 pub(crate) const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown"];
@@ -318,9 +361,15 @@ pub(crate) fn resolve_attachment_dir(attachments_dir: &std::path::Path, issue_id
 /// Classify a filename as "image", "markdown", or "other"
 pub(crate) fn classify_attachment(filename: &str) -> &'static str {
     let lower = filename.to_lowercase();
-    if IMAGE_EXTENSIONS.iter().any(|ext| lower.ends_with(&format!(".{ext}"))) {
+    if IMAGE_EXTENSIONS
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")))
+    {
         "image"
-    } else if MARKDOWN_EXTENSIONS.iter().any(|ext| lower.ends_with(&format!(".{ext}"))) {
+    } else if MARKDOWN_EXTENSIONS
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")))
+    {
         "markdown"
     } else {
         "other"
@@ -350,7 +399,6 @@ pub(crate) fn resolve_duplicate_filename(dir: &std::path::Path, name: &str) -> S
     format!("{stem}-{ts}{ext}")
 }
 
-
 #[tauri::command]
 pub(crate) async fn copy_file_to_attachments(
     project_path: String,
@@ -363,7 +411,9 @@ pub(crate) async fn copy_file_to_attachments(
 
     // Validate file extension (images + markdown)
     let source_lower = source_path.to_lowercase();
-    let is_allowed = IMAGE_EXTENSIONS.iter().chain(MARKDOWN_EXTENSIONS.iter())
+    let is_allowed = IMAGE_EXTENSIONS
+        .iter()
+        .chain(MARKDOWN_EXTENSIONS.iter())
         .any(|ext| source_lower.ends_with(&format!(".{ext}")));
 
     if !is_allowed {
@@ -382,8 +432,8 @@ pub(crate) async fn copy_file_to_attachments(
     } else {
         let p = PathBuf::from(&project_path);
         if p.is_relative() {
-            let cwd = env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {e}"))?;
+            let cwd =
+                env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?;
             cwd.join(&p)
         } else {
             p
@@ -415,7 +465,10 @@ pub(crate) async fn copy_file_to_attachments(
     // Copy the file
     fs::copy(&source, &dest_path).map_err(|e| format!("Failed to copy file: {e}"))?;
 
-    log::info!("[copy_file_to_attachments] Copied to: {}", dest_path.display());
+    log::info!(
+        "[copy_file_to_attachments] Copied to: {}",
+        dest_path.display()
+    );
 
     // Return just the filename (frontend doesn't need to store it in external_ref)
     Ok(dest_filename)
@@ -425,22 +478,25 @@ pub(crate) async fn copy_file_to_attachments(
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentFile {
     pub filename: String,
-    pub file_type: String,   // "image" or "markdown"
-    pub path: String,        // absolute path
-    pub modified: u64,       // mtime in epoch seconds (for sorting)
+    pub file_type: String, // "image" or "markdown"
+    pub path: String,      // absolute path
+    pub modified: u64,     // mtime in epoch seconds (for sorting)
 }
 
 /// List all attachments for an issue by reading the filesystem directly.
 /// Returns images and markdown files sorted by modification time (newest first).
 #[tauri::command]
-pub(crate) async fn list_attachments(project_path: String, issue_id: String) -> Result<Vec<AttachmentFile>, String> {
+pub(crate) async fn list_attachments(
+    project_path: String,
+    issue_id: String,
+) -> Result<Vec<AttachmentFile>, String> {
     let abs_project_path = if project_path == "." || project_path.is_empty() {
         env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?
     } else {
         let p = PathBuf::from(&project_path);
         if p.is_relative() {
-            let cwd = env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {e}"))?;
+            let cwd =
+                env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?;
             cwd.join(&p)
         } else {
             p
@@ -461,17 +517,24 @@ pub(crate) async fn list_attachments(project_path: String, issue_id: String) -> 
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
 
         let name = entry.file_name().to_string_lossy().to_string();
         // Skip legacy index.json files
-        if name == "index.json" { continue; }
+        if name == "index.json" {
+            continue;
+        }
 
         let file_type = classify_attachment(&name);
         // Only return images and markdown
-        if file_type == "other" { continue; }
+        if file_type == "other" {
+            continue;
+        }
 
-        let modified = entry.metadata()
+        let modified = entry
+            .metadata()
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -493,7 +556,11 @@ pub(crate) async fn list_attachments(project_path: String, issue_id: String) -> 
 
 /// Delete an attachment file by filename within an issue's attachment directory.
 #[tauri::command]
-pub(crate) async fn delete_attachment(project_path: String, issue_id: String, filename: String) -> Result<(), String> {
+pub(crate) async fn delete_attachment(
+    project_path: String,
+    issue_id: String,
+    filename: String,
+) -> Result<(), String> {
     log::info!("[delete_attachment] project: {project_path}, issue: {issue_id}, file: {filename}");
 
     // Security: reject path traversal
@@ -506,8 +573,8 @@ pub(crate) async fn delete_attachment(project_path: String, issue_id: String, fi
     } else {
         let p = PathBuf::from(&project_path);
         if p.is_relative() {
-            let cwd = env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {e}"))?;
+            let cwd =
+                env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?;
             cwd.join(&p)
         } else {
             p
@@ -523,20 +590,23 @@ pub(crate) async fn delete_attachment(project_path: String, issue_id: String, fi
     let file_path = issue_dir.join(&filename);
 
     if !file_path.exists() {
-        log::info!("[delete_attachment] File does not exist: {}", file_path.display());
+        log::info!(
+            "[delete_attachment] File does not exist: {}",
+            file_path.display()
+        );
         return Ok(());
     }
 
     // Security: verify file is inside .beads/attachments/
-    let canonical = file_path.canonicalize()
+    let canonical = file_path
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy();
     if !canonical_str.contains("/.beads/attachments/") {
         return Err("Can only delete files inside .beads/attachments/".to_string());
     }
 
-    fs::remove_file(&file_path)
-        .map_err(|e| format!("Failed to delete file: {e}"))?;
+    fs::remove_file(&file_path).map_err(|e| format!("Failed to delete file: {e}"))?;
 
     log::info!("[delete_attachment] Deleted: {}", file_path.display());
 
@@ -544,14 +614,18 @@ pub(crate) async fn delete_attachment(project_path: String, issue_id: String, fi
     if issue_dir.exists() {
         if let Ok(entries) = fs::read_dir(&issue_dir) {
             // Count non-index.json entries
-            let count = entries.flatten()
+            let count = entries
+                .flatten()
                 .filter(|e| e.file_name().to_string_lossy() != "index.json")
                 .count();
             if count == 0 {
                 // Remove index.json if present, then the directory
                 let _ = fs::remove_file(issue_dir.join("index.json"));
                 let _ = fs::remove_dir(&issue_dir);
-                log::info!("[delete_attachment] Cleaned up empty folder: {}", issue_dir.display());
+                log::info!(
+                    "[delete_attachment] Cleaned up empty folder: {}",
+                    issue_dir.display()
+                );
             }
         }
     }
@@ -572,7 +646,8 @@ pub(crate) async fn read_text_file(path: String) -> Result<TextData, String> {
     let path_lower = path.to_lowercase();
     let is_markdown = std::path::Path::new(&path_lower)
         .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) || path_lower.ends_with(".markdown");
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        || path_lower.ends_with(".markdown");
 
     if !is_markdown {
         return Err("Only markdown files are allowed".to_string());
@@ -584,17 +659,21 @@ pub(crate) async fn read_text_file(path: String) -> Result<TextData, String> {
     }
 
     // Security: Canonicalize to resolve symlinks/.. and verify inside .beads/attachments/
-    let canonical = std::path::Path::new(&path).canonicalize()
+    let canonical = std::path::Path::new(&path)
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy();
     if !canonical_str.contains("/.beads/attachments/") {
-        log_warn!("[read_text_file] Refusing to read file outside attachments: {} (resolved: {})", path, canonical_str);
+        log_warn!(
+            "[read_text_file] Refusing to read file outside attachments: {} (resolved: {})",
+            path,
+            canonical_str
+        );
         return Err("Can only read files inside .beads/attachments/".to_string());
     }
 
     // Read file as UTF-8
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {e}"))?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
 
     Ok(TextData { content })
 }
@@ -607,7 +686,8 @@ pub(crate) async fn write_text_file(path: String, content: String) -> Result<(),
     let path_lower = path.to_lowercase();
     let is_markdown = std::path::Path::new(&path_lower)
         .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) || path_lower.ends_with(".markdown");
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        || path_lower.ends_with(".markdown");
 
     if !is_markdown {
         return Err("Only markdown files are allowed".to_string());
@@ -619,23 +699,29 @@ pub(crate) async fn write_text_file(path: String, content: String) -> Result<(),
     }
 
     // Security: Canonicalize to resolve symlinks/.. and verify inside .beads/attachments/
-    let canonical = std::path::Path::new(&path).canonicalize()
+    let canonical = std::path::Path::new(&path)
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy();
     if !canonical_str.contains("/.beads/attachments/") {
-        log_warn!("[write_text_file] Refusing to write file outside attachments: {} (resolved: {})", path, canonical_str);
+        log_warn!(
+            "[write_text_file] Refusing to write file outside attachments: {} (resolved: {})",
+            path,
+            canonical_str
+        );
         return Err("Can only write files inside .beads/attachments/".to_string());
     }
 
     // Write content to file
-    fs::write(&path, &content)
-        .map_err(|e| format!("Failed to write file: {e}"))?;
+    fs::write(&path, &content).map_err(|e| format!("Failed to write file: {e}"))?;
 
-    log_info!("[write_text_file] Written {} bytes to {}", content.len(), path);
+    log_info!(
+        "[write_text_file] Written {} bytes to {}",
+        content.len(),
+        path
+    );
     Ok(())
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -767,8 +853,13 @@ mod tests {
 
     #[test]
     fn resolve_duplicate_filename_no_clash() {
-        let temp_dir = std::env::temp_dir().join(format!("beads_test_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "beads_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         let result = resolve_duplicate_filename(&temp_dir, "newfile.txt");
@@ -779,8 +870,13 @@ mod tests {
 
     #[test]
     fn resolve_duplicate_filename_with_clash() {
-        let temp_dir = std::env::temp_dir().join(format!("beads_test_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "beads_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         // Create a file
@@ -817,6 +913,4 @@ mod tests {
         let result = resolve_attachment_dir(&base, "long-prefix-name-xyz");
         assert_eq!(result, base.join("xyz"));
     }
-
-
 }
