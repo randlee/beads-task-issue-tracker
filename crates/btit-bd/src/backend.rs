@@ -252,28 +252,41 @@ impl DoltOperations for BdCli {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use btit_cli::testing::RecordingInvoker;
 
-    // ---- Moved from btit-app/src/cli.rs (b-5 Deliverable 5) ---------------------
-    //
-    // Exercises the wrapper end to end: `BdCli::project_uses_dolt` still spawns
-    // `bd --version` through a fresh `CliRunner` (B10 fixes that in b-10, not here).
+    // `BdCli::project_uses_dolt_false_without_beads_dir` spawned `bd --version`
+    // through a fresh `CliRunner`; b-10 (B10) replaced it with
+    // `dolt::tests::project_uses_dolt_for_is_false_for_dir_without_beads_layout`,
+    // which calls the pure core. This test keeps the wrapper covered over a scripted
+    // probe, so it spawns nothing either.
 
     #[test]
-    fn project_uses_dolt_false_without_beads_dir() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "beads_test_no_beads_{}",
+    fn project_uses_dolt_wrapper_derives_beads_dir_from_scripted_probe() {
+        let project = std::env::temp_dir().join(format!(
+            "beads_wrapper_dolt_{}_{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        let _ = std::fs::create_dir_all(&temp_dir);
+        let beads = project.join(".beads");
+        std::fs::create_dir_all(&beads).unwrap_or_else(|e| panic!("create_dir_all failed: {e}"));
+        let project_ref = ProjectRef::local(Some(project.to_string_lossy().to_string()));
+        let bd_1 = CliProbe {
+            client: CliClient::Bd,
+            version: Some((1, 0, 4).into()),
+            raw: "bd version 1.0.4".to_string(),
+        };
+        let cli = BdCli {
+            inv: Box::new(RecordingInvoker::new(Some(bd_1))),
+        };
 
-        let result = BdCli::new("bd", Arc::new(ProjectLocks::new())).project_uses_dolt(
-            &ProjectRef::local(Some(temp_dir.to_string_lossy().to_string())),
-        );
-        assert!(!result);
+        assert!(!cli.project_uses_dolt(&project_ref), "no metadata.json");
+        std::fs::write(beads.join("metadata.json"), r#"{"backend":"dolt"}"#)
+            .unwrap_or_else(|e| panic!("write failed: {e}"));
+        assert!(cli.project_uses_dolt(&project_ref), "bd 1.x metadata rule");
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&project);
     }
 }
