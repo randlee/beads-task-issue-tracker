@@ -124,6 +124,10 @@ impl CliInvoker for CliRunner {
     }
 
     fn client_info(&self) -> Option<CliProbe> {
+        // The guard is held across the `--version` spawn on purpose, as in
+        // cli.rs:326-338: concurrent callers wait for one probe instead of each
+        // spawning their own. Only parsed successes are cached, so a failed probe
+        // is retried by the next caller.
         let mut cached = self.cached();
         if let Some(p) = cached.as_ref() {
             return Some(p.clone());
