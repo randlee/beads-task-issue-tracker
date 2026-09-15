@@ -25,21 +25,21 @@ pub fn supports_daemon_flag_for(client: CliClient, major: u32, minor: u32, _patc
 
 /// Returns true if the CLI uses issues.jsonl files.
 /// - br: ALWAYS (frozen on SQLite+JSONL architecture)
-/// - bd < 0.50.0: YES
-/// - bd >= 0.50.0: NO (Dolt only)
+/// - bd < 0.51.0: YES
+/// - bd >= 0.51.0: NO (Dolt only; the tombstone system replaced JSONL in 0.51.0, B5)
 /// - unknown: NO (safe default)
 #[must_use]
 pub fn uses_jsonl_files_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
     match client {
         CliClient::Br => true, // br always uses JSONL
-        CliClient::Bd => major == 0 && minor < 50,
+        CliClient::Bd => major == 0 && minor < 51,
         CliClient::Unknown => false,
     }
 }
 
 /// Returns true if `bd list --all` works correctly.
 /// The --all flag was buggy before bd 0.55.0 (returned incorrect results).
-/// - br: NO
+/// - br: returns true (unverified against `beads_rust`; OQ-4)
 /// - bd >= 0.55.0: YES
 /// - bd < 0.55.0: NO (use 2 separate calls instead)
 /// - unknown: NO (safe default)
@@ -53,10 +53,10 @@ pub fn supports_list_all_flag_for(client: CliClient, major: u32, minor: u32, _pa
 }
 
 /// Returns true if `bd delete --hard` is supported.
-/// The --hard flag was removed in bd 0.50.0.
+/// The --hard flag was removed in bd 0.51.0 (the tombstone system replaced it, B4).
 /// - br: NO
-/// - bd < 0.50.0: YES
-/// - bd >= 0.50.0: NO (only --force needed)
+/// - bd < 0.51.0: YES
+/// - bd >= 0.51.0: NO (only --force needed)
 /// - unknown: NO (safe default)
 #[must_use]
 pub fn supports_delete_hard_flag_for(
@@ -66,15 +66,15 @@ pub fn supports_delete_hard_flag_for(
     _patch: u32,
 ) -> bool {
     match client {
-        CliClient::Bd => major == 0 && minor < 50,
+        CliClient::Bd => major == 0 && minor < 51,
         _ => false,
     }
 }
 
 /// Returns true if the CLI uses the Dolt backend (inverse of uses_jsonl_files).
 /// - br: NEVER (frozen on SQLite+JSONL architecture)
-/// - bd >= 0.50.0: YES (Dolt only)
-/// - bd < 0.50.0: NO (SQLite+JSONL)
+/// - bd >= 0.51.0: YES (Dolt only, B5)
+/// - bd < 0.51.0: NO (SQLite+JSONL)
 /// - unknown: NO (safe default)
 #[must_use]
 #[expect(
@@ -85,7 +85,7 @@ pub fn supports_delete_hard_flag_for(
 pub fn uses_dolt_backend_for(client: CliClient, major: u32, minor: u32, _patch: u32) -> bool {
     match client {
         CliClient::Br => false, // br never uses Dolt
-        CliClient::Bd => major > 0 || minor >= 50,
+        CliClient::Bd => major > 0 || minor >= 51,
         CliClient::Unknown => false,
     }
 }
@@ -149,8 +149,10 @@ mod tests {
     fn uses_jsonl_files_table_driven() {
         // (client, major, minor, patch, expected)
         let cases = vec![
-            (CliClient::Bd, 0, 49, 6, true),  // bd 0.49.6: major==0 && minor < 50
-            (CliClient::Bd, 0, 50, 0, false), // bd 0.50.0: minor !< 50
+            (CliClient::Bd, 0, 49, 6, true),  // bd 0.49.6: major==0 && minor < 51
+            (CliClient::Bd, 0, 50, 0, true),  // bd 0.50.0: minor < 51 (B5)
+            (CliClient::Bd, 0, 50, 3, true),  // bd 0.50.3: minor < 51 (B5)
+            (CliClient::Bd, 0, 51, 0, false), // bd 0.51.0: minor !< 51 (B5)
             (CliClient::Bd, 0, 52, 0, false), // bd 0.52.0
             (CliClient::Bd, 0, 55, 0, false), // bd 0.55.0
             (CliClient::Bd, 0, 56, 0, false), // bd 0.56.0
@@ -199,8 +201,10 @@ mod tests {
     fn supports_delete_hard_flag_table_driven() {
         // (client, major, minor, patch, expected)
         let cases = vec![
-            (CliClient::Bd, 0, 49, 6, true),  // bd 0.49.6: major==0 && minor < 50
-            (CliClient::Bd, 0, 50, 0, false), // bd 0.50.0: minor !< 50
+            (CliClient::Bd, 0, 49, 6, true),  // bd 0.49.6: major==0 && minor < 51
+            (CliClient::Bd, 0, 50, 0, true),  // bd 0.50.0: minor < 51 (B4)
+            (CliClient::Bd, 0, 50, 3, true),  // bd 0.50.3: minor < 51 (B4)
+            (CliClient::Bd, 0, 51, 0, false), // bd 0.51.0: minor !< 51 (B4)
             (CliClient::Bd, 0, 52, 0, false), // bd 0.52.0
             (CliClient::Bd, 0, 55, 0, false), // bd 0.55.0
             (CliClient::Bd, 0, 56, 0, false), // bd 0.56.0
@@ -224,11 +228,13 @@ mod tests {
     fn uses_dolt_backend_table_driven() {
         // (client, major, minor, patch, expected)
         let cases = vec![
-            (CliClient::Bd, 0, 49, 6, false), // bd 0.49.6: major !> 0 && minor !>= 50
-            (CliClient::Bd, 0, 50, 0, true),  // bd 0.50.0: minor >= 50
-            (CliClient::Bd, 0, 52, 0, true),  // bd 0.52.0: minor >= 50
-            (CliClient::Bd, 0, 55, 0, true),  // bd 0.55.0: minor >= 50
-            (CliClient::Bd, 0, 56, 0, true),  // bd 0.56.0: minor >= 50
+            (CliClient::Bd, 0, 49, 6, false), // bd 0.49.6: major !> 0 && minor !>= 51
+            (CliClient::Bd, 0, 50, 0, false), // bd 0.50.0: minor !>= 51 (B5)
+            (CliClient::Bd, 0, 50, 3, false), // bd 0.50.3: minor !>= 51 (B5)
+            (CliClient::Bd, 0, 51, 0, true),  // bd 0.51.0: minor >= 51 (B5)
+            (CliClient::Bd, 0, 52, 0, true),  // bd 0.52.0: minor >= 51
+            (CliClient::Bd, 0, 55, 0, true),  // bd 0.55.0: minor >= 51
+            (CliClient::Bd, 0, 56, 0, true),  // bd 0.56.0: minor >= 51
             (CliClient::Bd, 1, 0, 4, true),   // bd 1.0.4: major > 0
             (CliClient::Bd, 1, 2, 1, true),   // bd 1.2.1: major > 0
             (CliClient::Br, 0, 1, 33, false), // br 0.1.33: always false
@@ -245,7 +251,8 @@ mod tests {
         }
     }
 
-    /// Literal expectations taken from the `_for` cores at `a18c724` (cli.rs:372-459), so a
+    /// Literal expectations taken from the `_for` cores (originally `cli.rs:372-459` at
+    /// `a18c724`; the `(Bd, 0.50.0)` row reflects the B4/B5 cutoff moves to 0.51.0), so a
     /// wiring mistake in `capabilities_for` cannot hide behind derived expectations.
     /// Field order: `supports_daemon_flag`, `uses_jsonl_files`, `uses_dolt_backend`,
     /// `supports_list_all_flag`, `supports_delete_hard_flag`.
@@ -289,10 +296,10 @@ mod tests {
             }),
             BackendCapabilities {
                 supports_daemon_flag: false,
-                uses_jsonl_files: false,
-                uses_dolt_backend: true,
+                uses_jsonl_files: true,
+                uses_dolt_backend: false,
                 supports_list_all_flag: false,
-                supports_delete_hard_flag: false,
+                supports_delete_hard_flag: true,
             },
         ),
         (
