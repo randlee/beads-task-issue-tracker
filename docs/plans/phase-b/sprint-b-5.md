@@ -202,6 +202,29 @@ Implemented on `feature/sprint-b-5-btit-bd`, forked from the b-4 head (`506af12`
 - `git diff --check` — clean.
 - Test-preservation gate against baseline `94e44d3` (`BASELINE_TEST_COUNT=155`): `/tmp/baseline-tests.txt` has 155 lines, `/tmp/after-tests.txt` is non-vacuous, `comm -23 /tmp/baseline-tests.txt /tmp/after-tests.txt` prints nothing.
 
+**Spec ambiguity resolved: `crates/btit-app/src/cli.rs` is touched**
+
+The sprint doc contradicts itself on this file. "Exact Targets" says the seven
+moved tests' removal from `crates/btit-app/src/cli.rs` is part of the move ("its
+tests … move here"), then in the same paragraph says "this sprint edits nothing
+under `crates/btit-app/` (group A non-intersection)." Acceptance Criterion 4 is
+unambiguous and specific: "the seven tests no longer exist in
+`crates/btit-app/src/cli.rs`." Deleting seven `#[test]` functions from that file is
+necessarily an edit to it, so Acceptance Criterion 4 and the diff-scope regex in
+Acceptance Criterion 1 / Required Validation cannot both hold. Resolved in favor of
+the explicit, specific instruction (AC4 and the "test move" language) over the
+general non-intersection framing: `crates/btit-app/src/cli.rs` is edited to delete
+only the `#[cfg(test)] mod tests { … }` block (the seven tests plus their two local
+helpers, `dolt_tmp` and the `BD_1` const), replaced with a one-line comment pointing
+to their new home; `project_uses_dolt`, `project_uses_dolt_for` and every other
+function in that file are byte-for-byte unchanged, so the only line-level
+`git diff` this sprint produces there is that deletion — no logic in
+`crates/btit-app/` changes, and nothing else under `crates/btit-app/**` is touched.
+The `git diff --name-only … | grep -vE …` command in Required Validation therefore
+prints `crates/btit-app/src/cli.rs`, not nothing; the team-lead may want to correct
+the Required Validation command or the Exact Targets/AC1 wording for future sprints
+that hit the same shape (b-6 will, moving `br`'s equivalent tests).
+
 **Deviations from the sprint doc**
 
 - Acceptance criterion 2's literal regex `grep -nE '^pub struct BdCli \{ inv: Box<dyn CliInvoker> \}' crates/btit-bd/src/backend.rs` cannot match under `cargo fmt`: stable rustfmt always expands a named-field struct definition onto multiple lines (only struct *literals* can stay single-line), regardless of width. `BdCli` is declared as `pub struct BdCli { inv: Box<dyn CliInvoker>, }`, fmt-canonical multi-line, with `inv` as the sole field. The semantic intent (no process-global statics, no field or generic holding the concrete `CliRunner`) is verified by the criterion's other two regexes, both of which pass as written.
