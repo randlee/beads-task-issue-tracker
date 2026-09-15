@@ -33,6 +33,7 @@ All steps mandatory. Work is NOT complete until `git push` succeeds.
 - Keep `index.vue` as an orchestrator: layout structure, composable wiring, and minimal glue code
 - Prefer reusable composables over inline logic for state, dialogs, resize, filtering, etc.
 - **Prefer shared components** over duplication — if a UI element is used in multiple places, extract it into a shared component
+- Rust crates live under `crates/`, and library crates (`btit-types`, `btit-beads`, `btit-cli`, `btit-bd`, `btit-br`) never depend on `tauri` or `sc-observability-log` — only `crates/btit-app` does
 
 ### Context Management
 - **Always prefer `/continue-task` over `/compact`** — it preserves issue context, progress, and next steps far better
@@ -41,14 +42,14 @@ All steps mandatory. Work is NOT complete until `git push` succeeds.
 
 ### CLI Policy (bd first)
 - **`bd` (Go, [steveyegge/beads](https://github.com/steveyegge/beads)) is the primary and default CLI.** Target **bd 1.x** — that is what the maintainer runs and what new features are built against.
-- **Warn on bd < 1.0.** Pre-1.0 versions (0.49 SQLite/JSONL, 0.50–0.56 embedded-Dolt/server-mode transition) are legacy. The app should keep working where the version-gated helpers already allow it, but surface a warning to the user (see `check_bd_compatibility` in `crates/btit-app/src/lib.rs`) rather than silently degrading.
+- **Warn on bd < 1.0.** Pre-1.0 versions (0.49 SQLite/JSONL, 0.50–0.56 embedded-Dolt/server-mode transition) are legacy. The app should keep working where the version-gated helpers already allow it, but surface a warning to the user (see `check_bd_compatibility` in `crates/btit-app/src/backend.rs` and the warnings in `crates/btit-beads/src/compat.rs`) rather than silently degrading.
 - **`br` (Rust, [beads_rust](https://github.com/Dicklesworthstone/beads_rust)) remains supported** as a secondary CLI and can be selected in Settings. It is not a priority: do not block bd work on br parity, but do not break br detection or the `CliClient::Br` code paths either.
 - **Default binary**: auto-detection probes `bd` first, then `br`, and falls back to `bd` when neither is found. The probe must use `get_extended_path()` so GUI launches (Finder/Dock, minimal PATH) resolve Homebrew/Go/Cargo installs.
 - **History**: the original author pinned bd 0.49.x and recommended br because bd 0.50–0.56 removed embedded Dolt in favor of server mode (see [beads#2050](https://github.com/steveyegge/beads/issues/2050)). This project is now maintained independently and follows current bd. The branch `feat/bd-056-server-mode` holds earlier server-mode work (detection, adaptive polling, migration, DoltServerBanner) and can be mined when needed.
 
 ### bd Backward Compatibility
-- Never assume all projects use Dolt — check `project_uses_dolt()` before skipping legacy paths (br and legacy bd projects are SQLite/JSONL)
-- Use version-gated helpers in `crates/btit-app/src/lib.rs` for any feature that depends on a specific bd version
+- Never assume all projects use Dolt — check `project_uses_dolt()` before skipping legacy paths (br and legacy bd projects are SQLite/JSONL); `project_uses_dolt` is `BeadsBackend::project_uses_dolt`
+- Use version-gated helpers for any feature that depends on a specific bd version: `BeadsBackend::capabilities()`, backed by the `_for` cores in `crates/btit-beads/src/gates.rs`
 
 ### Logging
 - **Never use `console.log`** — always use the native logger so logs end up in the app log file.
