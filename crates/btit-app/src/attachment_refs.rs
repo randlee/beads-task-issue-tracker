@@ -7,6 +7,33 @@ use std::path::PathBuf;
 // Attachment Refs Migration v3 — filesystem-only
 // ============================================================================
 
+/// Returns `true` if `t` starts with a URL scheme (`^[A-Za-z][A-Za-z0-9+.-]*://`).
+fn has_url_scheme(t: &str) -> bool {
+    let Some(colon) = t.find(':') else { return false };
+    let scheme = &t[..colon];
+    let mut chars = scheme.chars();
+    let Some(first) = chars.next() else { return false };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-') {
+        return false;
+    }
+    t[colon..].starts_with("://")
+}
+
+/// Returns `true` if `t` is a Windows absolute path (`X:\`, `X:/`, or `\\server\share`).
+fn is_windows_absolute(t: &str) -> bool {
+    if t.starts_with("\\\\") {
+        return true;
+    }
+    let mut chars = t.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(drive), Some(':'), Some(sep)) => drive.is_ascii_alphabetic() && (sep == '\\' || sep == '/'),
+        _ => false,
+    }
+}
+
 /// Check if a ref is a "real" external reference (Redmine, GitHub, or other URL/ID).
 /// Returns false for att: refs, local file paths, cleared: sentinels.
 pub(crate) fn is_real_external_ref(r: &str) -> bool {
@@ -14,6 +41,14 @@ pub(crate) fn is_real_external_ref(r: &str) -> bool {
     if trimmed.is_empty() { return false; }
     if trimmed.starts_with("cleared:") { return false; }
     if trimmed.starts_with("att:") { return false; }
+    // A URL scheme is real, even if it happens to contain "/attachments/" or "/.beads/".
+    if has_url_scheme(trimmed) {
+        return true;
+    }
+    // Windows absolute paths (drive-letter or UNC) are local.
+    if is_windows_absolute(trimmed) {
+        return false;
+    }
     // Local file paths (absolute or relative .beads/)
     if trimmed.starts_with('/') { return false; }
     if trimmed.starts_with(".beads/") { return false; }
@@ -180,5 +215,14 @@ mod tests {
         assert!(!is_real_external_ref("path/attachments/file"));
     }
 
+    #[test]
+    fn is_real_external_ref_accepts_urls_containing_attachments_segment() {
+        assert!(is_real_external_ref("https://redmine.example/attachments/download/1"));
+    }
 
+    #[test]
+    fn is_real_external_ref_rejects_windows_absolute_paths() {
+        assert!(!is_real_external_ref(r"C:\proj\.beads\attachments\x.png"));
+        assert!(!is_real_external_ref(r"\\server\share\.beads\x"));
+    }
 }
