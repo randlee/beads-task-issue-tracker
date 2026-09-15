@@ -1,7 +1,7 @@
 ---
 id: b-10
 title: Dolt detection redesign in btit-bd (B3, DoltMode, B10 wrapper test, B13 rename)
-status: planned
+status: in_progress
 branch: feature/sprint-b-10-dolt-detection
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-10-dolt-detection
 target: integrate/phase-b
@@ -170,3 +170,105 @@ pub fn project_uses_dolt_for(info: Option<(CliClient, u32, u32, u32)>, beads_dir
 - `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-bd/|docs/plans/phase-b/sprint-b-10.md$)'` prints nothing
 - `python3 scripts/check_version_sync.py`
 - `git diff --check`
+
+## Implementation Notes
+
+Implemented on `feature/sprint-b-10-dolt-detection`, forked from the b-7 head `cb8a7de` (group B, parallel with
+b-8). Only `crates/btit-bd/**` and this doc are touched. bd rules were read from `../beads` at `610339cd7`,
+`internal/configfile/configfile.go`: `GetBackend` 297-311, backend constants 244-247, Dolt-mode constants
+325-327, `IsDoltServerMode` 364-390, `HostImpliesServerMode` 417-437, `IsLocalHostString` 444-450,
+`GetDoltMode` 471-479.
+
+**What landed**
+
+- `crates/btit-bd/src/dolt.rs`: `project_uses_dolt_for` follows the Explicit Code Sample. `Br` → `false`;
+  `Bd 0.<50` → `false`; `Bd 0.50.x` → `legacy_filesystem_probe` (the previous body, unchanged); everything else →
+  `.beads/.dolt`, or `metadata.json` parsed with `serde_json::from_str::<serde_json::Value>` whose `backend` is not
+  `sqlite`/`postgres`/`mysql`.
+- `#[non_exhaustive] pub enum DoltMode { Embedded, Server, ProxiedServer }` (`Debug, Clone, Copy, PartialEq, Eq,
+  Hash`) and `pub fn project_dolt_mode(beads_dir: &Path) -> Option<DoltMode>`. Both functions share
+  `read_metadata` and `metadata_backend_is_dolt`, so they agree on the backend rule. `project_dolt_mode` reads only
+  `backend`, `dolt_mode` and `dolt_server_host`. Both are re-exported at the crate root next to
+  `project_uses_dolt_for`. There is no app caller.
+- Tests: the four replacements in Required Work, and `crates/btit-bd/tests/dolt_mode.rs`. That file holds the
+  Deliverable 7 table (`project_dolt_mode_follows_bd_get_dolt_mode`), the signature pin
+  (`project_dolt_mode_signature`) and `vault_layout_is_dolt_and_embedded`.
+- `crates/btit-bd/tests/api_freeze.rs` is byte-identical to `cb8a7de`.
+
+**Gate outputs** (`IMPLEMENTATION_BASELINE=94e44d3`, `BASELINE_TEST_COUNT=155`, worktree
+`/tmp/btit-baseline-94e44d3`; macOS)
+
+- `cargo fmt --check -p btit-bd`: clean.
+- `cargo clippy -p btit-bd --all-targets -- -D warnings`: clean. The `--all-features` run is also clean.
+- `cargo rustdoc -p btit-bd -- -D missing-docs`: clean.
+- `cargo test --workspace`: exit 0, 373 passed, 0 failed.
+- Test-preservation gate, run as in the plan with stderr not suppressed: baseline 155 names, after 380 (b-7: 376).
+  Raw `comm -23` prints exactly b-9's three names and b-10's four removed names. With `/tmp/replaced.txt` = those
+  seven names, it prints nothing. All four replacement names and `project_dolt_mode_follows_bd_get_dolt_mode` are
+  in the after list.
+- AC1: the non-intersection grep prints nothing. `git diff --exit-code feature/sprint-b-7-backend-slot...HEAD --
+  crates/btit-bd/tests/api_freeze.rs` exits 0.
+- AC2: the removed-name grep over `crates/` prints nothing.
+- AC3 `awk` over `crates/btit-bd/src/*.rs`: prints nothing.
+- AC3 `grep -rnE 'BdCli::new\(|BdCli::with_seeded_probe\(|…' crates/btit-bd/tests`: **matches
+  `api_freeze.rs:25,32`**. See the first deviation below.
+- AC3 no-bd run: `SAFE_PATH=/Users/randlee/.cargo/bin:/usr/bin:/bin`. `! PATH="$SAFE_PATH" command -v bd &&
+  PATH="$SAFE_PATH" cargo test -p btit-bd` exits 0.
+- AC5a: `grep -n 'pub enum DoltMode'` matches once (line 60), preceded by `#[non_exhaustive]`.
+- `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support`: `0`.
+- `python3 scripts/check_version_sync.py`: OK. `git diff --check`: clean.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc
+  --all-targets`: finished. The only warnings are the pre-existing #49 ones in `beads-issue-tracker` (unused
+  `std::process::Command` import, unused `result`); none are in `btit-bd`.
+
+**Deviations and resolved ambiguities**
+
+1. **AC3 grep vs. the frozen `api_freeze.rs`.** The AC3 test-directory grep matches `BdCli::new(` and
+   `BdCli::with_seeded_probe(` in `crates/btit-bd/tests/api_freeze.rs:25,32`. Deliverable 8 and AC1 require that
+   file to stay byte-identical, so both criteria cannot hold literally. The intent of AC3 does hold: those two lines
+   only construct a `BdCli` and call no method. `CliRunner::new` probes lazily, and `with_seeded_probe` pre-seeds the
+   probe, so nothing is spawned. The no-bd run proves this. The grep with `api_freeze.rs` excluded prints nothing.
+   The maintainer needs to decide whether to narrow the grep (e.g. `--exclude=api_freeze.rs`) or change the pin.
+2. **Deliverable 2 deviation (as planned).** `Unknown` and unprobed (`None`) clients take the bd ≥ 0.51 metadata
+   rule, as the table's last two rows show.
+3. **Non-object JSON / non-string `backend`.** The code sample is followed literally: any JSON value that parses
+   counts as parsable. A top-level non-object (e.g. `[]`) or a non-string `backend` (e.g. `5`) therefore falls
+   through to Dolt. bd's typed `json.Unmarshal` would reject such a file (`Load` returns an error), so bd could not
+   open the project either way. No table row covers this.
+4. **Case rules.** `backend` is matched case-sensitively, like Go's `switch c.Backend`. `dolt_mode` and
+   `dolt_server_host` are lowercased with Unicode `to_lowercase` (and the host with `trim`), matching Go's
+   `strings.ToLower`/`TrimSpace`.
+5. **Additive tests beyond the tables.** These add no replaced names:
+   - `backend::tests::project_uses_dolt_wrapper_derives_beads_dir_from_scripted_probe` keeps
+     `BdCli::project_uses_dolt` covered through a `RecordingInvoker` probe with no spawn (the removed test was the
+     only wrapper test).
+   - `project_dolt_mode_signature` and `vault_layout_is_dolt_and_embedded` are in `tests/dolt_mode.rs`.
+   - `project_uses_dolt_for_bd_0_50_keeps_filesystem_probe` also asserts that `{}` stays `false` on 0.50.
+6. **B13 rename.** The body is unchanged. The temp-dir helper gained a process-id component so concurrent test
+   binaries cannot collide.
+
+**Behaviour deltas** (bd ≥ 0.51, `Unknown`, unprobed; bd 0.50.x and older, and br, are unchanged)
+
+- `metadata.json` with `backend: dolt` (or no `backend` key, or any non-SQL value) is now Dolt without a
+  `dolt/<name>/.dolt` directory. This covers server mode, `dolt_data_dir`, and the `embeddeddolt/<db>/` layout, e.g.
+  the maintainer's vault, which is now Dolt/`Embedded` so the app stops running the removed `bd sync` there.
+- The `backend` check is JSON-based rather than two substring forms, so any whitespace or key order is accepted.
+- `backend` `sqlite`/`postgres`/`mysql` is not Dolt, and an absent or unparsable `metadata.json` is not Dolt unless
+  `.beads/.dolt` exists.
+
+**Known limitations**
+
+- **postgres/mysql:** `project_uses_dolt_for` returns `false` for them, so downstream code takes the SQLite/JSONL
+  paths. A third storage kind is not modelled (out of scope). bd at `610339cd7` rejects both backends at store
+  selection anyway.
+- **`DoltMode`:** only the project-local persisted mode is reported. The runtime overrides
+  `BEADS_DOLT_SERVER_MODE`, `BEADS_DOLT_SHARED_SERVER` and `BEADS_DOLT_SERVER_HOST`, and the `config.yaml`
+  `dolt.mode`/`dolt.host` fallbacks, are not consulted. A `dolt-server.port` file or a running `dolt sql-server` is
+  never evidence of server mode.
+- Registered extension backend names (`backendnames.Has`) are treated as Dolt. They are not modelled.
+
+**Changelog lines** (collated by b-12)
+
+- Dolt projects on bd ≥ 0.51 are detected from `metadata.json` (server mode and custom data dirs included).
+- `btit-bd` adds `DoltMode` (embedded / server / proxied-server) resolved from `metadata.json`, the switch point for
+  future mode-dependent behaviour.
