@@ -71,6 +71,7 @@ pub(crate) fn bd_invoker(version: (u32, u32, u32)) -> RecordingInvoker {
 }
 
 /// A successful raw reply with `stdout`.
+#[expect(clippy::unnecessary_wraps, reason = "matches reply_raw's Result<CliOutput, BeadsError> parameter shape")]
 pub(crate) fn raw_ok(stdout: &str) -> Result<CliOutput, BeadsError> {
     Ok(CliOutput {
         status: Some(0),
@@ -81,6 +82,7 @@ pub(crate) fn raw_ok(stdout: &str) -> Result<CliOutput, BeadsError> {
 }
 
 /// A failed raw reply (exit 1) with `stderr`.
+#[expect(clippy::unnecessary_wraps, reason = "matches reply_raw's Result<CliOutput, BeadsError> parameter shape")]
 pub(crate) fn raw_fail(stderr: &str) -> Result<CliOutput, BeadsError> {
     Ok(CliOutput {
         status: Some(1),
@@ -215,6 +217,7 @@ impl TempProject {
     }
 
     /// The project root as the `cwd` string commands receive.
+    #[expect(clippy::unnecessary_wraps, reason = "mirrors the Option<String> cwd shape every command call site passes")]
     pub(crate) fn cwd(&self) -> Option<String> {
         Some(self.root.to_string_lossy().into_owned())
     }

@@ -235,7 +235,7 @@ pub(crate) fn with_cli<T>(
 }
 
 /// Logs the `[startup]` block from the probe `install` took (no further spawn).
-pub(crate) fn log_startup(binary: &str, probe: &Option<CliProbe>) {
+pub(crate) fn log_startup(binary: &str, probe: Option<&CliProbe>) {
     match probe {
         Some(p) => {
             log::info!(
@@ -435,8 +435,8 @@ mod tests {
     fn log_startup_spawns_no_probe() {
         let seed = probe(CliClient::Bd, Some((1, 0, 4)));
         let (slot, inv, _backend) = recording_slot("bd", Some(seed.clone()));
-        log_startup("bd", &Some(seed));
-        log_startup("bd", &None);
+        log_startup("bd", Some(&seed));
+        log_startup("bd", None);
         assert_eq!(inv.probe_calls(), 0);
         // The slot is untouched and still answers from its seeded cache.
         assert!(matches!(

@@ -44,7 +44,7 @@ pub fn run() {
             log::info!("[startup] CLI binary: {}", config.cli_binary);
             // One `--version` probe (run from the temp dir): selects the backend and feeds the startup log
             let probe = backend::install(&config.cli_binary);
-            backend::log_startup(&config.cli_binary, &probe);
+            backend::log_startup(&config.cli_binary, probe.as_ref());
 
             Ok(())
         })

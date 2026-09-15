@@ -46,16 +46,17 @@ pub(crate) async fn bd_count(options: CwdOptions) -> Result<CountResult, String>
 
     for issue in &raw_issues {
         let issue_type = issue.issue_type.to_lowercase();
-        if by_type.contains_key(&issue_type) {
-            *by_type.get_mut(&issue_type).unwrap() += 1;
+        if let Some(count) = by_type.get_mut(&issue_type) {
+            *count += 1;
         }
 
         let priority_key = format!("p{}", issue.priority);
-        if by_priority.contains_key(&priority_key) {
-            *by_priority.get_mut(&priority_key).unwrap() += 1;
+        if let Some(count) = by_priority.get_mut(&priority_key) {
+            *count += 1;
         }
 
-        if last_updated.is_none() || issue.updated_at > *last_updated.as_ref().unwrap() {
+        let is_newer = last_updated.as_ref().is_none_or(|last| issue.updated_at > *last);
+        if is_newer {
             last_updated = Some(issue.updated_at.clone());
         }
     }
@@ -172,9 +173,9 @@ pub(crate) async fn bd_delete(id: String, options: CwdOptions) -> Result<serde_j
             let att_dir = abs_path.join(".beads").join("attachments").join(issue_short_id(&id));
             if att_dir.exists() && att_dir.is_dir() {
                 if let Err(e) = fs::remove_dir_all(&att_dir) {
-                    log::warn!("[bd_delete] Failed to remove attachments folder: {}", e);
+                    log::warn!("[bd_delete] Failed to remove attachments folder: {e}");
                 } else {
-                    log::info!("[bd_delete] Removed attachments folder: {:?}", att_dir);
+                    log::info!("[bd_delete] Removed attachments folder: {}", att_dir.display());
                 }
             }
         }

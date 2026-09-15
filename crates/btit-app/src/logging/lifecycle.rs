@@ -758,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn exit_before_install_is_a_noop_and_rejects_a_later_install() -> Result<(), TestError> {
+    fn exit_before_install_is_a_noop_and_rejects_a_later_install() {
         let lifecycle: LogLifecycle<FakeGuard> = LogLifecycle::new();
         assert!(matches!(lifecycle.exit(TIMEOUT), ExitOutcome::NotInstalled));
         assert_eq!(lifecycle.shutdown_requests(), 0);
@@ -772,6 +772,5 @@ mod tests {
             })
         ));
         assert_eq!(shutdown_timeouts(&calls), vec![TIMEOUT]);
-        Ok(())
     }
 }

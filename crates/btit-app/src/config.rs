@@ -37,9 +37,9 @@ pub(crate) fn load_config() -> AppConfig {
         match fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str(&content) {
                 Ok(config) => return config,
-                Err(e) => log::warn!("[config] Failed to parse settings.json: {}", e),
+                Err(e) => log::warn!("[config] Failed to parse settings.json: {e}"),
             },
-            Err(e) => log::warn!("[config] Failed to read settings.json: {}", e),
+            Err(e) => log::warn!("[config] Failed to read settings.json: {e}"),
         }
     }
     AppConfig::default()
@@ -49,12 +49,12 @@ pub(crate) fn save_config(config: &AppConfig) -> Result<(), String> {
     let path = get_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+            .map_err(|e| format!("Failed to create config directory: {e}"))?;
     }
     let json = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        .map_err(|e| format!("Failed to serialize config: {e}"))?;
     fs::write(&path, json)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+        .map_err(|e| format!("Failed to write config: {e}"))?;
     Ok(())
 }
 
@@ -69,13 +69,13 @@ pub(crate) async fn get_bd_version() -> String {
     match probe_version_output(&binary) {
         Ok(output) if output.success => {
             let version = output.stdout.trim().to_string();
-            if binary != "bd" {
-                format!("{} ({})", version, binary)
-            } else {
+            if binary == "bd" {
                 version
+            } else {
+                format!("{version} ({binary})")
             }
         }
-        _ => format!("{} not found", binary),
+        _ => format!("{binary} not found"),
     }
 }
 
@@ -100,7 +100,7 @@ pub(crate) async fn set_cli_binary_path(path: String) -> Result<String, String> 
 
     // Persist to config file
     let mut config = load_config();
-    config.cli_binary = binary.clone();
+    config.cli_binary.clone_from(&binary);
     save_config(&config)?;
 
     log_info!("[config] CLI binary set to: {} ({})", binary, version);
@@ -128,7 +128,7 @@ pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, Strin
         Ok(output) if output.success => {
             let version = output.stdout.trim().to_string();
             if version.is_empty() {
-                Err(format!("'{}' returned empty version output", binary))
+                Err(format!("'{binary}' returned empty version output"))
             } else {
                 Ok(version)
             }
@@ -138,10 +138,10 @@ pub(crate) fn validate_cli_binary_internal(binary: &str) -> Result<String, Strin
             Err(format!("'{}' failed: {}", binary, if stderr.is_empty() { "unknown error".to_string() } else { stderr }))
         }
         Err(BeadsError::Spawn { source, .. }) => {
-            Err(format!("'{}' not found or not executable: {}", binary, source))
+            Err(format!("'{binary}' not found or not executable: {source}"))
         }
         Err(e) => {
-            Err(format!("'{}' not found or not executable: {}", binary, e))
+            Err(format!("'{binary}' not found or not executable: {e}"))
         }
     }
 }

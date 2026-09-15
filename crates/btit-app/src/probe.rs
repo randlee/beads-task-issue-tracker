@@ -17,14 +17,14 @@ pub(crate) async fn fetch_external_data(url: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let response = client
         .get(&url)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
         let err = format!("HTTP {}: {}", response.status().as_u16(), response.status().canonical_reason().unwrap_or("Unknown"));
@@ -32,7 +32,7 @@ pub(crate) async fn fetch_external_data(url: String) -> Result<String, String> {
         return Err(err);
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -43,7 +43,7 @@ pub(crate) async fn check_external_health(url: String) -> Result<bool, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     match client.get(&health_url).send().await {
         Ok(response) => Ok(response.status().is_success()),
@@ -57,7 +57,7 @@ pub(crate) async fn post_external_data(url: String, body: String) -> Result<Stri
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let response = client
         .post(&url)
@@ -66,7 +66,7 @@ pub(crate) async fn post_external_data(url: String, body: String) -> Result<Stri
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -74,7 +74,7 @@ pub(crate) async fn post_external_data(url: String, body: String) -> Result<Stri
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -83,14 +83,14 @@ pub(crate) async fn delete_external_data(url: String) -> Result<String, String> 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let response = client
         .delete(&url)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -98,7 +98,7 @@ pub(crate) async fn delete_external_data(url: String) -> Result<String, String> 
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
 }
 
 #[tauri::command]
@@ -107,7 +107,7 @@ pub(crate) async fn patch_external_data(url: String, body: String) -> Result<Str
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let response = client
         .patch(&url)
@@ -116,7 +116,7 @@ pub(crate) async fn patch_external_data(url: String, body: String) -> Result<Str
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -124,7 +124,7 @@ pub(crate) async fn patch_external_data(url: String, body: String) -> Result<Str
         return Err(format!("HTTP {}: {}", status.as_u16(), text));
     }
 
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    response.text().await.map_err(|e| format!("Failed to read response: {e}"))
 }
 
 // ============================================================================
@@ -135,13 +135,13 @@ pub(crate) async fn patch_external_data(url: String, body: String) -> Result<Str
 pub(crate) async fn launch_probe(port: u16) -> Result<String, String> {
     use std::process::Stdio;
 
-    let health_url = format!("http://127.0.0.1:{}/health", port);
+    let health_url = format!("http://127.0.0.1:{port}/health");
 
     // Check if probe is already reachable via HTTP health endpoint
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     if let Ok(resp) = client.get(&health_url).send().await {
         if resp.status().is_success() {
@@ -160,7 +160,7 @@ pub(crate) async fn launch_probe(port: u16) -> Result<String, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", bin, e))?;
+        .map_err(|e| format!("Failed to spawn {bin}: {e}"))?;
 
     // Store child handle so it lives as long as the app
     if let Ok(mut guard) = PROBE_CHILD.lock() {

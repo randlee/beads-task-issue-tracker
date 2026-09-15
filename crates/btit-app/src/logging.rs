@@ -1,12 +1,3 @@
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::indexing_slicing
-)]
 //! sc-observability-log bridge wiring: install, exit shutdown, and the log commands.
 //!
 //! The active log file is `<app_log_dir>/logs/beads-task-issue-tracker.log.jsonl`
@@ -504,14 +495,14 @@ pub(crate) async fn get_log_path_string() -> String {
 #[tauri::command]
 pub(crate) async fn log_frontend(level: String, message: String) {
     match level.as_str() {
-        "error" => log::log!(target: "frontend", log::Level::Error, "{}", message),
-        "warn" => log::log!(target: "frontend", log::Level::Warn, "{}", message),
-        "info" => log::log!(target: "frontend", log::Level::Info, "{}", message),
+        "error" => log::log!(target: "frontend", log::Level::Error, "{message}"),
+        "warn" => log::log!(target: "frontend", log::Level::Warn, "{message}"),
+        "info" => log::log!(target: "frontend", log::Level::Info, "{message}"),
         // Unknown level (should not happen: the TypeScript wrapper restricts the
         // level to error/warn/info): log at Info, same as today, but keep the raw
         // value visible in JSONL as a kv field.
         other => {
-            log::log!(target: "frontend", log::Level::Info, frontend_level = other; "{}", message);
+            log::log!(target: "frontend", log::Level::Info, frontend_level = other; "{message}");
         }
     }
 }

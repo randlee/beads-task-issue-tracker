@@ -2,7 +2,6 @@ use btit_beads::detect::{detect_cli_client, parse_bd_version};
 use btit_cli::command::new_command;
 use crate::config::get_bd_version;
 use btit_types::CliClient;
-use std::process::Command;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -74,7 +73,7 @@ pub(crate) fn get_github_token() -> Option<String> {
     }
     // Fall back to gh CLI
     let output = new_command("gh")
-        .args(&["auth", "token"])
+        .args(["auth", "token"])
         .output()
         .ok()?;
     if output.status.success() {
@@ -91,7 +90,7 @@ pub(crate) fn github_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("beads-task-issue-tracker")
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))
 }
 
 /// Add GitHub auth header to a request if a token is available.
@@ -177,7 +176,7 @@ pub(crate) async fn check_for_updates() -> Result<UpdateInfo, String> {
     let response = with_github_auth(client.get(GITHUB_RELEASES_URL))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch releases: {}", e))?;
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
 
     // Handle 404 (no published releases yet)
     if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -199,7 +198,7 @@ pub(crate) async fn check_for_updates() -> Result<UpdateInfo, String> {
     let release: GitHubRelease = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse release info: {}", e))?;
+        .map_err(|e| format!("Failed to parse release info: {e}"))?;
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = compare_versions(CURRENT_VERSION, &latest_version);
@@ -216,7 +215,7 @@ pub(crate) async fn check_for_updates() -> Result<UpdateInfo, String> {
         .send()
         .await
         .ok()
-        .and_then(|r| if r.status().is_success() { Some(r) } else { None });
+        .filter(|r| r.status().is_success());
     let changelog_text = match changelog {
         Some(r) => r.text().await.ok(),
         None => None,
@@ -240,7 +239,7 @@ pub(crate) async fn check_for_updates_demo() -> Result<UpdateInfo, String> {
     let response = with_github_auth(client.get(GITHUB_RELEASES_URL))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch releases: {}", e))?;
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -249,7 +248,7 @@ pub(crate) async fn check_for_updates_demo() -> Result<UpdateInfo, String> {
     let release: GitHubRelease = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse release info: {}", e))?;
+        .map_err(|e| format!("Failed to parse release info: {e}"))?;
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
 
@@ -265,7 +264,7 @@ pub(crate) async fn check_for_updates_demo() -> Result<UpdateInfo, String> {
         .send()
         .await
         .ok()
-        .and_then(|r| if r.status().is_success() { Some(r) } else { None });
+        .filter(|r| r.status().is_success());
     let changelog_text = match changelog {
         Some(r) => r.text().await.ok(),
         None => None,
@@ -293,7 +292,7 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
 
     // Parse semver from version string
     let current_tuple = parse_bd_version(&version_str).map(<(u32, u32, u32)>::from)
-        .ok_or_else(|| format!("Could not parse version from: {}", version_str))?;
+        .ok_or_else(|| format!("Could not parse version from: {version_str}"))?;
     let current_version = format!("{}.{}.{}", current_tuple.0, current_tuple.1, current_tuple.2);
 
     // Determine the correct GitHub repo based on client type (bd vs br)
@@ -310,7 +309,7 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
     let response = with_github_auth(client.get(api_url))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch releases: {}", e))?;
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -319,7 +318,7 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
     let release: GitHubRelease = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse release info: {}", e))?;
+        .map_err(|e| format!("Failed to parse release info: {e}"))?;
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = compare_versions(&current_version, &latest_version);
@@ -334,7 +333,7 @@ pub(crate) async fn check_bd_cli_update() -> Result<BdCliUpdateInfo, String> {
 
 #[tauri::command]
 pub(crate) async fn download_and_install_update(download_url: String) -> Result<String, String> {
-    log::info!("[download_update] Starting download from: {}", download_url);
+    log::info!("[download_update] Starting download from: {download_url}");
 
     // Extract filename from URL
     let filename = download_url
@@ -342,15 +341,15 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
         .next()
         .unwrap_or("update-download")
         .to_string();
-    log::info!("[download_update] Target filename: {}", filename);
+    log::info!("[download_update] Target filename: {filename}");
 
     // Download the file
     let client = reqwest::Client::builder()
         .user_agent("beads-task-issue-tracker")
         .build()
         .map_err(|e| {
-            log::error!("[download_update] Failed to create HTTP client: {}", e);
-            format!("Failed to create HTTP client: {}", e)
+            log::error!("[download_update] Failed to create HTTP client: {e}");
+            format!("Failed to create HTTP client: {e}")
         })?;
 
     log::info!("[download_update] Sending GET request...");
@@ -359,17 +358,17 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
         .send()
         .await
         .map_err(|e| {
-            log::error!("[download_update] HTTP request failed: {} (url: {})", e, download_url);
-            format!("Failed to download update: {}", e)
+            log::error!("[download_update] HTTP request failed: {e} (url: {download_url})");
+            format!("Failed to download update: {e}")
         })?;
 
     let status = response.status();
     let final_url = response.url().to_string();
-    log::info!("[download_update] Response status: {} (final URL: {})", status, final_url);
+    log::info!("[download_update] Response status: {status} (final URL: {final_url})");
 
     if !status.is_success() {
-        log::error!("[download_update] Download failed with status: {} (url: {})", status, final_url);
-        return Err(format!("Download failed with status: {}", status));
+        log::error!("[download_update] Download failed with status: {status} (url: {final_url})");
+        return Err(format!("Download failed with status: {status}"));
     }
 
     log::info!("[download_update] Reading response bytes...");
@@ -377,8 +376,8 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
         .bytes()
         .await
         .map_err(|e| {
-            log::error!("[download_update] Failed to read response bytes: {}", e);
-            format!("Failed to read download bytes: {}", e)
+            log::error!("[download_update] Failed to read response bytes: {e}");
+            format!("Failed to read download bytes: {e}")
         })?;
     log::info!("[download_update] Downloaded {} bytes", bytes.len());
 
@@ -394,7 +393,7 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
     fs::write(&dest_path, &bytes)
         .map_err(|e| {
             log::error!("[download_update] Failed to save file to {}: {}", dest_path.display(), e);
-            format!("Failed to save file: {}", e)
+            format!("Failed to save file: {e}")
         })?;
 
     let dest_str = dest_path.to_string_lossy().to_string();
@@ -403,14 +402,17 @@ pub(crate) async fn download_and_install_update(download_url: String) -> Result<
     // On macOS, mount the DMG
     #[cfg(target_os = "macos")]
     {
-        if filename.ends_with(".dmg") {
-            log::info!("[download_update] Mounting DMG: {}", dest_str);
-            Command::new("open")
+        if std::path::Path::new(&filename)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dmg"))
+        {
+            log::info!("[download_update] Mounting DMG: {dest_str}");
+            std::process::Command::new("open")
                 .arg(&dest_path)
                 .spawn()
                 .map_err(|e| {
-                    log::error!("[download_update] Failed to open DMG: {}", e);
-                    format!("Failed to open DMG: {}", e)
+                    log::error!("[download_update] Failed to open DMG: {e}");
+                    format!("Failed to open DMG: {e}")
                 })?;
         }
     }
@@ -431,13 +433,13 @@ mod tests {
         let platform = get_platform_string();
         assert!(!platform.is_empty());
         assert!((platform == "macos" || platform == "windows" || platform == "linux"),
-            "platform must be one of macos, windows, linux, got: {}", platform);
+            "platform must be one of macos, windows, linux, got: {platform}");
     }
 
     #[test]
     fn find_platform_asset_for_matches_each_suffix() {
         for suffix in ["_macOS-ARM64.dmg", "_macOS-Intel.dmg", "_Windows.msi", "_Linux-amd64.AppImage"] {
-            let name = format!("App{}", suffix);
+            let name = format!("App{suffix}");
             let assets = vec![GitHubAsset {
                 name: name.clone(),
                 browser_download_url: "https://example.com/download".to_string(),
@@ -458,44 +460,44 @@ mod tests {
 
     #[test]
     fn compare_versions_detects_new_version() {
-        assert!(compare_versions("1.0.0", "1.0.1") == true);
-        assert!(compare_versions("1.0.0", "1.1.0") == true);
-        assert!(compare_versions("1.0.0", "2.0.0") == true);
+        assert!(compare_versions("1.0.0", "1.0.1"));
+        assert!(compare_versions("1.0.0", "1.1.0"));
+        assert!(compare_versions("1.0.0", "2.0.0"));
     }
 
     #[test]
     fn compare_versions_detects_same_version() {
-        assert!(compare_versions("1.0.0", "1.0.0") == false);
-        assert!(compare_versions("1.2.3", "1.2.3") == false);
+        assert!(!compare_versions("1.0.0", "1.0.0"));
+        assert!(!compare_versions("1.2.3", "1.2.3"));
     }
 
     #[test]
     fn compare_versions_detects_older_version() {
-        assert!(compare_versions("1.0.1", "1.0.0") == false);
-        assert!(compare_versions("1.1.0", "1.0.0") == false);
-        assert!(compare_versions("2.0.0", "1.0.0") == false);
+        assert!(!compare_versions("1.0.1", "1.0.0"));
+        assert!(!compare_versions("1.1.0", "1.0.0"));
+        assert!(!compare_versions("2.0.0", "1.0.0"));
     }
 
     #[test]
     fn compare_versions_handles_v_prefix() {
-        assert!(compare_versions("v1.0.0", "v1.0.1") == true);
-        assert!(compare_versions("1.0.0", "v1.0.1") == true);
-        assert!(compare_versions("v1.0.0", "1.0.1") == true);
+        assert!(compare_versions("v1.0.0", "v1.0.1"));
+        assert!(compare_versions("1.0.0", "v1.0.1"));
+        assert!(compare_versions("v1.0.0", "1.0.1"));
     }
 
     #[test]
     fn compare_versions_handles_missing_parts() {
-        assert!(compare_versions("1.0", "1.0.1") == true);
-        assert!(compare_versions("1", "1.0.1") == true);
-        assert!(compare_versions("1.0.0", "1") == false);
+        assert!(compare_versions("1.0", "1.0.1"));
+        assert!(compare_versions("1", "1.0.1"));
+        assert!(!compare_versions("1.0.0", "1"));
     }
 
     #[test]
     fn compare_versions_ignores_prerelease_suffix() {
         // parse_version() strips everything from the first '-' before splitting,
         // so "1.0.0-alpha" and "1.0.0-beta" both parse as [1, 0, 0] and compare equal.
-        assert!(compare_versions("1.0.0-alpha", "1.0.0-beta") == false);
-        assert!(compare_versions("1.0.0-alpha", "1.1.0-beta") == true);
+        assert!(!compare_versions("1.0.0-alpha", "1.0.0-beta"));
+        assert!(compare_versions("1.0.0-alpha", "1.1.0-beta"));
         // An RC still compares equal to its own final release: it is not offered
         // its own final release as an update (residual behaviour, recorded in
         // Implementation Notes as the direction this review chose).

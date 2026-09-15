@@ -22,15 +22,15 @@ pub(crate) static LAST_KNOWN_MTIME: LazyLock<Mutex<HashMap<String, std::time::Sy
 #[derive(Debug, Serialize)]
 pub struct PollData {
     #[serde(rename = "openIssues")]
-    pub open_issues: Vec<Issue>,
+    pub open: Vec<Issue>,
     #[serde(rename = "closedIssues")]
-    pub closed_issues: Vec<Issue>,
+    pub closed: Vec<Issue>,
     #[serde(rename = "readyIssues")]
-    pub ready_issues: Vec<Issue>,
+    pub ready: Vec<Issue>,
 }
 
 /// Batched poll: sync once, then fetch all issues + ready in 2 commands (was 3).
-/// Replaces 3 separate IPC calls (bd_list + bd_list(closed) + bd_ready) with one.
+/// Replaces 3 separate IPC calls (`bd_list` + `bd_list(closed)` + `bd_ready`) with one.
 #[tauri::command]
 pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String> {
     log_info!("[bd_poll_data] Batched poll starting");
@@ -61,22 +61,20 @@ pub(crate) async fn bd_poll_data(cwd: Option<String>) -> Result<PollData, String
             .map(String::from)
             .or_else(|| env::var("BEADS_PATH").ok())
             .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            env::current_dir().map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
         });
         let beads_dir = std::path::Path::new(&working_dir).join(".beads");
 
         if let Some(mtime) = get_beads_mtime(&beads_dir) {
-            let mut map = LAST_KNOWN_MTIME.lock().unwrap();
+            let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             map.insert(working_dir, mtime);
         }
     }
 
     Ok(PollData {
-        open_issues: raw_open.into_iter().map(transform_issue).collect(),
-        closed_issues: raw_closed.into_iter().map(transform_issue).collect(),
-        ready_issues: raw_ready.into_iter().map(transform_issue).collect(),
+        open: raw_open.into_iter().map(transform_issue).collect(),
+        closed: raw_closed.into_iter().map(transform_issue).collect(),
+        ready: raw_ready.into_iter().map(transform_issue).collect(),
     })
 }
 
@@ -96,7 +94,7 @@ pub(crate) fn get_beads_mtime_with(
     let project = ProjectRef::local(beads_dir.parent().map(|p| p.to_string_lossy().into_owned()));
     let uses_dolt = be.project_uses_dolt(&project);
     let uses_jsonl = !uses_dolt
-        && cli_of(be, "mtime").map(|c| c.capabilities().uses_jsonl_files).unwrap_or(false);
+        && cli_of(be, "mtime").is_ok_and(|c| c.capabilities().uses_jsonl_files);
     get_beads_mtime_for(uses_dolt, uses_jsonl, beads_dir)
 }
 
@@ -176,32 +174,30 @@ pub(crate) fn get_beads_mtime_for(
 
 /// Check if the beads database has changed since last check (via filesystem mtime).
 /// Returns true if changes detected or if this is the first check.
-/// This is extremely cheap — just a few stat() calls, no bd process spawns.
+/// This is extremely cheap — just a few `stat()` calls, no bd process spawns.
 #[tauri::command]
 pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            env::current_dir().map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
         });
 
     let beads_dir = std::path::Path::new(&working_dir).join(".beads");
     let current_mtime = get_beads_mtime(&beads_dir);
 
-    let mut map = LAST_KNOWN_MTIME.lock().unwrap();
+    let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let previous = map.get(&working_dir).copied();
 
     match (current_mtime, previous) {
         (Some(current), Some(prev)) => {
-            if current != prev {
+            if current == prev {
+                log_debug!("[bd_check_changed] mtime unchanged — no changes");
+                Ok(false)
+            } else {
                 log_info!("[bd_check_changed] mtime changed — data may have been modified");
                 map.insert(working_dir, current);
                 Ok(true)
-            } else {
-                log_debug!("[bd_check_changed] mtime unchanged — no changes");
-                Ok(false)
             }
         }
         (Some(current), None) => {
@@ -221,7 +217,7 @@ pub(crate) async fn bd_check_changed(cwd: Option<String>) -> Result<bool, String
 /// Called from the frontend when switching projects to force a fresh poll.
 #[tauri::command]
 pub(crate) async fn bd_reset_mtime(cwd: Option<String>) -> Result<(), String> {
-    let mut map = LAST_KNOWN_MTIME.lock().unwrap();
+    let mut map = LAST_KNOWN_MTIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(path) = cwd {
         log_info!("[bd_reset_mtime] Resetting mtime for: {}", path);
         map.remove(&path);

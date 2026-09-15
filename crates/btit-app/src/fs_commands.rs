@@ -20,18 +20,15 @@ pub(crate) async fn fs_list(path: Option<String>) -> Result<FsListResult, String
     };
 
     let target_path = target_path.canonicalize()
-        .map_err(|e| format!("Cannot resolve path: {}", e))?;
+        .map_err(|e| format!("Cannot resolve path: {e}"))?;
 
     let entries = fs::read_dir(&target_path)
-        .map_err(|e| format!("Cannot read directory: {}", e))?;
+        .map_err(|e| format!("Cannot read directory: {e}"))?;
 
     let mut directories: Vec<DirectoryEntry> = Vec::new();
 
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        let Ok(entry) = entry else { continue };
 
         let name = entry.file_name().to_string_lossy().to_string();
 
@@ -40,10 +37,7 @@ pub(crate) async fn fs_list(path: Option<String>) -> Result<FsListResult, String
             continue;
         }
 
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+        let Ok(metadata) = entry.metadata() else { continue };
 
         if metadata.is_dir() {
             let full_path = entry.path();

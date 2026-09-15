@@ -11,19 +11,12 @@ use tauri::Emitter;
 // File Watcher (debounced native fs watcher via notify crate)
 // ============================================================================
 
+#[derive(Default)]
 pub(crate) struct WatcherState {
     debouncer: Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
     watched_path: Option<String>,
 }
 
-impl Default for WatcherState {
-    fn default() -> Self {
-        Self {
-            debouncer: None,
-            watched_path: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BeadsChangedPayload {
@@ -34,6 +27,10 @@ pub(crate) struct BeadsChangedPayload {
 // File Watcher Commands
 // ============================================================================
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri::AppHandle and tauri::State are the Tauri command parameter types; the IPC-facing signature is frozen"
+)]
 #[tauri::command]
 pub(crate) fn start_watching(
     path: String,
@@ -41,7 +38,7 @@ pub(crate) fn start_watching(
     state: tauri::State<'_, Mutex<WatcherState>>,
 ) -> Result<(), String> {
     let be = backend::current();
-    let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
 
     // Stop existing watcher if any
     if watcher_state.debouncer.is_some() {
@@ -76,11 +73,11 @@ pub(crate) fn start_watching(
                     }
                 }
                 Err(e) => {
-                    log::error!("[watcher] Error: {:?}", e);
+                    log::error!("[watcher] Error: {e:?}");
                 }
             }
         },
-    ).map_err(|e| format!("Failed to create watcher: {}", e))?;
+    ).map_err(|e| format!("Failed to create watcher: {e}"))?;
 
     // Watch .beads/ directory
     // Dolt backend: recursive (changes happen in .dolt/ subdirectories)
@@ -93,7 +90,7 @@ pub(crate) fn start_watching(
     debouncer.watcher().watch(
         beads_dir.as_path(),
         watch_mode,
-    ).map_err(|e| format!("Failed to watch .beads/: {}", e))?;
+    ).map_err(|e| format!("Failed to watch .beads/: {e}"))?;
 
     log::info!("[watcher] Started watching: {}", beads_dir.display());
     watcher_state.debouncer = Some(debouncer);
@@ -102,11 +99,15 @@ pub(crate) fn start_watching(
     Ok(())
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri::State is the Tauri command parameter type; the IPC-facing signature is frozen"
+)]
 #[tauri::command]
 pub(crate) fn stop_watching(
     state: tauri::State<'_, Mutex<WatcherState>>,
 ) -> Result<(), String> {
-    let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut watcher_state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
 
     if watcher_state.debouncer.is_some() {
         log::info!("[watcher] Stopped watching: {:?}", watcher_state.watched_path);
@@ -124,11 +125,15 @@ pub(crate) struct WatcherStatusInfo {
     watched_path: Option<String>,
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri::State is the Tauri command parameter type; the IPC-facing signature is frozen"
+)]
 #[tauri::command]
 pub(crate) fn get_watcher_status(
     state: tauri::State<'_, Mutex<WatcherState>>,
 ) -> Result<WatcherStatusInfo, String> {
-    let watcher_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let watcher_state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
 
     Ok(WatcherStatusInfo {
         active: watcher_state.debouncer.is_some(),

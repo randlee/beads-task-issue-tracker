@@ -73,7 +73,7 @@ pub(crate) struct MigrateRefsResult {
 }
 
 /// Check if a project needs attachment refs migration v3.
-/// v3 strips all attachment refs (att:, local paths) from external_ref,
+/// v3 strips all attachment refs (att:, local paths) from `external_ref`,
 /// keeping only real external refs (Redmine, GitHub, URLs).
 /// Returns quickly if the .migrated-attachments marker file exists.
 #[tauri::command]
@@ -81,9 +81,7 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            env::current_dir().map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
         });
 
     let beads_dir = PathBuf::from(&working_dir).join(".beads");
@@ -110,7 +108,7 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
 
     // Scan JSONL for refs that need cleanup (non-real external refs)
     let content = std::fs::read_to_string(&jsonl_path)
-        .map_err(|e| format!("Failed to read issues.jsonl: {}", e))?;
+        .map_err(|e| format!("Failed to read issues.jsonl: {e}"))?;
 
     let mut ref_count: u32 = 0;
 
@@ -122,7 +120,7 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
         };
         if let Some(ext_ref) = v.get("external_ref").and_then(|r| r.as_str()) {
             if ext_ref.is_empty() { continue; }
-            let refs: Vec<&str> = ext_ref.split(|c: char| c == '\n' || c == '|').collect();
+            let refs: Vec<&str> = ext_ref.split(['\n', '|']).collect();
             for r in &refs {
                 let trimmed = r.trim();
                 if !trimmed.is_empty() && !is_real_external_ref(trimmed) {
@@ -159,16 +157,14 @@ pub(crate) async fn check_refs_migration(cwd: Option<String>) -> Result<RefsMigr
 }
 
 /// Perform the attachment refs migration v3 (filesystem-only).
-/// Delegates to ensure_refs_migrated_v3 which handles backup, cleanup, dedup, and marker.
-/// The br sync is NOT called here — it will happen naturally after via sync_bd_database.
+/// Delegates to `ensure_refs_migrated_v3` which handles backup, cleanup, dedup, and marker.
+/// The br sync is NOT called here — it will happen naturally after via `sync_bd_database`.
 #[tauri::command]
 pub(crate) async fn migrate_attachment_refs(cwd: Option<String>) -> Result<MigrateRefsResult, String> {
     let working_dir = cwd
         .or_else(|| env::var("BEADS_PATH").ok())
         .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            env::current_dir().map_or_else(|_| ".".to_string(), |p| p.to_string_lossy().to_string())
         });
 
     let beads_dir = PathBuf::from(&working_dir).join(".beads");
