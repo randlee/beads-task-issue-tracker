@@ -1,7 +1,7 @@
 ---
 id: b-3
 title: btit-beads crate — backend traits, BeadsError, pure beads logic, log gate
-status: planned
+status: complete
 branch: feature/sprint-b-3-btit-beads
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-3-btit-beads
 target: integrate/phase-b
@@ -320,3 +320,92 @@ mod logging;
 - `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`
 - `git diff --check`
 - test-preservation gate (plan "Test preservation")
+
+## Implementation Notes
+
+Base: `feature/sprint-b-2-btit-types@cb3ef64`. Gate inputs from `sprint-b-1.md`:
+`IMPLEMENTATION_BASELINE=94e44d3`, `BASELINE_TEST_COUNT=155`, baseline worktree
+`/tmp/btit-baseline-94e44d3`. The `a18c724` line cites in this doc were used as-is
+(b-1 verified `cli.rs`, `issues.rs`, `config.rs`, `migration.rs`, `issue_commands.rs`,
+`updates.rs` blob-identical at `94e44d3`); after b-2 the app's `cli.rs` lines shifted,
+so the moved ranges were located by name.
+
+### What moved where
+
+- `detect.rs`: `CLI_CANDIDATES`, `CLI_FALLBACK`, `MIN_SUPPORTED_BD_MAJOR`, `CliSelection`
+  (+ `pub fn binary(&self) -> &str`, `pub fn probe(&self) -> Option<&CliProbe>`, `is_legacy` now `pub`),
+  `is_legacy_bd`, `rank_cli_candidate`, `select_default_binary`, `parse_cli_probe`, `cli_client_name`,
+  `detect_cli_client`, `parse_bd_version`; 32 tests.
+- `compat.rs`: `cli_compatibility_warnings`; 7 tests.
+- `gates.rs`: the five `_for` cores (doc comments kept, including the B7 "br: NO" line), `capabilities_for`;
+  5 moved tests + `capabilities_for_pins_a18c724_values` (literal table in a `const`).
+- `issues.rs` (`git mv` from the app): the six normalizers; 23 tests.
+- `parse.rs`: `parse_issues_tolerant` (log lines and `context` unchanged); the 8 `parse_*` tests.
+- `test_support.rs` (`git mv`): `probe`, `minimal_issue_json`, `issue_json_with_metadata`, unchanged.
+- `logging.rs`: the two statics, `pub use log;`, four `#[macro_export]` macros; app `logging.rs` re-exports the statics.
+- Tests staying in `btit-app/src/cli.rs` (spawn/fs, not in the moved ranges): `probe_returns_none_for_nonexistent_binary`,
+  `probe_returns_none_for_nonexistent_relative_path`, `probe_returns_none_for_empty_binary_name`, the four
+  `extended_path_*` tests, the five `project_uses_dolt_*` tests.
+
+Test counts: `app_lib` 152 → 77; `btit-beads` 86 unit (44 from `cli.rs`, 31 from `issues.rs`, 10 `error.rs`
+Display/code tests, 1 pin) + 9 `api_freeze`.
+
+### Gates run
+
+- Required Validation, all pass: `cargo fmt --check -p btit-types -p btit-beads`; `cargo clippy -p btit-beads --all-targets -- -D warnings`
+  (also with `-p btit-types`); `cargo rustdoc -p btit-beads -- -D missing-docs`; `cargo test --workspace`; `cargo check --workspace --all-targets`;
+  the `cargo tree` diff (empty); `python3 scripts/check_version_sync.py` (`(beads-issue-tracker, btit-types, btit-beads; independent: …)`);
+  `cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets` (only the three pre-existing Windows-only warnings in untouched
+  `updates.rs:4`, `attachments.rs:2`, `updates.rs:443`); `git diff --check`; `pnpm test` (366 passed); `npx vue-tsc --noEmit` (clean).
+- Test preservation: baseline list 155 lines, after list 283, `comm -23` prints nothing.
+- Command contract gates: signature diff empty (65 `#[tauri::command]` headers); frontend invoke subset prints nothing.
+- AC1 greps: no `std::(process|fs)|tauri|sc_observability` in `crates/btit-beads/src`; statics are exactly `LOGGING_ENABLED`, `VERBOSE_LOGGING`
+  (checked with perl locally: BSD grep does not accept the `\(crate\)` group; CI runs the GNU form). AC7 grep: no `allow(clippy::…)`; the crate has no `#[allow]` at all.
+- AC4: moved production items were compared token-by-token (whitespace and trailing commas stripped) against their pre-move text; the only deltas
+  are the adaptations listed under Deviations 5–7 and two rustfmt closure-brace changes (Deviation 8). `origin/integrate/phase-b` is at `eca588b`
+  (pre-b-2), so the layer diff is taken against `origin/feature/sprint-b-2-btit-types`.
+
+### Deviations (minimal, justified)
+
+1. **`detect_bd_1x_banner` moved too.** It sits at `cli.rs:868-874` (`a18c724`), between the listed ranges 818-845 and 875-1115. It exercises only
+   moved pure functions (`detect_cli_client`, `parse_bd_version`); leaving it in the app would have required the same `CliVersion` body change anyway.
+2. **Named re-exports in `cli.rs`** instead of `btit_beads::{detect::*, compat::*, gates::*}` (M-NO-GLOB-REEXPORTS): `cli_compatibility_warnings`,
+   the eight detect items and the five `_for` cores the app uses. `config.rs`, `migration.rs`, `issue_commands.rs`, `polling.rs`, `watcher.rs`,
+   `fs_commands.rs` are unchanged.
+3. **`[workspace.dependencies]` gains `btit-beads = { path = "crates/btit-beads" }`**, and `crates/btit-app/Cargo.toml` gains `btit-beads.workspace = true`
+   (b-1's every-dependency-via-workspace rule, as b-2 did for `btit-types`); `btit-beads` uses `btit-types.workspace = true` (the sample's alternative).
+4. **IPC-edge `.map_err(|e| e.to_string())`** at the 12 `parse_issues_tolerant` call sites (`issue_commands.rs` 7, `polling.rs` 4, `attachments.rs` 1),
+   beyond the `use` lines: the function now returns `BeadsError` and the commands keep `Result<_, String>` (plan "Engineering standards"). The strings are
+   unchanged because `Display` reproduces them.
+5. **Tuple → `CliVersion` adaptation form.** `is_legacy_bd` and `cli_compatibility_warnings` take `Option<CliVersion>` and start with
+   `let version: Option<(u32, u32, u32)> = version.map(Into::into);`, so their match arms stay byte-identical. `rank_cli_candidate`, `CliSelection::is_legacy`
+   and `parse_cli_probe` drop the now-redundant `.map(Into::into)`.
+6. **`parse_bd_version`.** Returns `Some((major, minor, patch).into())`; indexing is `parts.first()?`, `parts.get(1)?`, `parts.get(2)?` — `first()` for
+   index 0 because `clippy::get_first` rejects `get(0)`.
+7. **Further app call-site adaptations** for the new signatures: `updates.rs` `parse_bd_version(..).map(<(u32, u32, u32)>::from)`; `cli.rs`
+   `get_cli_client_info` `parse_bd_version(trimmed).map(Into::into)`; `check_bd_compatibility` `tuple.map(Into::into)` into `cli_compatibility_warnings` and
+   `is_legacy_bd`; `lib.rs` startup passes `p.version` directly; `default_cli_binary` reads `selection.binary()`/`selection.probe()` (fields stay private).
+   `parse_issues_tolerant`'s three `Err` values become `InvalidJson`/`UnexpectedShape { ArrayOrEnvelope }`/`UnexpectedShape { Array }`.
+8. **rustfmt on moved code.** Required Validation runs `cargo fmt --check -p btit-beads`, so the moved bodies are rustfmt-formatted. Besides whitespace and
+   trailing commas, rustfmt dropped the block braces of the two `|| { … }` closures in `transform_issue`'s count fallbacks and added braces to the
+   `find(|word| …)` closure in `parse_bd_version`. No token of logic changed.
+9. **Lint handling without body edits.** `#[must_use]` on the pure public functions (`clippy::must_use_candidate`). `#[expect(clippy::…, reason = "moved verbatim
+   from btit-app in b-3; behaviour and body edits belong to b-9")]` on items whose verbatim bodies trip workspace lints: `CliSelection::is_legacy`
+   (`map_unwrap_or`), `parse_bd_version` (`unnecessary_map_or`, `redundant_closure_for_method_calls`), `supports_daemon_flag_for`/`uses_dolt_backend_for`
+   (`match_same_arms`; the latter also `doc_markdown`, doc comment kept), `cli_compatibility_warnings`/`priority_to_string` (`uninlined_format_args`),
+   `transform_issue` (`too_many_lines`, `cast_possible_truncation`, `cast_possible_wrap`), `parse_issues_tolerant` (`redundant_closure_for_method_calls`);
+   `uninlined_format_args` on the moved test modules and `test_support`. The four traits carry a trait-level `# Errors` section and
+   `#[expect(clippy::missing_errors_doc)]`.
+10. **Docs added** (`#![deny(missing_docs)]`) to moved public items that had none: the four normalizers, `transform_issue`, `cli_client_name`; `parse_issues_tolerant`
+    keeps its two lines and gains a shape note and `# Errors`. Trait methods without a doc line in the sample got one citing the trait-inventory source.
+11. **`Unsupported` Display** renders `{client}` with `cli_client_name` (`bd`/`br`/`unknown`), since `CliClient` has no `Display`.
+12. **Crate root re-exports** `BeadsBackend`, `CliBackend`, `DoltOperations`, `CloseSuggestions`, `BeadsError`, `ExpectedShape`, `ParseTarget`
+    (`#[doc(inline)]`); later sprint docs name `btit_beads::BeadsError`. All modules are `pub`.
+13. **`api_freeze.rs`.** `CreatePayload`/`UpdatePayload` have no `Default`, so `create`/`update` are pinned by signature (fn pointers and the impls) and not
+    called. Accessor defaults are pinned by `Probe` (no overrides → `None`); `Full` overrides them to pin the `Some(&dyn …)` pattern.
+14. **CI source gates.** `rust-quality` also runs the AC1/AC7 greps on Linux, as `test -z "$(…)"` (a leading `!` does not trip `bash -e`).
+15. **ADR table order.** The ADR-008 row is appended after ADR-009, matching the body order (ADR-008 appended after ADR-009).
+
+### Open items before `status: complete`
+
+None. CI on the PR is the maintainer's confirmation step.
