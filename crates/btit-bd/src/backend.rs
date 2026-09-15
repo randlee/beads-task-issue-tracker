@@ -25,9 +25,8 @@ pub const BD_RELEASE_SOURCE: ReleaseSource = ReleaseSource {
 /// The Go `bd` CLI (also used for an unrecognized client, which shares bd's defaults
 /// today), over a `Box<dyn CliInvoker>`: a [`CliRunner`] in production, a scripted
 /// `RecordingInvoker` in tests (feature `test-support`).
-pub struct BdCli {
-    inv: Box<dyn CliInvoker>,
-}
+#[rustfmt::skip]
+pub struct BdCli { inv: Box<dyn CliInvoker> }
 
 impl std::fmt::Debug for BdCli {
     /// `CliInvoker` is not `Debug` (it must stay object-safe across a test-support
