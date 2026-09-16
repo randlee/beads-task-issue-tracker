@@ -37,6 +37,9 @@ coverage
 .temp
 *.cache
 
+# Cargo workspace build output
+/target/
+
 # repowise — index & caches are machine-local artifacts (regenerable via
 # `repowise update --provider codex_cli --yes`). Config, data exports, and
 # generated reports live in .sc/repowise/ and docs/repowise/ (committed).

@@ -1,0 +1,18 @@
+error[E0599]: no method named `shutdown` found for struct `LogControl` in the current scope
+ --> tests/ui/log_control_not_owner.rs:7:21
+  |
+7 |     let _ = control.shutdown(Duration::from_secs(1));
+  |                     ^^^^^^^^ method not found in `LogControl`
+
+error[E0308]: mismatched types
+  --> tests/ui/log_control_not_owner.rs:11:20
+   |
+10 | fn control_into_owner(control: LogControl) -> LogGuard {
+   |                                               -------- this return type influences the call expression's return type
+11 |     LogGuard::from(control)
+   |     -------------- ^^^^^^^ expected `LogGuard`, found `LogControl`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $RUST/core/src/convert/mod.rs

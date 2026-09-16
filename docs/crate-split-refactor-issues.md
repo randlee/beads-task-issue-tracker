@@ -197,3 +197,49 @@ When the production behavior is fixed, update or replace the pinning test in the
 - **Blocking deps shown as relations:** `conditional-blocks` and `waits-for` block work in bd (`types.go:1308`) but are shown as plain relations.
 - **Failed version parse is not cached:** `get_cli_client_info` does not cache a failure (`cli.rs:361-364`), so every version-gated call re-spawns `bd --version`.
 - **Double warning:** tests pin "unparseable bd version counts as legacy", so the frontend shows the legacy banner on top of the parse warning (unverified in the UI).
+
+---
+
+## Disposition (phase-b)
+
+Every item above closed against `docs/plans/phase-b/plan-phase-b.md` "Issue inventory" and each sprint's own acceptance criteria; the closing test or doc is the sprint's own change, not a re-verification against `../beads` beyond what the sprint doc records. Sprint docs are `docs/plans/phase-b/sprint-b-N.md`.
+
+| Item | Disposition | Sprint | Closing test or doc |
+| --- | --- | --- | --- |
+| A1 log target | Closed by phase-a a-4. No phase-b work. | — | `plan-phase-a.md` issue inventory |
+| A2 platform-gated imports (`updates.rs:4`, `attachments.rs:2`; `logging.rs` done in a-4) | Closed: fully-qualified `std::process::Command::new(..)` call sites, matching the existing Windows call site | b-12 | `cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`; `git diff` on `updates.rs`/`attachments.rs` |
+| A3 wrapper + pure-core extraction | No action (verified result-equivalent). The `_for` cores moved unchanged. | — | `crates/btit-beads/src/gates.rs` table-driven tests |
+| A4 orphaned doc comment (`cli.rs:594-595`), moved comment, visibility | Closed: the orphaned comment deleted with `CompatibilityInfo`'s move (b-2); `ensure_refs_migrated_v3` doc comment restored when `migration.rs` was rewired (b-8); visibility redefined by crate boundaries (`pub` = crate API, everything else private) | b-2, b-8 | crate diffs at each sprint head |
+| B1 unknown type/status rewritten | Closed: `normalize_issue_type`/`normalize_issue_status` pass unknown values through | b-9 | `crates/btit-beads/src/issues.rs` tests |
+| B2 `is_real_external_ref` substring match | Closed: URL scheme accepted first, Windows absolute paths local | b-11 | `crates/btit-app/src/attachment_refs.rs` tests |
+| B3 Dolt detection false negatives on bd 1.x | Closed: bd ≥ 0.51 decides from `metadata.json` (`GetBackend()` rule); no `.dolt` probe; `dolt_data_dir` honoured | b-10 | `crates/btit-bd/src/backend.rs`, `crates/btit-bd/src/dolt.rs` tests |
+| B4 `--hard` cutoff | Closed: cutoff moved to 0.51.0 | b-9 | `crates/btit-beads/src/gates.rs` tests |
+| B5 `uses_dolt_backend`/`uses_jsonl_files` cutoff | Closed: cutoff moved to 0.51.0 | b-9 | `crates/btit-beads/src/gates.rs` tests |
+| B6 test that cannot fail | Closed: `get_beads_mtime_for(uses_dolt, uses_jsonl, dir)` pure core; test asserts `None` | b-11 | `crates/btit-app/src/polling.rs` tests |
+| B7 `supports_list_all_flag` doc vs code for br | **Open (OQ-4).** br source unavailable locally and the binary is not installed, so the behaviour could not be verified; the doc comment now reads "unverified against beads_rust (OQ-4)", code unchanged | b-9 | doc comment on `supports_list_all_flag_for` |
+| B8 attachment folders keyed by short ID | Closed as documentation: `docs/attachments.md` `{issue-id}` → `{short-id}` with the collision note. Changing the layout (a data migration) is out of scope | b-11 | `docs/attachments.md` |
+| B9 pre-release version comparison | Closed: strip from `-` before splitting | b-11 | `crates/btit-app/src/updates.rs` tests |
+| B10 tests that assert nothing off macOS; wrapper-calling test | Closed: `find_platform_asset` tests use an injectable suffix (b-11); `project_uses_dolt_false_without_beads_dir` calls the `_for` core (b-10) | b-10, b-11 | `crates/btit-app/src/updates.rs`, `crates/btit-bd` tests |
+| B11 priority parsing | Closed: case-insensitive `p`/`P`; values outside 0–4 fall back to `"3"` | b-9 | `crates/btit-beads/src/issues.rs` tests |
+| B12 `sanitize_filename` extension | Closed: extension sanitized, bare trailing `.` dropped | b-11 | `crates/btit-app/src/attachments.rs` tests |
+| B13 misleading test name (`cli.rs:1295`) | Closed: renamed, moved with `project_uses_dolt_for` | b-10 (moved to `btit-bd` in b-5) | `crates/btit-bd` tests |
+| B13 out-of-range case (`cli.rs:1089`) | Closed: 0.99.0 case removed; message substrings kept | b-9 | `crates/btit-beads/src/compat.rs` tests |
+| B13 invalid `related-to` fixture (`issues.rs:653,661`) | Closed: fixture uses `relates-to` | b-9 | `crates/btit-beads/src/issues.rs` tests |
+| B13 blocking deps shown as relations (`conditional-blocks`, `waits-for`) | Closed: added to `STRUCTURAL_TYPES`/`BLOCKING_TYPES`, feed `blocked_by`/`blocks` | b-9 | `crates/btit-beads/src/issues.rs` tests |
+| B13 failed version parse not cached | Closed: `CliRunner` caches the failed probe as `ProbeState::Failed`; reset on binary change or a compatibility recheck | b-11 | `crates/btit-cli/src/runner.rs` tests |
+| B13 double warning (legacy banner plus parse warning) | **Out of scope (OQ-5).** Frontend banner behaviour, unverified in the UI. | — | — |
+
+### Follow-ups filed during phase-b
+
+Not owned by this table's A/B items; filed as separate issues for work explicitly deferred by a sprint doc or this sprint's own review. None are fixed by b-12 (see sprint-b-12.md "Known and out of scope").
+
+- **#55** — subprocess timeouts, `spawn_blocking` at the `btit-app` command boundary, and `ProjectLocks` eviction (plan QA RSH-001/002/005; headroom noted in the plan's trait design section, not fixed by any phase-b sprint)
+- **#65** — a flaky Windows attachments test; related in theme to B10 (platform-conditional tests) but not the same test and not fixed here
+- **#67** — `migration.rs` decomposition (1909 lines at the b-12 head); this sprint kept it as two linear functions with `#[expect(clippy::too_many_lines, reason = "...")]` rather than splitting it, per the plan's "no behaviour change" constraint
+- **#68** — further structuring of `btit-app`'s `Result<_, String>` command-boundary errors, beyond `BeadsError`'s discriminated union (b-3) and `map_err(|e| e.to_string())` at the IPC edge
+- **#70** — a frontend duplicate-create issue; not a Rust backend item
+- **#73** — logging defaults; not addressed by this sprint's logging work (the `#![deny(..)]` removal in `logging.rs` and the workspace lint adoption are unrelated)
+- **#74** — `bd migrate --to-dolt` follow-up; `bd_migrate_to_dolt_with` (`migration.rs`) is unchanged behaviourally by b-12 beyond the panic-site and lint fixes recorded in this sprint's Implementation Notes
+- **#76** — CLI probe retry; `CliRunner`'s `ProbeState::Failed` cache (b-11, B13) records a failed probe but does not retry it automatically
+- **#77** — reserved filenames (e.g. Windows `CON`, `PRN`) in `sanitize_filename`; not covered by B12's extension sanitization
+- Upstream **sc-observability#96** and **sc-observability#97** — tracked in the `../sc-observability` repository, not this one; not part of this table's A/B inventory
