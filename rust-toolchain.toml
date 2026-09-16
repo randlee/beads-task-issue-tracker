@@ -1,7 +1,6 @@
-# Pinned Rust toolchain (repo root so it applies both to `cargo --manifest-path
-# src-tauri/Cargo.toml` run from the root and to the Tauri CLI running in src-tauri).
-# Keep in sync with `rust-version` in src-tauri/Cargo.toml and the `toolchain:`
-# pins in .github/workflows/*.yml — `python3 scripts/check_version_sync.py` enforces this.
+# Pinned Rust toolchain (repo root, applies to every workspace crate and to the Tauri CLI).
+# Keep in sync with `rust-version` in Cargo.toml and the `toolchain:` pins in
+# .github/workflows/*.yml — `python3 scripts/check_version_sync.py` enforces this.
 [toolchain]
 channel = "1.98.1"
 profile = "minimal"

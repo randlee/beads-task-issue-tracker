@@ -1,7 +1,7 @@
 ---
 id: b-8
 title: Legacy-path and Dolt rewire — migration, mtime, watcher, fs, updates on the slot; delete cli.rs
-status: planned
+status: complete
 branch: feature/sprint-b-8-legacy-dolt-rewire
 worktree: ../beads-task-issue-tracker-worktrees/feature/sprint-b-8-legacy-dolt-rewire
 target: integrate/phase-b
@@ -134,7 +134,7 @@ pub(crate) fn bd_repair_database_with(be: &dyn BeadsBackend, cwd: Option<String>
 ## Acceptance Criteria
 
 1. `crates/btit-app/src/cli.rs` does not exist; `! grep -rnE 'mod cli;|crate::cli::|execute_bd|btit_cli::run::run_json' crates/btit-app/src` (every beads CLI invocation goes through the backend; the non-beads spawns keep `btit_cli::command::new_command` for `gh auth token` (`updates.rs:75`) and `cmd /C start` (`attachments.rs:50`) so `CREATE_NO_WINDOW` is preserved, and `sqlite3`/`open`/`xdg-open` use `std::process::Command` directly, as today).
-2. `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing (group B non-intersection). Injection discipline: (a) `awk '/fn [a-z_]+_with\(/{c=1} c&&/(backend::|\bcurrent\(\)|with_cli\(|get_cli_binary\()/{print FILENAME":"FNR": "$0} c&&/^}/{c=0}' crates/btit-app/src/*.rs` prints nothing (no `_with` body reaches the global slot, directly or through `config::get_cli_binary()`); (b) `! grep -nE 'use crate::backend::\{|use crate::backend::(current|with_cli)|use crate::config::get_cli_binary' crates/btit-app/src/{migration,polling}.rs` (so a bare `current()`/`get_cli_binary()` cannot appear); (c) the only functions in `migration.rs` and `polling.rs` that call `backend::current()` are on the allow-list `bd_sync`, `bd_repair_database`, `bd_cleanup_stale_locks`, `bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_check_changed`, `bd_reset_mtime`, `bd_poll_data` (command wrappers) plus the two non-command wrappers `sync_bd_database` (`migration.rs:188`) and `get_beads_mtime` (`polling.rs:95`): `awk '/^(pub(\(crate\))? )?(async )?fn [a-z_]+/{name=$0; sub(/.*fn /,"",name); sub(/[(<].*/,"",name)} /backend::current\(\)/{print name}' crates/btit-app/src/{migration,polling}.rs | sort -u | diff - <(printf 'bd_check_changed\nbd_check_needs_migration\nbd_cleanup_stale_locks\nbd_migrate_to_dolt\nbd_poll_data\nbd_repair_database\nbd_reset_mtime\nbd_sync\nget_beads_mtime\nsync_bd_database\n' | sort)` is empty (names that do not use the slot simply do not appear; the diff allows only a subset).
+2. `git diff --name-only feature/sprint-b-7-backend-slot...HEAD | grep -vE '^(crates/btit-app/|docs/plans/phase-b/sprint-b-8.md$)'` prints nothing (group B non-intersection). Injection discipline: (a) `awk '/fn [a-z_]+_with\(/{c=1} c&&/(backend::|\bcurrent\(\)|with_cli\(|get_cli_binary\()/{print FILENAME":"FNR": "$0} c&&/^}/{c=0}' crates/btit-app/src/*.rs` prints nothing (no `_with` body reaches the global slot, directly or through `config::get_cli_binary()`); (b) `! grep -nE 'use crate::backend::\{|use crate::backend::(current|with_cli)|use crate::config::get_cli_binary' crates/btit-app/src/{migration,polling}.rs` (so a bare `current()`/`get_cli_binary()` cannot appear); (c) the only functions in `migration.rs` and `polling.rs` that call `backend::current()` are on the allow-list `bd_sync`, `bd_repair_database`, `bd_cleanup_stale_locks`, `bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_check_changed`, `bd_reset_mtime`, `bd_poll_data` (command wrappers) plus the two non-command wrappers `sync_bd_database` (`migration.rs:188`) and `get_beads_mtime` (`polling.rs:95`): `awk '/^(pub(\(crate\))? )?(async )?fn [a-z_]+/{name=$0; sub(/.*fn /,"",name); sub(/[(<].*/,"",name)} /backend::current\(\)/{print name}' crates/btit-app/src/{migration,polling}.rs | sort -u | comm -23 - <(printf 'bd_check_changed\nbd_check_needs_migration\nbd_cleanup_stale_locks\nbd_migrate_to_dolt\nbd_poll_data\nbd_repair_database\nbd_reset_mtime\nbd_sync\nget_beads_mtime\nsync_bd_database\n' | sort)` prints nothing (`comm -23` lists only names outside the allow-list, so a subset passes; corrected at QA-1 ATM-QA-003/QA-001).
 3a. Test-only feature isolation: `cargo tree -e normal,features -p beads-issue-tracker | grep -c 'test-support'` is `0` (the `test-support` features are enabled only through `[dev-dependencies]`, never in the normal build).
 3. `generate_handler!` still lists the same 65 names in order (gate from `sprint-b-7.md` Acceptance Criterion 2); the plan's command-signature gate (1) diffs empty (the `_with` cores are new free functions; the `#[tauri::command]` headers are unchanged) and the frontend invoke-subset gate (2) prints nothing.
 4. Every row of the error-text table is covered by a unit test on the mapping closure, or by the `RecordingInvoker` tests of Deliverable 6.
@@ -158,3 +158,132 @@ pub(crate) fn bd_repair_database_with(be: &dyn BeadsBackend, cwd: Option<String>
 - `git diff --check`
 - test-preservation gate
 - `pnpm tauri:dev` (manual, Deliverable 7)
+
+## Implementation Notes
+
+Implemented on `feature/sprint-b-8-legacy-dolt-rewire` (group B, forked from the b-7 head `cb8a7de`).
+No merge-forward was needed. The branch touches only `crates/btit-app/**` and this document. b-10's sibling branch
+is not merged in.
+
+**Gate outputs** (`IMPLEMENTATION_BASELINE=94e44d3`, worktree `/tmp/btit-baseline-94e44d3`)
+
+- `cargo check --workspace --all-targets`: clean, 0 warnings.
+- `cargo test --workspace`: all green. There are 23 new app tests: 21 in `migration::tests` and 2 in
+  `polling::tests`. The 5 `reprefix_id_*` tests and `get_beads_mtime_returns_none_without_beads_dir` are
+  unchanged.
+- `cargo test -p beads-issue-tracker`: all green (102 lib tests).
+- `cargo clippy --manifest-path crates/btit-app/Cargo.toml --all-targets`: 0 errors. The lib reports 9 warnings,
+  down from 17 at `cb8a7de`, because the direct spawns' `.args(&[..])` needless borrows are gone. The lib-test
+  target reports 25, down from 33. No lint kind is new, and all remaining warnings are pre-existing #49 drift.
+- rustfmt: the new `test_backend.rs` and the reordered `backend.rs` pass `rustfmt --check`. The rest of
+  `btit-app` was not reformatted (#49, b-12). `cargo fmt --check -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br`
+  is clean, and those crates are untouched.
+- Command-signature gate (1): the diff is empty (65 headers). Frontend invoke-subset gate (2): prints nothing.
+- `generate_handler!`: the same 65 names in the same order as the baseline (diff empty).
+- AC 1: `cli.rs` is absent, and the forbidden-name grep prints nothing.
+- AC 2: the `git diff --name-only feature/sprint-b-7-backend-slot...HEAD` filter prints nothing.
+  (a) The awk prints nothing (see deviation 1). (b) The grep prints nothing. (c) The slot-calling functions in
+  `migration.rs`/`polling.rs` are `bd_check_needs_migration`, `bd_migrate_to_dolt`, `bd_poll_data`,
+  `bd_repair_database`, `bd_sync`, `get_beads_mtime` and `sync_bd_database`. All are on the allow-list, so the
+  diff shows only allow-list-only names.
+- AC 3a: `cargo tree -e normal,features -p beads-issue-tracker | grep -c test-support` is `0`.
+- AC 5: `grep -B3 'fn ensure_refs_migrated_v3' … | grep -c '^///'` is `2`.
+- Test-preservation gate: the baseline list has exactly 155 names and the after list 399. Raw `comm -23` prints
+  exactly b-9's three replaced names (`normalize_issue_status_defaults_unknown`,
+  `normalize_issue_type_defaults_unknown`, `priority_to_number_defaults_invalid_inputs`). With those three names
+  removed, it prints nothing. The replaced list came from a private file, not the shared `/tmp/replaced.txt`,
+  which already holds the sibling b-10's names.
+- `pnpm test`: 20 files, 366 tests passed. `npx vue-tsc --noEmit`: exit 0.
+- `python3 scripts/check_version_sync.py`: OK.
+- `PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin check --workspace --target x86_64-pc-windows-msvc --all-targets`:
+  clean. The only warnings are the pre-existing #49 ones (`updates.rs:5,442`, `attachments.rs:2`).
+- `git diff --check`: clean.
+- `pnpm tauri:dev` manual verification (Deliverable 7, AC 7): **open**, left for the team-lead.
+- AC 8 (QA-1, CI): open.
+
+**AC 4 coverage** (the error-text table)
+
+| Row | Test |
+|---|---|
+| doctor spawn | `dolt_op_error_keeps_spawn_texts`, `repair_dolt_spawn_error_keeps_text` |
+| doctor non-zero | `repair_dolt_failure_maps_trimmed_stderr` |
+| migrate spawn | `dolt_op_error_keeps_spawn_texts`, `migrate_spawn_error_keeps_text` |
+| init spawn | `dolt_op_error_keeps_spawn_texts`, `migrate_empty_project_init_paths` |
+| import spawn | `dolt_op_error_keeps_spawn_texts`, `migrate_fallback_error_texts` |
+| version unknown | `migrate_version_guards` (a backend without a CLI) |
+
+The argv assertions in Deliverable 6 are covered by these tests:
+
+- `repair_sqlite_verifies_with_list_argv_on_bd_1` checks `["list","--limit=1","--json"]`.
+- `repair_sqlite_verifies_with_no_daemon_on_bd_0_49` checks the same argv with `--no-daemon`.
+- `migrate_fallback_sends_exact_restore_argv` checks `update … --set-labels` (once per label) and `dep add … --type`,
+  plus the `migrate`, `init` and `import` argv.
+- `restore_comments_sends_exact_argv` checks `comments add <id> -f <file> --author <a>`.
+
+**Deviations**
+
+1. *`backend.rs` method order (outside Exact Targets, inside `crates/btit-app/**`).* AC 2(a)'s awk opens a region
+   at any `fn <name>_with(` and closes it only at a column-0 `}`. The indented `Slot::install_with` therefore
+   swept `Slot::compatibility`'s `self.with_cli(..)` instance calls (lines 141 and 149 at `cb8a7de`) into the region,
+   and the gate printed them. Neither call reaches the global slot through a `_with` core. The fix moves
+   `Slot::install_with` and `Slot::install_with_if` to the end of `impl Slot`, with no code change, so the gate
+   stays literal.
+2. *New test-only module `crates/btit-app/src/test_backend.rs` (`#[cfg(test)] mod test_backend;` in `lib.rs`).*
+   The migration and polling tests share it. It holds the `Shared(Arc<RecordingInvoker>)` delegate (the same
+   pattern as b-7's backend tests), the rule-invariant `TempProject` fixtures, and `FakeBackend`. `FakeBackend`
+   has a fixed `project_uses_dolt`, an optional `BdCli` CLI facet and no `dolt()`. It exercises the two paths no
+   shipped backend reaches: a backend without a CLI, and a Dolt project on a backend without `DoltOperations`.
+   Its answers are fixed, not rule-derived, so b-10 cannot change them.
+3. *`restore_comments` extracted from `bd_migrate_to_dolt_with`.* The comment-row loop that runs after the `sqlite3`
+   query is now a private function taking the `sqlite3` stdout, with the body unchanged. `sqlite3` is a direct
+   non-beads spawn that a `RecordingInvoker` cannot script. Without this extraction the comment argv could not
+   be asserted. This is not the #67 decomposition. Nothing else in `migration.rs` moved.
+4. *`migrate_fallback_sends_exact_restore_argv` fixture has `issues.jsonl` but no `beads.db`.* A `beads.db`
+   would become `beads.db.backup` and trigger the real `sqlite3`. The fixture is still SQLite by both the
+   `a18c724` rule and b-10's rule, because it has no `metadata.json` and no `.dolt/`.
+5. *`sync_bd_database` and `bd_sync` read the binary from the backend they already hold* (`cli_binary(be)`, which
+   is `be.cli().binary()` or `"bd"`). This is exactly `config::get_cli_binary`'s rule over the same slot instance.
+   It lets AC 2(b) ban the `get_cli_binary` import from `migration.rs`.
+
+**Behaviour deltas** (none reachable with the shipped `BdCli`/`BrCli` and today's `br` 0.1.x versions)
+
+- `bd_migrate_to_dolt` on a backend without `dolt()` (today only `BrCli`) that passes the version gate now returns
+  `Dolt migration is not supported by the br client`. It fails before any file cleanup. Previously the app
+  spawned `br migrate --to-dolt --yes`. This is reachable only for a `br` reporting version ≥ 0.50. br is at
+  0.1.x, so its version gate still returns the 0.50+ error first.
+- `bd_repair_database` on a SQLite project whose backend has no CLI returns
+  `SQLite repair is not supported by the unknown client` before backing up or removing any file. This is
+  unreachable, because both shipped backends have a CLI. The resolution sits before the destructive steps, so a
+  future non-CLI transport cannot leave a deleted database behind.
+- A Dolt project on a backend without `dolt()` gets `Dolt repair is not supported by the <client> client` (spec
+  Deliverable 1). This is unreachable: only `BdCli` detects Dolt, and it has `dolt()`.
+- `start_watching` and `fs_list` read the slot once at the top instead of once per `project_uses_dolt` call. A
+  `set_cli_binary_path` that lands during an `fs_list` loop no longer changes the answer mid-listing.
+- Log lines only: the restore-step `Failed to run bd …: {e}` logs and `Failed to verify repair: {e}` print the
+  spawn's `io::Error` text, as before, through `raw_error_text`. A non-spawn `BeadsError` (none exists for
+  `run_raw` on a local project) would print its `Display`.
+
+Carried over and unchanged: b-7's extra `--version` spawns on an unparsed probe. Each `client()`, `version()` or
+`capabilities()` read of a lazy runner may probe; b-11 fixes this with B13.
+
+**Spec ambiguities resolved**
+
+1. *Where `cli_of` lives.* The spec calls it "a local helper" in `migration.rs`, and Deliverable 3 also uses it in
+   `get_beads_mtime_with`. Resolution: `pub(crate) fn cli_of` in `migration.rs`, imported by `polling.rs` (which
+   already imported `sync_bd_database` from there).
+2. *Operation names for `Unsupported`.* The spec fixes only `"Dolt repair"` (sample) and `"repair test"`. Resolution:
+   `"SQLite repair"` for the hoisted SQLite resolution (it now guards the whole SQLite path, not just the test
+   call), `"Dolt migration check"`, `"Dolt migration"` and `"mtime"`. These names appear only in unreachable
+   `Unsupported` texts.
+3. *`get_beads_mtime_with`'s project.* The spec writes `ProjectRef::local(Some(working_dir))`, but the function
+   receives `beads_dir`. Resolution: `beads_dir.parent()`, exactly as b-7's `project_uses_dolt` shim derived it,
+   so `bd_poll_data`/`bd_check_changed` resolve the same project as before.
+4. *Capabilities read count in the SQLite repair.* The code calls `cli.capabilities()` once at the JSONL check and
+   once at the daemon-flag check, matching today's two wrapper reads and their spawn count on an unparsed probe.
+5. *`btit-br` `test-support` dev-dependency.* It is listed in Exact Targets but unused by this sprint's tests,
+   which follow the "never `Br`" probe rule. It is added as specified. The normal graph has no `test-support`
+   (AC 3a).
+6. *`cargo fmt --all`.* It is not run. It would reformat the whole app crate, which is #49 and owned by b-12. Only
+   the new and reordered files are formatted.
+
+**Changelog line (for b-12):** Database repair and Dolt migration run through the bd backend's `DoltOperations`; legacy-path detection (mtime, watcher, directory listing) asks the selected backend. No user-visible change.

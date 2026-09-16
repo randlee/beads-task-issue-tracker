@@ -1,0 +1,45 @@
+[package]
+name = "beads-issue-tracker"             # OQ-2
+version.workspace = true
+description = "Beads Task-Issue Tracker - Desktop app for managing bd Beads issues"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+serde.workspace = true
+btit-types.workspace = true
+btit-beads.workspace = true
+btit-cli.workspace = true
+btit-bd = { path = "../btit-bd" }   # b-7: the backend slot constructs BdCli
+btit-br = { path = "../btit-br" }   # b-7: the backend slot constructs BrCli
+log.workspace = true
+sc-observability-log.workspace = true
+tauri.workspace = true
+tauri-plugin-shell.workspace = true
+tauri-plugin-dialog.workspace = true
+dirs.workspace = true
+reqwest.workspace = true
+notify.workspace = true
+notify-debouncer-mini.workspace = true
+dotenvy.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+# b-7/b-8 backend seam tests: RecordingInvoker and BdCli/BrCli::with_invoker (dev-only; never in the normal graph)
+btit-cli = { workspace = true, features = ["test-support"] }
+btit-bd = { path = "../btit-bd", features = ["test-support"] }
+btit-br = { path = "../btit-br", features = ["test-support"] }
