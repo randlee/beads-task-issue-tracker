@@ -5,9 +5,9 @@ A lightweight, standalone desktop application for managing [Beads](https://githu
 ![Beads Task-Issue Tracker](docs/screenshots/app-overview-1.23.0.png)
 
 > [!NOTE]
-> **Maintenance status.** This repository is now maintained independently as a desktop GUI for the [`bd`](https://github.com/steveyegge/beads) CLI (bd 1.x). The original author has moved on to [PaiR](https://pair.w3dev.fr), a separate product with its own CLI and storage format — if you want that direction, see the PaiR releases at [w3dev33/pair-dist](https://github.com/w3dev33/pair-dist/releases).
+> **Maintenance status.** Forked from [w3dev33/beads-task-issue-tracker](https://github.com/w3dev33/beads-task-issue-tracker) and now maintained independently.
 >
-> Here, the focus is: follow current `bd`, keep `br` working as a secondary CLI, and stay a lightweight human control panel over `.beads/`.
+> The focus here: follow current `bd` (Go, 1.x, Dolt-backed), keep `br` (Rust) working as a fully supported second CLI, and stay a lightweight human control panel over `.beads/`.
 
 ## Why This App?
 

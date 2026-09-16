@@ -214,7 +214,7 @@ interface DashboardStats { total, open, inProgress, blocked, closed, ready, byTy
 
 ## Backend Structure (`crates/`)
 
-Six crates under a root Cargo workspace (`Cargo.toml` at the repo root; phase-b crate split, sprints b-1..b-12). Line counts below are at the b-12 head.
+Nine crates under a root Cargo workspace (`Cargo.toml` at the repo root; phase-b crate split, sprints b-1..b-12): the six `btit-*` crates described below, plus the three in-tree `sc-observability-log*` crates (the `log` bridge, its macros, and a consumer check) that phase-a added and phase-b kept as workspace members at 0.1.0. Line counts below are at the b-12 head.
 
 ### `crates/btit-app/` — Tauri command glue, filesystem features, backend selection
 
