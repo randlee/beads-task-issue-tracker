@@ -76,6 +76,10 @@ fn a1_public_api_is_frozen() {
     let _ = |e: InitError| match e {
         InitError::AlreadyInitialized => (),
         InitError::ForeignLoggerInstalled { source: _ } => (),
+        InitError::UnsupportedLevel {
+            configured: _,
+            available: _,
+        } => (),
         InitError::IdentityResolution { source: _ } => (),
         InitError::Logger { source: _ } => (),
     };

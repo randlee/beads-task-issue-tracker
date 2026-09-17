@@ -1,8 +1,6 @@
 //! The `log::Log` implementation installed by [`init`](crate::init).
 
-use std::sync::atomic::Ordering;
-
-use crate::handle::{self, THRESHOLD};
+use crate::handle;
 use crate::{DropCause, mapping};
 
 /// Maps every enabled `log` record to a `LogEvent` and submits it through the
@@ -12,10 +10,10 @@ use crate::{DropCause, mapping};
 pub(crate) struct Bridge;
 
 impl log::Log for Bridge {
-    /// Compares the record level against the threshold derived from `LoggerConfig.level`.
+    /// Retains every compiled facade site through Trace. The staged core applies
+    /// the one effective runtime filter during admission.
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        let rank = metadata.level() as usize;
-        rank <= usize::from(THRESHOLD.load(Ordering::Relaxed))
+        handle::core_enabled(mapping::map_level(metadata.level()))
     }
 
     /// Never blocks on I/O or queue capacity and never panics.

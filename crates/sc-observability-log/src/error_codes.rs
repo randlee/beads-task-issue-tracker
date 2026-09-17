@@ -26,6 +26,30 @@ pub const SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED: ErrorCode =
 /// `FlushError::HelperLost` / `ShutdownError::HelperLost`: the helper thread ended without a result.
 pub const SC_OBSERVABILITY_LOG_HELPER_LOST: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_HELPER_LOST");
+/// `InitError::UnsupportedLevel`: the executable's static facade cap cannot retain the baseline.
+pub const SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL");
+/// Direct runtime setup failed before bridge admission.
+pub const SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED");
+/// A direct/control request arrived outside the running lifecycle.
+pub const SC_OBSERVABILITY_LOG_NOT_RUNNING: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_NOT_RUNNING");
+/// A typed direct event supplied an invalid field key.
+pub const SC_OBSERVABILITY_LOG_INVALID_FIELD: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_INVALID_FIELD");
+/// A producer re-entered the guarded bridge submission path.
+pub const SC_OBSERVABILITY_LOG_REENTRANT_EMIT: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_REENTRANT_EMIT");
+/// A callback panic was contained by the bridge admission boundary.
+pub const SC_OBSERVABILITY_LOG_LOGGER_PANICKED: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_LOGGER_PANICKED");
+/// A read-only state/query observation is unavailable.
+pub const SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE");
+/// A wait request was made before initialization.
+pub const SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED: ErrorCode =
+    ErrorCode::new_static("SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED");
 /// `FlushError::ShutDown`: a flush was requested after shutdown had started.
 pub const SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN: ErrorCode =
     ErrorCode::new_static("SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN");
@@ -63,6 +87,14 @@ pub const ALL: &[ErrorCode] = &[
     SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
     SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
     SC_OBSERVABILITY_LOG_HELPER_LOST,
+    SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL,
+    SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED,
+    SC_OBSERVABILITY_LOG_NOT_RUNNING,
+    SC_OBSERVABILITY_LOG_INVALID_FIELD,
+    SC_OBSERVABILITY_LOG_REENTRANT_EMIT,
+    SC_OBSERVABILITY_LOG_LOGGER_PANICKED,
+    SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE,
+    SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED,
     SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
     SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
     SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL,
@@ -85,6 +117,6 @@ mod tests {
             assert!(code.as_str().starts_with("SC_OBSERVABILITY_LOG_"));
             assert!(seen.insert(code.as_str()), "duplicate code {code}");
         }
-        assert_eq!(ALL.len(), 16);
+        assert_eq!(ALL.len(), 24);
     }
 }

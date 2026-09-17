@@ -15,7 +15,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BridgeHealthReport, BridgeLifecycle, FlushError, Level, SubmitError, handle, health, mapping,
+    BridgeHealthReport, BridgeLifecycle, ControlError, EmitError, FieldKeyError, FlushError, Level,
+    LifecyclePhase, SubmitError, handle, health, mapping,
 };
 
 /// A JSON value, as stored in `LogEvent.fields` (re-exported `serde_json::Value`).
@@ -23,6 +24,34 @@ pub type JsonValue = serde_json::Value;
 
 /// The field map of a [`StructuredRecord`] (a `serde_json::Map`).
 pub type JsonMap = serde_json::Map<String, JsonValue>;
+
+/// Typed direct producer input. Bridge-owned envelope identity and timestamps
+/// remain absent, so a caller cannot replace host provenance.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BridgeEvent {
+    /// Canonical core event level.
+    pub level: sc_observability_types::Level,
+    /// Pre-validated event target.
+    pub target: sc_observability_types::TargetCategory,
+    /// Optional action; the bridge default is used when omitted.
+    pub action: Option<sc_observability_types::ActionName>,
+    /// Optional producer message.
+    pub message: Option<String>,
+    /// Optional operation outcome.
+    pub outcome: Option<sc_observability_types::OutcomeLabel>,
+    /// Producer fields, validated by the same key policy as macros.
+    pub fields: JsonMap,
+    /// Optional request identifier.
+    pub request_id: Option<sc_observability_types::CorrelationId>,
+    /// Optional correlation identifier.
+    pub correlation_id: Option<sc_observability_types::CorrelationId>,
+    /// Optional explicit trace context.
+    pub trace: Option<sc_observability_types::TraceContext>,
+}
+
+/// Compatibility spelling for the core admission result, not an independent enum.
+pub type EmitOutcome = sc_observability_types::AdmissionOutcome;
 
 /// Cloneable, non-owning control of the installed bridge.
 ///
@@ -79,6 +108,62 @@ impl LogControl {
         health::active_log_path()
     }
 
+    /// Snapshot of exact-once bridge rejection counters. This does not expose
+    /// lifecycle ownership.
+    #[must_use]
+    pub fn dropped_events(&self) -> crate::DroppedEvents {
+        handle::dropped_events()
+    }
+
+    /// Waits only for the already-started owner shutdown. Controls neither
+    /// initiate shutdown nor retain the owner while waiting.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WaitError`](crate::WaitError) before initialization or when
+    /// the requested observation deadline passes.
+    pub fn wait_stopped(
+        &self,
+        timeout: Duration,
+    ) -> Result<crate::ShutdownReport, crate::WaitError> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match handle::lifecycle() {
+                BridgeLifecycle::Stopped => {
+                    if !handle::installed_once() {
+                        return Err(crate::WaitError::NotStarted);
+                    }
+                    return Ok(crate::ShutdownReport {
+                        outcome: crate::ShutdownOutcome::Stopped,
+                        health: health::snapshot(),
+                    });
+                }
+                BridgeLifecycle::ShutdownTimedOut => {
+                    return Ok(crate::ShutdownReport {
+                        outcome: crate::ShutdownOutcome::Unconfirmed {
+                            cause: crate::UnconfirmedShutdown::HelperLost {
+                                diagnostic: operation_diagnostic(
+                                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                                    "shutdown completion is not confirmed".to_owned(),
+                                    sc_observability_types::Remediation::recoverable(
+                                        "wait for the owner shutdown to complete",
+                                        std::iter::empty::<String>(),
+                                    ),
+                                ),
+                            },
+                        },
+                        health: health::snapshot(),
+                    });
+                }
+                BridgeLifecycle::Running | BridgeLifecycle::ShuttingDown => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(crate::WaitError::TimedOut { timeout });
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     /// Submits one structured record to the installed writer without blocking.
     ///
     /// The record goes through the same guarded submission core as the `log`
@@ -110,14 +195,6 @@ impl LogControl {
     /// A record below `LoggerConfig.level` is `Ok(SubmitOutcome::Filtered)` and
     /// counts nothing.
     pub fn submit(&self, record: StructuredRecord) -> Result<SubmitOutcome, SubmitError> {
-        if !handle::level_enabled(record.level.into()) {
-            // Shutdown sets the threshold to Off: tell "stopped" from "filtered".
-            let lifecycle = handle::lifecycle();
-            if lifecycle != BridgeLifecycle::Running {
-                return Err(stopped(lifecycle));
-            }
-            return Ok(SubmitOutcome::Filtered);
-        }
         let lifecycle = handle::lifecycle();
         if lifecycle != BridgeLifecycle::Running {
             return Err(stopped(lifecycle));
@@ -129,7 +206,160 @@ impl LogControl {
             let parts = mapping::structured_to_parts(record).map_err(SubmitError::InvalidInput)?;
             handle::submit_to(&installed, parts).map_err(SubmitError::from_drop_cause)
         })
-        .map(|()| SubmitOutcome::Accepted)
+        .map(|outcome| match outcome {
+            sc_observability_types::AdmissionOutcome::Accepted => SubmitOutcome::Accepted,
+            sc_observability_types::AdmissionOutcome::Filtered => SubmitOutcome::Filtered,
+        })
+    }
+
+    /// Admits a typed direct event through the same staged-core writer path as
+    /// facade and macro producers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmitError`] after exact-once rejection accounting when the
+    /// input, lifecycle, queue, writer, or guarded callback rejects admission.
+    pub fn try_log(&self, event: BridgeEvent) -> Result<EmitOutcome, EmitError> {
+        if handle::lifecycle() != BridgeLifecycle::Running {
+            return Err(not_running());
+        }
+        handle::submit_guarded(|| {
+            let installed = handle::current_installed().ok_or_else(not_running)?;
+            let event = direct_event(event, &installed)?;
+            installed
+                .logger
+                .try_log_with_outcome(event)
+                .map_err(|error| core_emit_error(&error))
+        })
+    }
+
+    /// Executes a typed core query without yielding owner or shutdown authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError`] when the bridge is not running or the staged
+    /// core rejects the query.
+    pub fn query(
+        &self,
+        query: &sc_observability_types::LogQuery,
+    ) -> Result<sc_observability_types::LogSnapshot, ControlError> {
+        let installed = handle::current_installed().ok_or_else(|| ControlError::NotRunning {
+            phase: lifecycle_phase(),
+        })?;
+        installed.logger.query(query).map_err(|error| {
+            let diagnostic = error.diagnostic();
+            ControlError::Query {
+                diagnostic: operation_diagnostic(
+                    error.code(),
+                    error.to_string(),
+                    diagnostic.remediation.clone(),
+                ),
+            }
+        })
+    }
+}
+
+fn direct_event(
+    event: BridgeEvent,
+    installed: &handle::Installed,
+) -> Result<sc_observability_types::LogEvent, EmitError> {
+    let mut fields = JsonMap::new();
+    for (raw, value) in event.fields {
+        let key = mapping::field_key_label(&raw)
+            .map_err(|error| EmitError::InvalidField {
+                raw_key: raw.clone(),
+                reason: match error {
+                    mapping::LabelError::Empty { .. } | mapping::LabelError::Rejected { .. } => {
+                        FieldKeyError::Empty
+                    }
+                    mapping::LabelError::ReservedPrefix { .. } => FieldKeyError::ReservedPrefix,
+                },
+            })?
+            .into_owned();
+        if let Some(other_raw_key) = fields.insert(key.clone(), value).map(|_| raw.clone()) {
+            return Err(EmitError::InvalidField {
+                raw_key: raw,
+                reason: FieldKeyError::Collision { other_raw_key },
+            });
+        }
+    }
+    let observation = sc_observability_types::Observation::new(installed.service.clone(), ());
+    Ok(sc_observability_types::LogEvent {
+        version: observation.version,
+        timestamp: observation.timestamp,
+        level: event.level,
+        service: installed.service.clone(),
+        target: event.target,
+        action: event
+            .action
+            .unwrap_or_else(|| installed.options.default_action.clone()),
+        message: event.message,
+        identity: installed.identity.clone(),
+        trace: event.trace.or_else(crate::context::current_trace),
+        request_id: event.request_id,
+        correlation_id: event.correlation_id,
+        outcome: event.outcome,
+        diagnostic: None,
+        state_transition: None,
+        fields,
+    })
+}
+
+fn lifecycle_phase() -> LifecyclePhase {
+    match handle::lifecycle() {
+        BridgeLifecycle::Running => LifecyclePhase::Running,
+        BridgeLifecycle::ShuttingDown => LifecyclePhase::Stopping,
+        BridgeLifecycle::Stopped => LifecyclePhase::Stopped,
+        BridgeLifecycle::ShutdownTimedOut => LifecyclePhase::Failed,
+    }
+}
+
+fn not_running() -> EmitError {
+    EmitError::NotRunning {
+        phase: lifecycle_phase(),
+    }
+}
+
+fn operation_diagnostic(
+    code: sc_observability_types::ErrorCode,
+    message: String,
+    remediation: sc_observability_types::Remediation,
+) -> sc_observability_types::OperationDiagnostic {
+    sc_observability_types::OperationDiagnostic {
+        code,
+        message,
+        remediation,
+        at: sc_observability_types::Timestamp::now_utc(),
+    }
+}
+
+fn core_emit_error(error: &sc_observability::TryLogError) -> EmitError {
+    let error_text = error.to_string();
+    let diagnostic = |code| {
+        operation_diagnostic(
+            code,
+            error_text.clone(),
+            sc_observability_types::Remediation::recoverable(
+                "inspect the bridge health and retry when the logger is running",
+                std::iter::empty::<String>(),
+            ),
+        )
+    };
+    match error {
+        sc_observability::TryLogError::InvalidEvent(_) => EmitError::InvalidEvent {
+            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT),
+        },
+        sc_observability::TryLogError::QueueFull(_) => EmitError::QueueFull {
+            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL),
+        },
+        sc_observability::TryLogError::WriterDegraded(_) => EmitError::WriterDegraded {
+            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_WRITER_DEGRADED),
+        },
+        sc_observability::TryLogError::ShutdownTimedOut(_) => EmitError::ShutdownTimedOut {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_BACKEND_SHUTDOWN_TIMED_OUT,
+            ),
+        },
     }
 }
 

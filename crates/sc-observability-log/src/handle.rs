@@ -12,11 +12,9 @@ use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use sc_observability::TryLogError;
-use sc_observability_types::LevelFilter;
-
 use crate::__private::EventParts;
 use crate::{BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, health};
+use sc_observability::TryLogError;
 
 /// A rejected submission: every failure of the guarded core maps to exactly one [`DropCause`].
 ///
@@ -45,6 +43,27 @@ impl Rejection for DropCause {
     }
 }
 
+impl Rejection for crate::EmitError {
+    fn drop_cause(&self) -> DropCause {
+        match self {
+            Self::InvalidField { .. } | Self::InvalidEvent { .. } => DropCause::InvalidEvent,
+            Self::QueueFull { .. } => DropCause::QueueFull,
+            Self::WriterDegraded { .. } => DropCause::WriterDegraded,
+            Self::ShutdownTimedOut { .. } => DropCause::ShutdownTimedOut,
+            Self::NotRunning { .. } => DropCause::NotInstalled,
+            Self::Reentrant => DropCause::ReentrantEmit,
+            Self::Panicked => DropCause::LoggerPanicked,
+        }
+    }
+
+    fn reentrant() -> Self {
+        Self::Reentrant
+    }
+    fn panicked() -> Self {
+        Self::Panicked
+    }
+}
+
 /// Everything the emit path needs, shared behind one `Arc`.
 pub(crate) struct Installed {
     pub(crate) logger: sc_observability::Logger,
@@ -55,10 +74,11 @@ pub(crate) struct Installed {
 
 pub(crate) static SLOT: RwLock<Option<Arc<Installed>>> = RwLock::new(None);
 pub(crate) static INSTALLED: AtomicBool = AtomicBool::new(false);
-/// Encoded `LevelFilter`: 0 = Off, 1 = Error, 2 = Warn, 3 = Info, 4 = Debug, 5 = Trace.
-pub(crate) static THRESHOLD: AtomicU8 = AtomicU8::new(THRESHOLD_OFF);
 
-pub(crate) const THRESHOLD_OFF: u8 = 0;
+/// Whether this process has ever successfully claimed bridge initialization.
+pub(crate) fn installed_once() -> bool {
+    INSTALLED.load(Ordering::SeqCst)
+}
 
 /// Encoded [`BridgeLifecycle`]; `Stopped` until `init` succeeds (no guard exists before).
 static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_STOPPED);
@@ -133,44 +153,36 @@ pub(crate) fn dropped_events() -> DroppedEvents {
     DroppedEvents::from_counter(drop_count)
 }
 
-/// Encodes a `LevelFilter` for `THRESHOLD`.
-pub(crate) fn encode_threshold(level: LevelFilter) -> u8 {
+/// Reads the staged core's coherent effective level for lazy facade and macro
+/// evaluation. This is an optimization only: `try_log_with_outcome` remains the
+/// authoritative admission decision and no bridge-owned threshold is retained.
+pub(crate) fn core_enabled(level: sc_observability_types::Level) -> bool {
+    let Some(installed) = current_installed() else {
+        return false;
+    };
+    let effective = installed.logger.level_state().effective_level;
+    level_rank(level) >= filter_rank(effective)
+}
+
+fn level_rank(level: sc_observability_types::Level) -> u8 {
     match level {
-        LevelFilter::Off => THRESHOLD_OFF,
-        LevelFilter::Error => 1,
-        LevelFilter::Warn => 2,
-        LevelFilter::Info => 3,
-        LevelFilter::Debug => 4,
-        LevelFilter::Trace => 5,
+        sc_observability_types::Level::Trace => 0,
+        sc_observability_types::Level::Debug => 1,
+        sc_observability_types::Level::Info => 2,
+        sc_observability_types::Level::Warn => 3,
+        sc_observability_types::Level::Error => 4,
     }
 }
 
-/// Maps a `LevelFilter` to the `log` facade's filter.
-pub(crate) fn to_log_level_filter(level: LevelFilter) -> log::LevelFilter {
+fn filter_rank(level: sc_observability_types::LevelFilter) -> u8 {
     match level {
-        LevelFilter::Off => log::LevelFilter::Off,
-        LevelFilter::Error => log::LevelFilter::Error,
-        LevelFilter::Warn => log::LevelFilter::Warn,
-        LevelFilter::Info => log::LevelFilter::Info,
-        LevelFilter::Debug => log::LevelFilter::Debug,
-        LevelFilter::Trace => log::LevelFilter::Trace,
+        sc_observability_types::LevelFilter::Trace => 0,
+        sc_observability_types::LevelFilter::Debug => 1,
+        sc_observability_types::LevelFilter::Info => 2,
+        sc_observability_types::LevelFilter::Warn => 3,
+        sc_observability_types::LevelFilter::Error => 4,
+        sc_observability_types::LevelFilter::Off => 5,
     }
-}
-
-/// Encoded rank of an event level, comparable with `THRESHOLD`.
-pub(crate) fn level_rank(level: sc_observability_types::Level) -> u8 {
-    match level {
-        sc_observability_types::Level::Error => 1,
-        sc_observability_types::Level::Warn => 2,
-        sc_observability_types::Level::Info => 3,
-        sc_observability_types::Level::Debug => 4,
-        sc_observability_types::Level::Trace => 5,
-    }
-}
-
-/// Lock-free threshold check.
-pub(crate) fn level_enabled(level: sc_observability_types::Level) -> bool {
-    level_rank(level) <= THRESHOLD.load(Ordering::Relaxed)
 }
 
 thread_local! {
@@ -209,9 +221,9 @@ impl Drop for EmitScope {
 /// The closure must reach the logger only through the unguarded cores
 /// [`submit_installed`] / [`submit_to`]; calling a guarded entry point from
 /// inside the closure would classify the record as `DropCause::ReentrantEmit`.
-pub(crate) fn submit_guarded<E: Rejection>(
-    submit: impl FnOnce() -> Result<(), E>,
-) -> Result<(), E> {
+pub(crate) fn submit_guarded<T, E: Rejection>(
+    submit: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
     let Some(_scope) = EmitScope::enter() else {
         let rejection = E::reentrant();
         record_drop(rejection.drop_cause());
@@ -233,7 +245,10 @@ pub(crate) fn submit_guarded<E: Rejection>(
 ///
 /// Never call it outside a [`submit_guarded`] closure: it neither contains panics
 /// nor detects reentrancy.
-pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), DropCause> {
+pub(crate) fn submit_to(
+    installed: &Installed,
+    parts: EventParts,
+) -> Result<sc_observability_types::AdmissionOutcome, DropCause> {
     let mut event = crate::mapping::assemble_event(
         parts,
         &installed.service,
@@ -244,7 +259,7 @@ pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), 
     event.trace = crate::context::current_trace();
     installed
         .logger
-        .try_log(event)
+        .try_log_with_outcome(event)
         .map_err(|error| match error {
             TryLogError::QueueFull(_) => DropCause::QueueFull,
             TryLogError::InvalidEvent(_) => DropCause::InvalidEvent,
@@ -256,7 +271,9 @@ pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), 
 /// Unguarded submit core for pre-built parts: slot read, then [`submit_to`].
 ///
 /// Same contract as [`submit_to`]: call it only inside a [`submit_guarded`] closure.
-pub(crate) fn submit_installed(parts: EventParts) -> Result<(), DropCause> {
+pub(crate) fn submit_installed(
+    parts: EventParts,
+) -> Result<sc_observability_types::AdmissionOutcome, DropCause> {
     let installed = current_installed().ok_or(DropCause::NotInstalled)?;
     submit_to(&installed, parts)
 }
@@ -463,7 +480,9 @@ pub(crate) fn shutdown_installed(
 /// `Stopped` (see [`shutdown_installed`]).
 pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> {
     set_lifecycle(BridgeLifecycle::ShuttingDown);
-    THRESHOLD.store(THRESHOLD_OFF, Ordering::SeqCst);
+    // Runtime admission belongs exclusively to the staged core logger.  The
+    // facade is disabled only because shutdown has started; it is never a
+    // second threshold policy.
     log::set_max_level(log::LevelFilter::Off);
     let taken = SLOT.write().unwrap_or_else(PoisonError::into_inner).take();
     let result = match taken {
@@ -673,34 +692,10 @@ mod tests {
     }
 
     #[test]
-    fn threshold_encoding_orders_levels() {
-        assert_eq!(encode_threshold(LevelFilter::Off), THRESHOLD_OFF);
-        assert!(
-            level_rank(sc_observability_types::Level::Error)
-                <= encode_threshold(LevelFilter::Error)
-        );
-        assert!(
-            level_rank(sc_observability_types::Level::Warn) > encode_threshold(LevelFilter::Error)
-        );
-        assert!(
-            level_rank(sc_observability_types::Level::Trace)
-                <= encode_threshold(LevelFilter::Trace)
-        );
-        assert_eq!(
-            to_log_level_filter(LevelFilter::Debug),
-            log::LevelFilter::Debug
-        );
-        for (filter, log_filter) in [
-            (LevelFilter::Off, log::LevelFilter::Off),
-            (LevelFilter::Error, log::LevelFilter::Error),
-            (LevelFilter::Warn, log::LevelFilter::Warn),
-            (LevelFilter::Info, log::LevelFilter::Info),
-            (LevelFilter::Debug, log::LevelFilter::Debug),
-            (LevelFilter::Trace, log::LevelFilter::Trace),
-        ] {
-            // The encoding matches the log facade's own ordering (Off = 0 .. Trace = 5).
-            assert_eq!(usize::from(encode_threshold(filter)), log_filter as usize);
-        }
+    fn bridge_has_no_independent_level_policy() {
+        // Admission filtering is delegated to sc-observability's LevelOwner.
+        // The bridge keeps no mutable level threshold to test or synchronize.
+        assert_eq!(log::STATIC_MAX_LEVEL, log::LevelFilter::Trace);
     }
 
     /// The only unit test that calls `submit_guarded` or `record_drop`, so its counter deltas cannot race.
@@ -740,7 +735,7 @@ mod tests {
         // A closure error is counted under its own cause.
         let invalid_before = drop_count(DropCause::InvalidEvent);
         assert_eq!(
-            submit_guarded(|| Err(DropCause::InvalidEvent)),
+            submit_guarded(|| Err::<(), DropCause>(DropCause::InvalidEvent)),
             Err(DropCause::InvalidEvent)
         );
         assert_eq!(drop_count(DropCause::InvalidEvent), invalid_before + 1);

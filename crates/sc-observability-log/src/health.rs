@@ -99,6 +99,12 @@ pub struct BridgeHealthReport {
     pub dropped_events: DroppedEvents,
     /// Flush and shutdown helper threads; see [`HelperHealth`].
     pub helpers: HelperHealth,
+    /// The immutable core baseline selected at initialization.
+    pub configured_level: sc_observability_types::LevelFilter,
+    /// The staged core's current effective level.
+    pub effective_level: sc_observability_types::LevelFilter,
+    /// The staged core's coherent level-state revision.
+    pub level_revision: u64,
 }
 
 /// Helper threads that bound `flush` and `shutdown`.
@@ -276,7 +282,16 @@ pub(crate) fn read_report<State>(
 /// Takes a snapshot; see the module docs for the contract.
 pub(crate) fn snapshot() -> BridgeHealthReport {
     let lifecycle = handle::lifecycle();
-    let report = match handle::current_installed() {
+    let installed = handle::current_installed();
+    let level_state = installed.as_ref().map_or(
+        sc_observability_types::LevelState {
+            configured_level: sc_observability_types::LevelFilter::Off,
+            effective_level: sc_observability_types::LevelFilter::Off,
+            revision: 0,
+        },
+        |value| value.logger.level_state(),
+    );
+    let report = match installed {
         Some(installed) => read_report(&installed.logger),
         None => FINAL_REPORT
             .lock()
@@ -289,6 +304,7 @@ pub(crate) fn snapshot() -> BridgeHealthReport {
         SINK_CONFIG.get(),
         handle::dropped_events(),
         handle::helper_health(),
+        level_state,
     )
 }
 
@@ -299,6 +315,7 @@ fn project(
     config: Option<&SinkConfig>,
     dropped_events: DroppedEvents,
     helpers: HelperHealth,
+    level_state: sc_observability_types::LevelState,
 ) -> BridgeHealthReport {
     let running = lifecycle == BridgeLifecycle::Running;
     let state = match (running, report) {
@@ -327,6 +344,9 @@ fn project(
         console_sink: sink_snapshot(console_enabled, running, report, CONSOLE_SINK_NAME),
         dropped_events,
         helpers,
+        configured_level: level_state.configured_level,
+        effective_level: level_state.effective_level,
+        level_revision: level_state.revision,
     }
 }
 
@@ -495,6 +515,14 @@ mod tests {
         }
     }
 
+    fn level_state() -> sc_observability_types::LevelState {
+        sc_observability_types::LevelState {
+            configured_level: sc_observability_types::LevelFilter::Info,
+            effective_level: sc_observability_types::LevelFilter::Debug,
+            revision: 2,
+        }
+    }
+
     #[test]
     fn running_projection_keeps_every_field() {
         let report = report(
@@ -507,6 +535,7 @@ mod tests {
             Some(&config(true)),
             DroppedEvents::default(),
             HelperHealth::default(),
+            level_state(),
         );
         assert_eq!(health.schema_version, BRIDGE_HEALTH_SCHEMA_VERSION);
         assert_eq!(health.state, BridgeHealthState::Degraded);
@@ -560,6 +589,7 @@ mod tests {
                 Some(&config(true)),
                 DroppedEvents::default(),
                 HelperHealth::default(),
+                level_state(),
             );
             assert_eq!(health.state, BridgeHealthState::Unavailable);
             assert_eq!(health.file_sink.status, SinkStatus::Unavailable);
@@ -571,6 +601,7 @@ mod tests {
             Some(&config(false)),
             DroppedEvents::default(),
             HelperHealth::default(),
+            level_state(),
         );
         assert_eq!(unreadable.state, BridgeHealthState::Unavailable);
         assert!(unreadable.logger.is_none());
@@ -603,6 +634,7 @@ mod tests {
             Some(&config(true)),
             DroppedEvents::default(),
             HelperHealth::default(),
+            level_state(),
         );
         let detached = project(
             BridgeLifecycle::Running,
@@ -613,6 +645,7 @@ mod tests {
                 flush_in_flight: true,
                 detached: 2,
             },
+            level_state(),
         );
         assert_eq!(
             serde_json::to_value(detached.helpers).unwrap(),

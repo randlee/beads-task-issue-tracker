@@ -9,10 +9,249 @@
 
 use std::time::Duration;
 
-use sc_observability_types::{DiagnosticInfo, ErrorCode, Remediation};
+use sc_observability_types::{DiagnosticInfo, ErrorCode, LevelFilter, Remediation};
 use serde::{Deserialize, Serialize};
 
 use crate::{BridgeLifecycle, error_codes};
+
+/// Lifecycle projection used by the reviewed B.P3 direct/control contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecyclePhase {
+    /// The bridge is installed and can admit work.
+    Running,
+    /// The owner has begun final shutdown.
+    Stopping,
+    /// Final shutdown was confirmed.
+    Stopped,
+    /// Completion could not be confirmed; this never claims the writer stopped.
+    Failed,
+}
+
+/// Reason a direct producer field cannot enter the bridge event.
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum FieldKeyError {
+    /// The raw key is empty.
+    #[error("field key is empty")]
+    Empty,
+    /// The raw key belongs to bridge-owned metadata.
+    #[error("field key uses a reserved prefix")]
+    ReservedPrefix,
+    /// Two distinct raw keys normalize to the same output key.
+    #[error("field key collides with {other_raw_key:?}")]
+    Collision { other_raw_key: String },
+}
+
+/// Typed direct-admission failure; each path has already recorded exactly one drop cause.
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum EmitError {
+    /// A producer field cannot be represented safely.
+    #[error("invalid field {raw_key:?}: {reason}")]
+    InvalidField {
+        raw_key: String,
+        reason: FieldKeyError,
+    },
+    /// The core rejected the assembled event.
+    #[error("invalid event: {diagnostic}")]
+    InvalidEvent {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// The core queue is full.
+    #[error("writer queue is full: {diagnostic}")]
+    QueueFull {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// The writer cannot accept more work.
+    #[error("writer is degraded: {diagnostic}")]
+    WriterDegraded {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// The core shutdown deadline has elapsed.
+    #[error("logger shutdown timed out: {diagnostic}")]
+    ShutdownTimedOut {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// The lifecycle is no longer running.
+    #[error("logger is not running: {phase:?}")]
+    NotRunning { phase: LifecyclePhase },
+    /// The producer re-entered the guarded path.
+    #[error("reentrant emission")]
+    Reentrant,
+    /// A logger callback panic was contained.
+    #[error("logger callback panicked")]
+    Panicked,
+}
+
+/// Failure of a read-only control operation.
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ControlError {
+    /// The lifecycle does not permit the request.
+    #[error("logger is not running: {phase:?}")]
+    NotRunning { phase: LifecyclePhase },
+    /// A core query failed.
+    #[error("query failed: {diagnostic}")]
+    Query {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// A snapshot or capability is unavailable.
+    #[error("control operation unavailable: {diagnostic}")]
+    Unavailable {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+}
+
+/// Failure while waiting for owner shutdown completion.
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum WaitError {
+    /// No bridge lifecycle has begun in this process.
+    #[error("logger was not started")]
+    NotStarted,
+    /// The completed owner result was not observed by the deadline.
+    #[error("shutdown wait timed out after {timeout:?}")]
+    TimedOut { timeout: Duration },
+    /// Observation state is unavailable.
+    #[error("shutdown state unavailable: {diagnostic}")]
+    Unavailable {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+}
+
+/// Outcome retained after owner shutdown has begun.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum UnconfirmedShutdown {
+    /// The shutdown helper could not be started.
+    HelperSpawn {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// The shutdown helper disappeared before a final result.
+    HelperLost {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+}
+
+/// Final or observable pending shutdown state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ShutdownOutcome {
+    /// The core writer reported a confirmed stop.
+    Stopped,
+    /// The writer stopped despite a final flush error.
+    StoppedWithFlushError {
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
+    /// Completion was not confirmed; callers must not infer stopped.
+    Unconfirmed { cause: UnconfirmedShutdown },
+}
+
+/// Read-only shutdown observation returned to controls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShutdownReport {
+    /// Completion outcome.
+    pub outcome: ShutdownOutcome,
+    /// Health projection taken at observation time.
+    pub health: crate::BridgeHealthReport,
+}
+
+impl EmitError {
+    /// Stable code for this direct-admission failure.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::InvalidField { .. } => error_codes::SC_OBSERVABILITY_LOG_INVALID_FIELD,
+            Self::InvalidEvent { diagnostic }
+            | Self::QueueFull { diagnostic }
+            | Self::WriterDegraded { diagnostic }
+            | Self::ShutdownTimedOut { diagnostic } => diagnostic.code.clone(),
+            Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
+            Self::Reentrant => error_codes::SC_OBSERVABILITY_LOG_REENTRANT_EMIT,
+            Self::Panicked => error_codes::SC_OBSERVABILITY_LOG_LOGGER_PANICKED,
+        }
+    }
+
+    /// Recovery guidance preserved from the staged core where available.
+    #[must_use]
+    pub fn remediation(&self) -> Remediation {
+        match self {
+            Self::InvalidEvent { diagnostic }
+            | Self::QueueFull { diagnostic }
+            | Self::WriterDegraded { diagnostic }
+            | Self::ShutdownTimedOut { diagnostic } => diagnostic.remediation.clone(),
+            Self::InvalidField { .. } => {
+                Remediation::recoverable("correct the field key", ["resubmit the event"])
+            }
+            Self::NotRunning { .. } => {
+                Remediation::not_recoverable("the owner has stopped the bridge")
+            }
+            Self::Reentrant => Remediation::recoverable(
+                "emit after the enclosing logger callback returns",
+                std::iter::empty::<String>(),
+            ),
+            Self::Panicked => Remediation::recoverable(
+                "inspect the sink or redactor callback",
+                std::iter::empty::<String>(),
+            ),
+        }
+    }
+}
+
+impl ControlError {
+    /// Stable code for this control failure.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
+            Self::Query { diagnostic } | Self::Unavailable { diagnostic } => {
+                diagnostic.code.clone()
+            }
+        }
+    }
+
+    /// Recovery guidance for this control failure.
+    #[must_use]
+    pub fn remediation(&self) -> Remediation {
+        match self {
+            Self::Query { diagnostic } | Self::Unavailable { diagnostic } => {
+                diagnostic.remediation.clone()
+            }
+            Self::NotRunning { .. } => {
+                Remediation::not_recoverable("the owner has stopped the bridge")
+            }
+        }
+    }
+}
+
+impl WaitError {
+    /// Stable code for this wait failure.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::NotStarted => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED,
+            Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
+            Self::Unavailable { diagnostic } => diagnostic.code.clone(),
+        }
+    }
+
+    /// Recovery guidance for this wait failure.
+    #[must_use]
+    pub fn remediation(&self) -> Remediation {
+        match self {
+            Self::Unavailable { diagnostic } => diagnostic.remediation.clone(),
+            Self::NotStarted => Remediation::recoverable(
+                "initialize the bridge before waiting",
+                std::iter::empty::<String>(),
+            ),
+            Self::TimedOut { .. } => Remediation::recoverable(
+                "wait longer for the existing owner shutdown",
+                std::iter::empty::<String>(),
+            ),
+        }
+    }
+}
 
 /// Error returned by [`init`](crate::init).
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +265,15 @@ pub enum InitError {
         /// Error reported by `log::set_boxed_logger`.
         #[source]
         source: log::SetLoggerError,
+    },
+    /// The requested baseline cannot be represented by the executable's
+    /// compile-time `log` cap. This is rejected before global installation.
+    #[error("configured level {configured:?} exceeds available static level {available:?}")]
+    UnsupportedLevel {
+        /// Requested configured baseline.
+        configured: LevelFilter,
+        /// Most verbose facade level compiled into this executable.
+        available: LevelFilter,
     },
     /// `ProcessIdentityPolicy::Resolver` failed, or `Auto` could not resolve a non-empty hostname.
     #[error("process identity resolution failed")]
@@ -115,6 +363,7 @@ impl InitError {
             Self::ForeignLoggerInstalled { .. } => {
                 error_codes::SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED
             }
+            Self::UnsupportedLevel { .. } => error_codes::SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL,
             Self::IdentityResolution { source } => source.diagnostic().code.clone(),
             Self::Logger { source } => source.diagnostic().code.clone(),
         }
@@ -130,6 +379,9 @@ impl InitError {
             Self::ForeignLoggerInstalled { .. } => Remediation::recoverable(
                 "remove the other log::Log implementation",
                 ["or call sc_observability_log::init before it is installed"],
+            ),
+            Self::UnsupportedLevel { .. } => Remediation::not_recoverable(
+                "rebuild without the static cap or choose a supported startup baseline",
             ),
             Self::IdentityResolution { source } => source.diagnostic().remediation.clone(),
             Self::Logger { source } => source.diagnostic().remediation.clone(),

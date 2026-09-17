@@ -97,9 +97,16 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 #[doc(inline)]
-pub use control::{JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome};
+pub use control::{
+    BridgeEvent, EmitOutcome, JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome,
+};
 #[doc(inline)]
-pub use error::{DropCause, FlushError, InitError, InvalidInputReason, ShutdownError, SubmitError};
+pub use error::{
+    ControlError, DropCause, EmitError, FieldKeyError, FlushError, InitError, InvalidInputReason,
+    LifecyclePhase, ShutdownError, SubmitError, WaitError,
+};
+#[doc(inline)]
+pub use error::{ShutdownOutcome, ShutdownReport, UnconfirmedShutdown};
 #[doc(inline)]
 pub use health::{
     BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState, BridgeLifecycle,
@@ -117,6 +124,11 @@ pub use sc_observability::LoggerConfig;
 pub use sc_observability_types::{
     ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
     TargetCategory, Timestamp,
+};
+#[doc(inline)]
+pub use sc_observability_types::{
+    AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource,
+    LevelState, LogQuery, LogSnapshot, OperationDiagnostic,
 };
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
@@ -169,7 +181,7 @@ impl From<Level> for sc_observability_types::Level {
     }
 }
 
-use handle::{INSTALLED, Installed, SLOT, THRESHOLD};
+use handle::{INSTALLED, Installed, SLOT};
 
 /// Bridge behavior. The level threshold is `LoggerConfig.level` only.
 #[derive(Debug, Clone)]
@@ -253,6 +265,7 @@ pub const DEFAULT_DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug)]
 pub struct LogGuard {
     active_log_path: Option<PathBuf>,
+    level_owner: sc_observability::LevelOwner,
     shut_down: bool,
 }
 
@@ -264,6 +277,38 @@ impl LogGuard {
     #[must_use]
     pub fn control(&self) -> LogControl {
         LogControl::new()
+    }
+
+    /// Raises the staged core's effective filter.  Only the lifecycle owner
+    /// holds this authority; `LogControl` cannot acquire it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `UnsupportedLevel` before mutation when the executable cap
+    /// cannot retain the requested level, or the staged core's typed lifecycle
+    /// error when the owner can no longer change it.
+    pub fn elevate_level(
+        &mut self,
+        level: LevelFilter,
+        source: LevelChangeSource,
+    ) -> Result<LevelChange, LevelChangeError> {
+        ensure_static_level(level).map_err(|available| LevelChangeError::UnsupportedLevel {
+            requested: level,
+            available,
+        })?;
+        self.level_owner.elevate_level(level, source)
+    }
+
+    /// Restores the staged core's configured baseline through the sole owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns the staged core's typed lifecycle error if reset cannot commit.
+    pub fn reset_level(
+        &mut self,
+        source: LevelChangeSource,
+    ) -> Result<LevelChange, LevelChangeError> {
+        self.level_owner.reset_level(source)
     }
 
     /// Flushes on a helper thread, bounded by `timeout`; same as [`LogControl::flush`].
@@ -348,6 +393,12 @@ impl Drop for LogGuard {
 ///   automatic hostname discovery cannot produce a hostname (retry allowed).
 /// - [`InitError::Logger`] when `Logger::new` fails (retry allowed).
 pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, InitError> {
+    if let Err(available) = ensure_static_level(config.level) {
+        return Err(InitError::UnsupportedLevel {
+            configured: config.level,
+            available,
+        });
+    }
     if INSTALLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -363,13 +414,12 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             return Err(InitError::IdentityResolution { source });
         }
     };
-    let (level, service, enable_file_sink, enable_console_sink) = (
-        config.level,
+    let (service, enable_file_sink, enable_console_sink) = (
         config.service_name.clone(),
         config.enable_file_sink,
         config.enable_console_sink,
     );
-    let logger = match sc_observability::Logger::new(config) {
+    let (logger, level_owner) = match sc_observability::Logger::new_with_level_owner(config) {
         Ok(logger) => logger,
         Err(source) => {
             INSTALLED.store(false, Ordering::SeqCst); // recoverable: allow a retry
@@ -390,8 +440,8 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
         let _ = handle::shutdown_installed(installed, DEFAULT_DROP_SHUTDOWN_TIMEOUT);
         return Err(InitError::ForeignLoggerInstalled { source });
     }
-    // Install order: slot, then threshold, then the facade level. Records arriving
-    // before the last step are filtered by the facade's initial `Off` level.
+    // The facade stays at Trace so compiled debug/trace sites survive. The core
+    // LevelOwner is the sole runtime filter for direct, facade, and macro paths.
     health::set_sink_config(health::SinkConfig {
         file_enabled: enable_file_sink,
         console_enabled: enable_console_sink,
@@ -399,12 +449,44 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
     });
     *SLOT.write().unwrap_or_else(PoisonError::into_inner) = Some(installed);
     handle::set_lifecycle(BridgeLifecycle::Running);
-    THRESHOLD.store(handle::encode_threshold(level), Ordering::SeqCst);
-    log::set_max_level(handle::to_log_level_filter(level));
+    log::set_max_level(log::LevelFilter::Trace);
     Ok(LogGuard {
         active_log_path,
+        level_owner,
         shut_down: false,
     })
+}
+
+fn ensure_static_level(level: LevelFilter) -> Result<(), LevelFilter> {
+    let available = match log::STATIC_MAX_LEVEL {
+        log::LevelFilter::Off => LevelFilter::Off,
+        log::LevelFilter::Error => LevelFilter::Error,
+        log::LevelFilter::Warn => LevelFilter::Warn,
+        log::LevelFilter::Info => LevelFilter::Info,
+        log::LevelFilter::Debug => LevelFilter::Debug,
+        log::LevelFilter::Trace => LevelFilter::Trace,
+    };
+    let requested_rank = match level {
+        LevelFilter::Trace => 0,
+        LevelFilter::Debug => 1,
+        LevelFilter::Info => 2,
+        LevelFilter::Warn => 3,
+        LevelFilter::Error => 4,
+        LevelFilter::Off => 5,
+    };
+    let available_rank = match available {
+        LevelFilter::Trace => 0,
+        LevelFilter::Debug => 1,
+        LevelFilter::Info => 2,
+        LevelFilter::Warn => 3,
+        LevelFilter::Error => 4,
+        LevelFilter::Off => 5,
+    };
+    if requested_rank < available_rank {
+        Err(available)
+    } else {
+        Ok(())
+    }
 }
 
 /// Hidden support for `sc-observability-log-macros` expansions.
@@ -453,10 +535,11 @@ pub mod __private {
         pub fields: Map<String, Value>,
     }
 
-    /// Lock-free check of `level` against the threshold derived from `LoggerConfig.level`.
+    /// The staged core owns runtime filtering; this keeps macro call sites
+    /// available through the conservative facade Trace ceiling.
     #[must_use]
     pub fn enabled(level: sc_observability_types::Level) -> bool {
-        handle::level_enabled(level)
+        handle::core_enabled(level)
     }
 
     /// Submits one event to the installed `Logger` with `try_log`.

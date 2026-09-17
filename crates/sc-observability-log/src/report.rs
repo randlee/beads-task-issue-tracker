@@ -144,8 +144,8 @@ impl InitError {
         let failure = match self {
             Self::AlreadyInitialized => InitFailure::AlreadyInitialized,
             Self::ForeignLoggerInstalled { .. } => InitFailure::ForeignLoggerInstalled,
+            Self::UnsupportedLevel { .. } | Self::Logger { .. } => InitFailure::Logger,
             Self::IdentityResolution { .. } => InitFailure::IdentityResolution,
-            Self::Logger { .. } => InitFailure::Logger,
         };
         report(
             Failure::Init(failure),
