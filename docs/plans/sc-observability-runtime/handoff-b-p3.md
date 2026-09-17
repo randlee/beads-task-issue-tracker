@@ -75,6 +75,7 @@ three-platform execution evidence. The immutable local evidence bundle is:
 | `~/.config/atm/share/sc-obs/bp3-evidence/ci-35185604331/logs.zip` | `ca1520851fde90b3fa5db4c3b341617d60b2c7b84275eb6ce716dd3f132018f0` | Raw GitHub job/step logs for that same implementation SHA. |
 | `~/.config/atm/share/sc-obs/bp3-evidence/d7a26ded/lead-focused-fixtures.log` | `03533cd0d614e188f82d65a83b261d739e5ef73f60d2c7d7ab1c49549bb933d4` | The selected one-writer and late-shutdown fixture pass at `d7a26ded`; supporting pre-final evidence only, not a substitute for the final CI SHA. |
 | `~/.config/atm/share/sc-obs/bp3-evidence/c3109532/lead-native-data.log` | `bb56db31edb748d8eac489e8af6c82486ce86689a2882c8299f195bfb2d03c15` | Native error/health serde and clone data fixtures at `c31095326bde604557dd1aa51c7252db7b3d6284`. |
+| `~/.config/atm/share/sc-obs/bp3-evidence/3e0e8ab2/ubuntu-crates.log` | `a695f5e4b66d8927e83d5b7de0769fbcb792a66562fac9927baa154ff9f1ceec` | Retained historical failed Ubuntu `crates` log at `3e0e8ab2`: Rustdoc rejected missing field documentation. It is failure provenance only, superseded by the successful final CI run above; it does not qualify `c31095326bde604557dd1aa51c7252db7b3d6284`. |
 
 Reproduce the retained-bundle integrity checks with:
 
@@ -127,6 +128,24 @@ The retained CI metadata names all thirteen successful jobs:
 | `version sync`; frontend and backend on Ubuntu/macOS/Windows | PASS |
 
 ## Handoff boundary
+
+### Shutdown residual risk
+
+The public shutdown callers are bounded: `LogGuard::shutdown` returns its
+timeout, `LogControl::wait_stopped` returns `WaitError::TimedOut`, and the
+lifecycle remains honestly `Stopping` until final completion is actually
+published. A permanently blocked user callback, sink, or I/O operation can
+therefore retain an `Arc<Installed>` forever and keep the sole-ownership helper
+waiting forever. This is an explicitly accepted residual risk: there is no
+safe forced shutdown for arbitrary Rust callbacks/I/O. The bridge must not
+invent a terminal `Stopped` or `Failed` result in that case; if the operation
+eventually unblocks, it publishes the real late completion normally.
+
+`WaitError::Unavailable` is retained by the reviewed public contract for a
+legitimate loss of retained observation state. If the final health snapshot
+cannot be read, shutdown retains that terminal result with its original
+diagnostic and notifies every waiter; repeated `wait_stopped` calls return the
+same unavailable failure. This task does not narrow that API.
 
 Implementation completeness is recorded. Independent critical review/re-review
 and source QA, sc-observability acceptance, B.1 destination copy, merge, and

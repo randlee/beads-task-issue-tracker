@@ -124,7 +124,7 @@ pub(crate) fn lifecycle_phase() -> crate::LifecyclePhase {
 enum ShutdownState {
     NotStarted,
     InProgress,
-    Complete(Box<ShutdownReport>),
+    Complete(Box<Result<ShutdownReport, crate::WaitError>>),
 }
 
 struct ShutdownCoordinator {
@@ -224,12 +224,25 @@ fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     if !matches!(&*state, ShutdownState::Complete(_)) {
-        let Ok(health) = health::snapshot() else {
-            return;
+        let result = match health::snapshot() {
+            Ok(health) => Ok(ShutdownReport { outcome, health }),
+            Err(error) => Err(wait_error_from_snapshot(error)),
         };
-        *state = ShutdownState::Complete(Box::new(ShutdownReport { outcome, health }));
+        *state = ShutdownState::Complete(Box::new(result));
         coordinator.complete.notify_all();
     }
+}
+
+fn wait_error_from_snapshot(error: crate::ControlError) -> crate::WaitError {
+    let diagnostic = match error {
+        crate::ControlError::Query { diagnostic }
+        | crate::ControlError::Unavailable { diagnostic } => diagnostic,
+        crate::ControlError::NotRunning { phase } => diagnostic(
+            crate::error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE,
+            format!("shutdown health became unavailable in {phase:?}"),
+        ),
+    };
+    crate::WaitError::Unavailable { diagnostic }
 }
 
 fn diagnostic(
@@ -267,7 +280,7 @@ pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::W
     loop {
         match &*state {
             ShutdownState::NotStarted => return Err(crate::WaitError::NotStarted),
-            ShutdownState::Complete(report) => return Ok(*report.clone()),
+            ShutdownState::Complete(result) => return *result.clone(),
             ShutdownState::InProgress => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {

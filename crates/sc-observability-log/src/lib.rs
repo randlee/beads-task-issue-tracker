@@ -129,6 +129,9 @@ pub use sc_observability_types::{
 #[cfg(feature = "test_hooks")]
 #[doc(hidden)]
 pub use handle::fail_next_shutdown_coordinator_reservation;
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub use health::fail_next_health_snapshot;
 #[doc(inline)]
 pub use sc_observability_types::{
     AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource,

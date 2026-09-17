@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant};
 
 use sc_observability_log::{
@@ -92,17 +93,34 @@ fn run_parent() {
         .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (stdout_tx, stdout_rx) = sync_channel(1);
+    let drain = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut stdout = stdout;
+        let mut bytes = Vec::new();
+        let result = stdout.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = stdout_tx.send(result);
+    });
     let started = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
         }
-        assert!(started.elapsed() < CHILD_DEADLINE, "child timed out");
+        if started.elapsed() >= CHILD_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child timed out");
+        }
         std::thread::sleep(Duration::from_millis(20));
     };
-    let output = child.wait_with_output().unwrap();
+    let stdout = stdout_rx
+        .recv_timeout(CHILD_DEADLINE)
+        .expect("stdout drain thread timed out")
+        .expect("could not drain child stdout");
+    drain.join().expect("stdout drain thread panicked");
     assert!(status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stdout = String::from_utf8(stdout).unwrap();
     let line = stdout
         .lines()
         .find_map(|line| line.split_once(RESULT_PREFIX).map(|(_, value)| value))

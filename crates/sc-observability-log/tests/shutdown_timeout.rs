@@ -37,7 +37,11 @@ impl Redactor for BlockingRedactor {
         if key == "block" {
             let gate = GATE.get().unwrap();
             gate.entered.send(()).unwrap();
-            gate.release.lock().unwrap().recv().unwrap();
+            gate.release
+                .lock()
+                .unwrap()
+                .recv_timeout(LATE_COMPLETION_DEADLINE)
+                .expect("test release signal timed out");
         }
     }
 }
@@ -88,13 +92,17 @@ fn timed_out_owner_shutdown_completes_late_for_repeated_control_waiters() {
     let control = guard.control();
     let path = control.active_log_path().unwrap().unwrap();
     let blocked_control = control.clone();
-    let blocked = std::thread::spawn(move || {
-        blocked_control.try_log(event(
+    let (blocked_tx, blocked_rx) = sync_channel(1);
+    let _blocked = std::thread::spawn(move || {
+        let result = blocked_control.try_log(event(
             "admitted before late completion",
             serde_json::Map::from_iter([("block".to_owned(), serde_json::json!(true))]),
-        ))
+        ));
+        let _ = blocked_tx.send(result);
     });
-    entered_rx.recv().unwrap();
+    entered_rx
+        .recv_timeout(SHUTDOWN_TIMEOUT)
+        .expect("redactor did not enter before shutdown timeout");
 
     let started = Instant::now();
     let result = guard.shutdown(SHUTDOWN_TIMEOUT);
@@ -119,19 +127,16 @@ fn timed_out_owner_shutdown_completes_late_for_repeated_control_waiters() {
     ));
 
     release_tx.send(()).unwrap();
-    assert_eq!(blocked.join().unwrap().unwrap(), AdmissionOutcome::Accepted);
-    let deadline = Instant::now() + LATE_COMPLETION_DEADLINE;
-    loop {
-        if control.health().unwrap().lifecycle == LifecyclePhase::Stopped {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "late completion was not published"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let first = control.wait_stopped(Duration::ZERO).unwrap();
+    assert_eq!(
+        blocked_rx
+            .recv_timeout(LATE_COMPLETION_DEADLINE)
+            .expect("blocked submission did not finish")
+            .unwrap(),
+        AdmissionOutcome::Accepted
+    );
+    let first = control
+        .wait_stopped(LATE_COMPLETION_DEADLINE)
+        .expect("late completion was not published");
     let second = control.wait_stopped(Duration::ZERO).unwrap();
     assert!(matches!(first.outcome, ShutdownOutcome::Stopped));
     assert_eq!(first.health.lifecycle, LifecyclePhase::Stopped);
