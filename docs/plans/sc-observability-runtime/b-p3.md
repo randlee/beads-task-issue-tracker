@@ -1,7 +1,7 @@
 ---
 id: SC-OBS-B.P3-source
 status: complete
-qa_status: not_dispatched
+qa_status: pass_qa2
 merge_status: unmerged
 branch: fix/sc-obs-B-P3-source-qa1
 worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/fix/sc-obs-B-P3-source-qa1
@@ -11,7 +11,7 @@ evidence_status: complete
 evidence_branch: fix/sc-obs-B-P3-handoff-evidence
 evidence_worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/fix/sc-obs-B-P3-handoff-evidence
 evidence_target: feature/sc-obs-B-P3-runtime-bridge
-source_acceptance: pending_independent_qa
+source_acceptance: accepted_by_sc_observability_phase_lead
 ---
 
 # B.P3 — Implement the reviewed sc-observability bridge contract in BTIT
@@ -33,7 +33,7 @@ Phase lead aobs accepts the target design at that revision for BTIT implementati
 based on [independent contract QA2 PASS](https://github.com/randlee/sc-observability/pull/111#issuecomment-5708115438).
 The omitted service-hardening coverage was completed with a documented scope
 skip and zero findings in the [QA addendum](https://github.com/randlee/sc-observability/pull/111#issuecomment-5708138146).
-This is not acceptance of BTIT source. Runtime public-API acceptance remains
+The subsequent [source re-review and lead acceptance](../../reviews/sc-observability-bp3-qa2.md) accepts exact source `396a9d9f77ca1950eeb92d4f88c0eecadb5ef00b` for B.1. Runtime public-API acceptance remains
 owner-deferred to phase completion; publication remains deferred to B.7.
 
 Consume the final immutable B.P2 staged 1.3.0 package set from the completed
