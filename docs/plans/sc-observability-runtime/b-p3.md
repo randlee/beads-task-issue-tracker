@@ -3,10 +3,10 @@ id: SC-OBS-B.P3-source
 status: complete
 qa_status: not_dispatched
 merge_status: unmerged
-branch: feature/sc-obs-B-P3-runtime-bridge
-worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/feature/sc-obs-B-P3-runtime-bridge
-target: develop
-implementation_sha: c31095326bde604557dd1aa51c7252db7b3d6284
+branch: fix/sc-obs-B-P3-source-qa1
+worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/fix/sc-obs-B-P3-source-qa1
+target: fix/sc-obs-B-P3-inventory-exports
+implementation_sha: 51fb22c6873b12c541b20b7f909110abb457c240
 evidence_status: complete
 evidence_branch: fix/sc-obs-B-P3-handoff-evidence
 evidence_worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/fix/sc-obs-B-P3-handoff-evidence

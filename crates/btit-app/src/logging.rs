@@ -514,8 +514,25 @@ pub(crate) async fn get_log_path_string() -> String {
     get_log_path().to_string_lossy().to_string()
 }
 
+const FRONTEND_LOG_INPUT_MAX_BYTES: usize = 4 * 1024;
+const FRONTEND_LOG_TRUNCATION_MARKER: &str = "… [truncated]";
+
+fn bounded_frontend_log_input(value: &str) -> String {
+    if value.len() <= FRONTEND_LOG_INPUT_MAX_BYTES {
+        return value.to_owned();
+    }
+    let prefix_limit = FRONTEND_LOG_INPUT_MAX_BYTES - FRONTEND_LOG_TRUNCATION_MARKER.len();
+    let mut end = prefix_limit;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{FRONTEND_LOG_TRUNCATION_MARKER}", &value[..end])
+}
+
 #[tauri::command]
 pub(crate) async fn log_frontend(level: String, message: String) {
+    let level = bounded_frontend_log_input(&level);
+    let message = bounded_frontend_log_input(&message);
     match level.as_str() {
         "error" => log::log!(target: "frontend", log::Level::Error, "{message}"),
         "warn" => log::log!(target: "frontend", log::Level::Warn, "{message}"),
@@ -532,6 +549,19 @@ pub(crate) async fn log_frontend(level: String, message: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontend_log_input_is_utf8_safe_and_marked_when_truncated() {
+        let short = "é".repeat(FRONTEND_LOG_INPUT_MAX_BYTES / 2);
+        assert_eq!(bounded_frontend_log_input(&short), short);
+
+        let long = "é".repeat(FRONTEND_LOG_INPUT_MAX_BYTES);
+        let bounded = bounded_frontend_log_input(&long);
+        assert!(bounded.ends_with(FRONTEND_LOG_TRUNCATION_MARKER));
+        let prefix_end = bounded.len() - FRONTEND_LOG_TRUNCATION_MARKER.len();
+        assert!(bounded.is_char_boundary(prefix_end));
+        assert!(bounded.len() <= FRONTEND_LOG_INPUT_MAX_BYTES);
+    }
 
     /// A poisoned lock yields its value, and the poison flag is cleared so the
     /// recovery is logged once (QA-1 RSH-001/RSH-002, b-12).
