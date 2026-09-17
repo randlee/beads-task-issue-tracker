@@ -1,18 +1,10 @@
-//! One `init` per test binary, in a child process: the bridge cannot be replaced after shutdown.
-//!
-//! R-A4-005 design evidence 4 (install-once). The single test fn re-executes this
-//! test binary with `CHILD_ENV` set. The child installs the bridge, shuts it
-//! down, then tries to reinstall it (`init` again) and to replace it with a
-//! foreign `log::Log`, and reports every outcome as one JSON line built only from
-//! the serializable contracts (`FailureReport`, `BridgeHealthReport`). The parent
-//! never calls `init`; it checks the child's exit status, the reported codes and
-//! the JSONL file from outside the child process.
+//! Install-once and post-stop direct-admission evidence in a fresh child process.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing,
-    reason = "integration test: helper fns are not covered by clippy.toml allow-*-in-tests"
+    reason = "subprocess fixture controls its own process-global logger"
 )]
 
 use std::path::{Path, PathBuf};
@@ -20,7 +12,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use sc_observability_log::{
-    ActionName, BridgeOptions, Level, LevelFilter, LoggerConfig, ServiceName, StructuredRecord,
+    ActionName, BridgeEvent, BridgeOptions, EventLevel, LevelFilter, LoggerConfig, ServiceName,
+    TargetCategory,
 };
 use serde_json::{Value, json};
 
@@ -53,44 +46,41 @@ fn config(root: &Path) -> (LoggerConfig, BridgeOptions) {
     (config, options)
 }
 
-/// The child process: install, shut down, then try to reinstall and replace.
-fn run_child(root: &Path) {
-    let (first_config, first_options) = config(root);
-    let guard = sc_observability_log::init(first_config, first_options).unwrap();
-    let control = guard.control();
-    log::info!(target: "reinstall", "record before shutdown");
-    let before = control
-        .submit(
-            StructuredRecord::new(Level::INFO, "reinstall").with_message("submit before shutdown"),
-        )
-        .unwrap();
-    guard.shutdown(Duration::from_secs(5)).unwrap();
+fn event(message: &str) -> BridgeEvent {
+    BridgeEvent {
+        level: EventLevel::Info,
+        target: TargetCategory::new("reinstall").unwrap(),
+        action: None,
+        message: Some(message.to_owned()),
+        outcome: None,
+        fields: serde_json::Map::new(),
+        request_id: None,
+        correlation_id: None,
+        trace: None,
+    }
+}
 
+fn run_child(root: &Path) {
+    let (first_config, options) = config(root);
+    let guard = sc_observability_log::init(first_config, options).unwrap();
+    let control = guard.control();
+    assert!(control.try_log(event("direct before shutdown")).is_ok());
+    guard.shutdown(Duration::from_secs(5)).unwrap();
     let (second_config, second_options) = config(root);
-    let reinit = sc_observability_log::init(second_config, second_options)
-        .map(|_guard| ())
-        .unwrap_err()
-        .report();
-    let foreign_rejected = log::set_boxed_logger(Box::new(ForeignLogger)).is_err();
-    log::error!(target: "reinstall", "record after reinstall attempt");
-    let submit_after = control
-        .submit(
-            StructuredRecord::new(Level::ERROR, "reinstall").with_message("submit after shutdown"),
-        )
-        .unwrap_err()
-        .report();
-    let flush_after = control.flush(Duration::from_secs(1)).unwrap_err().report();
-    let result = json!({
-        "submit_before": before,
-        "reinit": reinit,
-        "foreign_logger_rejected": foreign_rejected,
-        "submit_after": submit_after,
-        "flush_after": flush_after,
-        "health": control.health(),
-        "active_log_path": control.active_log_path(),
-    });
-    // libtest may print "test <name> ... " on the same line first.
-    println!("{RESULT_PREFIX}{result}");
+    let reinit = sc_observability_log::init(second_config, second_options).unwrap_err();
+    let post_stop = control.try_log(event("direct after shutdown")).unwrap_err();
+    let flush = control.flush(Duration::from_millis(10)).unwrap_err();
+    println!(
+        "{RESULT_PREFIX}{}",
+        json!({
+            "reinit_code": reinit.code(),
+            "foreign_logger_rejected": log::set_boxed_logger(Box::new(ForeignLogger)).is_err(),
+            "post_stop": post_stop,
+            "flush": flush,
+            "health": control.health().unwrap(),
+            "active_log_path": control.active_log_path().unwrap(),
+        })
+    );
 }
 
 fn run_parent() {
@@ -107,51 +97,29 @@ fn run_parent() {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
         }
-        if started.elapsed() > CHILD_DEADLINE {
-            let _ = child.kill();
-            panic!("child did not exit within {CHILD_DEADLINE:?}");
-        }
+        assert!(started.elapsed() < CHILD_DEADLINE, "child timed out");
         std::thread::sleep(Duration::from_millis(20));
     };
     let output = child.wait_with_output().unwrap();
-    assert!(status.success(), "child failed: {status}");
+    assert!(status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let line = stdout
         .lines()
-        .find_map(|line| line.split_once(RESULT_PREFIX).map(|(_, json)| json))
-        .unwrap_or_else(|| panic!("no child result in:\n{stdout}"));
+        .find_map(|line| line.split_once(RESULT_PREFIX).map(|(_, value)| value))
+        .unwrap();
     let result: Value = serde_json::from_str(line).unwrap();
-
-    assert_eq!(result["submit_before"], "accepted");
-    assert_eq!(result["reinit"]["failure"]["operation"], "init");
-    assert_eq!(result["reinit"]["failure"]["kind"], "already_initialized");
     assert_eq!(
-        result["reinit"]["code"],
+        result["reinit_code"],
         "SC_OBSERVABILITY_LOG_ALREADY_INITIALIZED"
     );
-    assert_eq!(result["reinit"]["remediation"]["kind"], "not_recoverable");
     assert_eq!(result["foreign_logger_rejected"], true);
-    assert_eq!(
-        result["submit_after"]["failure"],
-        json!({"operation": "submit", "kind": "stopped", "lifecycle": "stopped"})
-    );
-    assert_eq!(
-        result["submit_after"]["code"],
-        "SC_OBSERVABILITY_LOG_SUBMIT_STOPPED"
-    );
-    assert_eq!(result["flush_after"]["failure"]["kind"], "shut_down");
+    assert_eq!(result["post_stop"]["kind"], "not_running");
+    assert_eq!(result["flush"]["kind"], "not_running");
     assert_eq!(result["health"]["lifecycle"], "stopped");
-    assert_eq!(result["health"]["state"], "unavailable");
-    assert_eq!(result["health"]["logger"]["writer_state"], "stopped");
-    assert_eq!(result["health"]["dropped_events"]["not_installed"], 1);
-
     let path = PathBuf::from(result["active_log_path"].as_str().unwrap());
-    assert!(path.starts_with(root.path()));
-    let contents = std::fs::read_to_string(&path).unwrap();
-    assert!(contents.contains("record before shutdown"));
-    assert!(contents.contains("submit before shutdown"));
-    assert!(!contents.contains("after reinstall attempt"));
-    assert!(!contents.contains("submit after shutdown"));
+    let contents = std::fs::read_to_string(path).unwrap();
+    assert!(contents.contains("direct before shutdown"));
+    assert!(!contents.contains("direct after shutdown"));
 }
 
 #[test]

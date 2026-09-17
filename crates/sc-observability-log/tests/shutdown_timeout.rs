@@ -1,19 +1,10 @@
-//! One `init` per test binary: a timed-out shutdown completes late, observably.
-//!
-//! R-A4-005 design evidence 4 (timeout versus final stop). A submission blocks
-//! inside a custom redactor while it holds the installed logger, so the owner's
-//! `shutdown` cannot gain sole ownership within its timeout and returns
-//! `ShutdownError::TimedOut`. The lifecycle is then `ShutdownTimedOut` (not the
-//! final `Stopped`), and new submissions are rejected. Releasing the redactor lets
-//! the detached shutdown helper finish: health reports `Stopped` with the stopped
-//! writer's final report, and the record admitted before the late completion is
-//! flushed to the file.
+//! Owner timeout retains one shutdown operation for controls to observe later.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing,
-    reason = "integration test: helper fns are not covered by clippy.toml allow-*-in-tests"
+    reason = "integration fixture owns one process-global bridge"
 )]
 
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
@@ -22,15 +13,16 @@ use std::time::{Duration, Instant};
 
 use sc_observability::{RedactionPolicy, Redactor};
 use sc_observability_log::{
-    ActionName, BridgeHealthState, BridgeLifecycle, BridgeOptions, JsonValue, Level, LevelFilter,
-    LoggerConfig, ServiceName, ShutdownError, StructuredRecord, SubmitError, SubmitOutcome,
-    WriterStatus,
+    ActionName, AdmissionOutcome, BridgeEvent, BridgeOptions, EmitError, EventLevel, LevelFilter,
+    LifecyclePhase, LoggerConfig, ServiceName, ShutdownError, ShutdownOutcome, TargetCategory,
+    WaitError,
 };
+use sc_observability_types::WriterState;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(150);
 const LATE_COMPLETION_DEADLINE: Duration = Duration::from_secs(20);
 
-/// `entered` fires when the redactor blocks; `release` unblocks it.
+#[derive(Debug)]
 struct Gate {
     entered: SyncSender<()>,
     release: Mutex<Receiver<()>>,
@@ -41,7 +33,7 @@ static GATE: OnceLock<Gate> = OnceLock::new();
 struct BlockingRedactor;
 
 impl Redactor for BlockingRedactor {
-    fn redact(&self, key: &str, _value: &mut JsonValue) {
+    fn redact(&self, key: &str, _value: &mut serde_json::Value) {
         if key == "block" {
             let gate = GATE.get().unwrap();
             gate.entered.send(()).unwrap();
@@ -50,17 +42,29 @@ impl Redactor for BlockingRedactor {
     }
 }
 
+fn event(message: &str, fields: serde_json::Map<String, serde_json::Value>) -> BridgeEvent {
+    BridgeEvent {
+        level: EventLevel::Info,
+        target: TargetCategory::new("shutdown_timeout").unwrap(),
+        action: None,
+        message: Some(message.to_owned()),
+        outcome: None,
+        fields,
+        request_id: None,
+        correlation_id: None,
+        trace: None,
+    }
+}
+
 #[test]
-fn timed_out_shutdown_completes_late_and_is_observable() {
+fn timed_out_owner_shutdown_completes_late_for_repeated_control_waiters() {
     let (entered_tx, entered_rx) = sync_channel(1);
     let (release_tx, release_rx) = sync_channel(1);
-    assert!(
-        GATE.set(Gate {
-            entered: entered_tx,
-            release: Mutex::new(release_rx),
-        })
-        .is_ok()
-    );
+    GATE.set(Gate {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    })
+    .unwrap();
 
     let root = tempfile::tempdir().unwrap();
     let mut config = LoggerConfig::default_for(
@@ -73,79 +77,73 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
         custom_redactors: vec![Box::new(BlockingRedactor)],
         ..RedactionPolicy::default()
     };
-    let options = BridgeOptions {
-        default_action: ActionName::new("log.record").unwrap(),
-        parse_bracket_action: false,
-    };
-    let guard = sc_observability_log::init(config, options).unwrap();
+    let guard = sc_observability_log::init(
+        config,
+        BridgeOptions {
+            default_action: ActionName::new("log.record").unwrap(),
+            parse_bracket_action: false,
+        },
+    )
+    .unwrap();
     let control = guard.control();
-    let path = control.active_log_path().unwrap();
-
-    // A submission that holds the installed logger until released.
+    let path = control.active_log_path().unwrap().unwrap();
     let blocked_control = control.clone();
     let blocked = std::thread::spawn(move || {
-        blocked_control.submit(
-            StructuredRecord::new(Level::INFO, "shutdown_timeout")
-                .with_message("admitted before the late completion")
-                .with_field("block", true),
-        )
+        blocked_control.try_log(event(
+            "admitted before late completion",
+            serde_json::Map::from_iter([("block".to_owned(), serde_json::json!(true))]),
+        ))
     });
     entered_rx.recv().unwrap();
 
-    // 1. The owner's shutdown times out.
     let started = Instant::now();
     let result = guard.shutdown(SHUTDOWN_TIMEOUT);
-    assert!(
-        matches!(result, Err(ShutdownError::TimedOut { timeout }) if timeout == SHUTDOWN_TIMEOUT),
-        "{result:?}"
-    );
-    assert!(
-        started.elapsed() < SHUTDOWN_TIMEOUT * 10,
-        "shutdown stays bounded"
-    );
-
-    // 2. Timed out is not final: lifecycle says so, nothing is accepted, no final report yet.
-    let pending = control.health();
-    assert_eq!(pending.lifecycle, BridgeLifecycle::ShutdownTimedOut);
-    assert_eq!(pending.state, BridgeHealthState::Unavailable);
-    assert!(
-        pending.logger.is_none(),
-        "no final report before completion"
-    );
+    assert!(matches!(
+        result,
+        Err(ShutdownError::TimedOut { timeout }) if timeout == SHUTDOWN_TIMEOUT
+    ));
+    assert!(started.elapsed() < SHUTDOWN_TIMEOUT * 10);
     assert_eq!(
-        serde_json::to_value(&pending).unwrap()["lifecycle"],
-        "shutdown_timed_out"
+        control.health().unwrap().lifecycle,
+        LifecyclePhase::Stopping
     );
-    assert_eq!(
-        control.submit(StructuredRecord::new(Level::ERROR, "shutdown_timeout")),
-        Err(SubmitError::Stopped {
-            lifecycle: BridgeLifecycle::ShutdownTimedOut
+    assert!(matches!(
+        control.try_log(event("rejected while stopping", serde_json::Map::new())),
+        Err(EmitError::NotRunning {
+            phase: LifecyclePhase::Stopping,
         })
-    );
+    ));
+    assert!(matches!(
+        control.wait_stopped(Duration::from_millis(10)),
+        Err(WaitError::TimedOut { .. })
+    ));
 
-    // 3. Release the blocked submission: the detached helper completes the shutdown late.
     release_tx.send(()).unwrap();
-    assert_eq!(blocked.join().unwrap(), Ok(SubmitOutcome::Accepted));
+    assert_eq!(blocked.join().unwrap().unwrap(), AdmissionOutcome::Accepted);
     let deadline = Instant::now() + LATE_COMPLETION_DEADLINE;
-    let stopped = loop {
-        let health = control.health();
-        if health.lifecycle == BridgeLifecycle::Stopped {
-            break health;
+    loop {
+        if control.health().unwrap().lifecycle == LifecyclePhase::Stopped {
+            break;
         }
         assert!(
             Instant::now() < deadline,
-            "late completion never observed: {health:?}"
+            "late completion was not published"
         );
         std::thread::sleep(Duration::from_millis(10));
-    };
-    let logger = stopped
-        .logger
-        .as_ref()
-        .expect("final report after late completion");
-    assert_eq!(logger.writer_state, WriterStatus::Stopped);
-    assert_eq!(logger.queue.depth, 0);
-
-    // The late shutdown flushed the record admitted while it was pending.
-    let contents = std::fs::read_to_string(&path).unwrap();
-    assert!(contents.contains("admitted before the late completion"));
+    }
+    let first = control.wait_stopped(Duration::ZERO).unwrap();
+    let second = control.wait_stopped(Duration::ZERO).unwrap();
+    assert!(matches!(first.outcome, ShutdownOutcome::Stopped));
+    assert_eq!(first.health.lifecycle, LifecyclePhase::Stopped);
+    assert_eq!(first.health.logging.writer_state, WriterState::Stopped);
+    assert_eq!(first.health.logging.queue_depth, 0);
+    assert_eq!(
+        serde_json::to_value(first).unwrap(),
+        serde_json::to_value(second).unwrap()
+    );
+    assert!(
+        std::fs::read_to_string(path)
+            .unwrap()
+            .contains("admitted before late completion")
+    );
 }

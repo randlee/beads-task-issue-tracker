@@ -2,7 +2,7 @@
 //!
 //! Nothing in this module touches global state: `record_to_parts` turns a
 //! `log::Record` into [`EventParts`], `structured_to_parts` does the same for a
-//! [`StructuredRecord`], `assemble_event` completes the envelope, and the
+//! direct bridge event, `assemble_event` completes the envelope, and the
 //! sanitizer functions turn arbitrary strings into valid `TargetCategory` /
 //! `ActionName` values and field keys. The unified field-key and collision rules
 //! shared by every producer are documented in `docs/mapping.md`, "Field keys". The sanitizer items are
@@ -19,8 +19,6 @@ use serde_json::{Map, Value};
 
 use crate::__private::EventParts;
 use crate::BridgeOptions;
-use crate::control::StructuredRecord;
-use crate::error::InvalidInputReason;
 
 /// Field keys starting with this prefix are reserved for the bridge itself.
 pub const RESERVED_FIELD_PREFIX: &str = "sc_observability_log.";
@@ -366,59 +364,6 @@ pub(crate) fn record_to_parts(
     })
 }
 
-/// Maps a [`StructuredRecord`] to event parts, or the reason it is invalid.
-///
-/// Uses the same sanitizer as every other producer. Because `LogControl::submit`
-/// has a result channel, input the facade or the macros would repair and count
-/// (an empty action, an empty or reserved field key) rejects the whole request
-/// instead; nothing is written. Accepted field keys are stored in their
-/// canonical sanitized form.
-pub(crate) fn structured_to_parts(
-    record: StructuredRecord,
-) -> Result<EventParts, InvalidInputReason> {
-    let StructuredRecord {
-        level,
-        target,
-        action,
-        message,
-        fields,
-    } = record;
-    let target = target_label(&target).map_err(|_| InvalidInputReason::RejectedTarget)?;
-    let action = action
-        .map(|raw| {
-            action_label(&raw).map_err(|error| match error {
-                LabelError::Empty { .. } => InvalidInputReason::EmptyAction,
-                LabelError::ReservedPrefix { .. } | LabelError::Rejected { .. } => {
-                    InvalidInputReason::RejectedAction
-                }
-            })
-        })
-        .transpose()?;
-    let mut canonical_fields = Map::new();
-    for (raw_key, value) in fields {
-        let key = match field_key_label(&raw_key) {
-            Ok(key) => key.into_owned(),
-            Err(LabelError::ReservedPrefix { .. }) => {
-                return Err(InvalidInputReason::ReservedFieldKey { key: raw_key });
-            }
-            Err(LabelError::Empty { .. } | LabelError::Rejected { .. }) => {
-                return Err(InvalidInputReason::EmptyFieldKey);
-            }
-        };
-        // `serde_json::Map` already gives every producer a deterministic
-        // last-write-wins rule; apply it after normalization too.
-        canonical_fields.insert(key, value);
-    }
-    Ok(EventParts {
-        level: level.into(),
-        target,
-        action,
-        message,
-        outcome: None,
-        fields: canonical_fields,
-    })
-}
-
 /// Completes the envelope: version, timestamp, service and identity (`trace` is set by `emit`).
 pub(crate) fn assemble_event(
     parts: EventParts,
@@ -753,42 +698,6 @@ mod tests {
             "accepted keys are stored in canonical form"
         );
         assert_eq!(fields.len(), 3);
-    }
-
-    #[test]
-    fn structured_record_rules() {
-        use crate::Level as TracingLevel;
-        let ok = StructuredRecord::new(TracingLevel::WARN, "app::ui")
-            .with_action("ui.click")
-            .with_message("clicked")
-            .with_field("a b", 1);
-        let parts = structured_to_parts(ok).unwrap();
-        assert_eq!(parts.level, Level::Warn);
-        assert_eq!(parts.target.as_str(), "app.ui");
-        assert_eq!(parts.action.unwrap().as_str(), "ui.click");
-        assert_eq!(parts.message.as_deref(), Some("clicked"));
-        assert_eq!(parts.fields["a_b"], Value::from(1));
-
-        let empty_action = StructuredRecord::new(TracingLevel::INFO, "t").with_action("");
-        assert_eq!(
-            structured_to_parts(empty_action).unwrap_err(),
-            InvalidInputReason::EmptyAction
-        );
-        let reserved = StructuredRecord::new(TracingLevel::INFO, "t")
-            .with_field("sc_observability_log::x", true);
-        assert_eq!(
-            structured_to_parts(reserved).unwrap_err(),
-            InvalidInputReason::ReservedFieldKey {
-                key: "sc_observability_log::x".to_owned()
-            }
-        );
-        let empty_key = StructuredRecord::new(TracingLevel::INFO, "t").with_field("", true);
-        assert_eq!(
-            structured_to_parts(empty_key).unwrap_err(),
-            InvalidInputReason::EmptyFieldKey
-        );
-        let default_target = structured_to_parts(StructuredRecord::new(TracingLevel::INFO, ""));
-        assert_eq!(default_target.unwrap().target.as_str(), "log");
     }
 
     // ---- process identity ----

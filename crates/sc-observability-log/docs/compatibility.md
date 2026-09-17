@@ -99,7 +99,7 @@ with that prefix, and the empty literal key, are rejected at compile time.
 Literal and dotted keys are otherwise stored in their canonical sanitized form
 (after removing `r#`). The same prefix is reserved at runtime for every field
 key, including `{ KEY } = v` keys, `log` key-values and
-`LogControl::submit` fields (`mapping.md`, "Field keys").
+`LogControl::try_log` fields (`mapping.md`, "Field keys").
 
 ### Runtime labels and keys
 

@@ -4,13 +4,13 @@
 //! a `sc_observability_types::LogEvent` and writes it through one process-wide
 //! `sc_observability::Logger`. Existing `log::info!` (and friends) call sites keep
 //! working unchanged; the tracing-compatible event macros, `#[instrument]` and
-//! [`LogControl::submit`] write through the same logger.
+//! [`LogControl::try_log`] write through the same logger.
 //!
 //! # Quick start
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use sc_observability_log::{ActionName, BridgeOptions, Level, LoggerConfig, ServiceName, StructuredRecord};
+//! use sc_observability_log::{ActionName, BridgeEvent, BridgeOptions, EventLevel, LoggerConfig, ServiceName, TargetCategory};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = LoggerConfig::default_for(
@@ -27,7 +27,17 @@
 //! let control = guard.control();
 //!
 //! log::info!(target: "my_app::sync", "[sync.start] syncing {} items", 3);
-//! control.submit(StructuredRecord::new(Level::INFO, "my_app.ui").with_message("clicked"))?;
+//! control.try_log(BridgeEvent {
+//!     level: EventLevel::Info,
+//!     target: TargetCategory::new("my_app.ui")?,
+//!     action: None,
+//!     message: Some("clicked".to_owned()),
+//!     outcome: None,
+//!     fields: serde_json::Map::new(),
+//!     request_id: None,
+//!     correlation_id: None,
+//!     trace: None,
+//! })?;
 //! control.flush(Duration::from_secs(1))?;
 //! println!("{}", serde_json::to_string(&control.health())?);
 //!
@@ -46,11 +56,11 @@
 //!   [`LogGuard::shutdown`] (or, as a fallback, `Drop for LogGuard`) stops the
 //!   logger, and it does so once.
 //! - **Control is not ownership.** [`LogGuard::control`] returns a cloneable
-//!   [`LogControl`] with bounded flush, health, the active path and nonblocking
-//!   structured submission. No control operation can shut the logger down,
+//!   [`LogControl`] with bounded flush, health, the active path and direct event
+//!   admission. No control operation can shut the logger down,
 //!   keep it alive, or yield a `LogGuard` or the mutable `Logger`.
 //! - **One submission core, one writer.** The facade, the macros and
-//!   [`LogControl::submit`] enter the same guarded core (panic containment and
+//!   [`LogControl::try_log`] enter the same guarded core (panic containment and
 //!   reentrancy detection, entered once per record) and reach the same
 //!   `Logger`. Every rejection is counted under exactly one [`DropCause`]; the
 //!   facade and macros keep their unit return and discard the result only after
@@ -59,14 +69,13 @@
 //!   process identity (resolved once at `init`), trace context, redaction and
 //!   sink routing are filled by the bridge; no producer can supply them.
 //! - **Timeout versus final stop.** A shutdown that returns
-//!   [`ShutdownError::TimedOut`] leaves [`BridgeLifecycle::ShutdownTimedOut`]
-//!   while a detached helper finishes; late completion is observable as
-//!   [`BridgeLifecycle::Stopped`]. `Stopped` is final.
+//!   [`ShutdownError::TimedOut`] leaves [`LifecyclePhase::Stopping`] while a
+//!   detached helper finishes; late completion is observable as
+//!   [`LifecyclePhase::Stopped`]. `Stopped` is final.
 //! - **Serializable contracts.** [`BridgeHealthReport`] (versioned by
-//!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`StructuredRecord`], [`SubmitOutcome`],
-//!   [`SubmitError`] and [`FailureReport`] (versioned by
-//!   [`CONTROL_SCHEMA_VERSION`]) are plain serde data with `snake_case` tagged
-//!   discriminants and stable code / remediation fields.
+//!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`BridgeEvent`] and the native operation
+//!   errors are plain serde data with `snake_case` tagged discriminants and
+//!   stable code / remediation fields.
 //! - **Field keys.** One sanitizer and one reserved prefix
 //!   (`sc_observability_log.`) for every producer; see `docs/mapping.md`,
 //!   "Field keys", for the per-producer and collision rules.
@@ -89,34 +98,41 @@ mod error;
 mod handle;
 mod health;
 mod mapping;
-mod report;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
+use crate::health::BridgeLifecycle;
+
 #[doc(inline)]
-pub use control::{JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome};
+pub use control::{BridgeEvent, EmitOutcome, LogControl};
 #[doc(inline)]
-pub use error::{DropCause, FlushError, InitError, InvalidInputReason, ShutdownError, SubmitError};
-#[doc(inline)]
-pub use health::{
-    BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState, BridgeLifecycle,
-    FileSinkHealth, HealthDiagnostic, HelperHealth, LoggerHealth, QueueHealth, SinkHealthSnapshot,
-    SinkStatus, WriterStatus,
+pub use error::{
+    ControlError, DropCause, EmitError, FieldKeyError, FlushError, InitError, LifecyclePhase,
+    ShutdownError, WaitError,
 };
 #[doc(inline)]
-pub use report::{
-    CONTROL_SCHEMA_VERSION, Failure, FailureReport, FlushFailure, InitFailure, ShutdownFailure,
-};
+pub use error::{ShutdownOutcome, ShutdownReport, UnconfirmedShutdown};
+#[doc(inline)]
+pub use health::{BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport};
 #[doc(inline)]
 pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
 #[doc(inline)]
 pub use sc_observability_types::{
-    ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
-    TargetCategory, Timestamp,
+    ActionName, CorrelationId, ErrorCode, LevelFilter, LoggingHealthReport, OutcomeLabel,
+    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory, Timestamp, TraceContext,
+};
+
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub use handle::fail_next_shutdown_coordinator_reservation;
+#[doc(inline)]
+pub use sc_observability_types::{
+    AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource,
+    LevelState, LogEvent, LogQuery, LogSnapshot, OperationDiagnostic,
 };
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).
@@ -169,7 +185,7 @@ impl From<Level> for sc_observability_types::Level {
     }
 }
 
-use handle::{INSTALLED, Installed, SLOT, THRESHOLD};
+use handle::{INSTALLED, Installed, SLOT};
 
 /// Bridge behavior. The level threshold is `LoggerConfig.level` only.
 #[derive(Debug, Clone)]
@@ -253,6 +269,7 @@ pub const DEFAULT_DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug)]
 pub struct LogGuard {
     active_log_path: Option<PathBuf>,
+    level_owner: sc_observability::LevelOwner,
     shut_down: bool,
 }
 
@@ -266,6 +283,38 @@ impl LogGuard {
         LogControl::new()
     }
 
+    /// Raises the staged core's effective filter.  Only the lifecycle owner
+    /// holds this authority; `LogControl` cannot acquire it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `UnsupportedLevel` before mutation when the executable cap
+    /// cannot retain the requested level, or the staged core's typed lifecycle
+    /// error when the owner can no longer change it.
+    pub fn elevate_level(
+        &mut self,
+        level: LevelFilter,
+        source: LevelChangeSource,
+    ) -> Result<LevelChange, LevelChangeError> {
+        ensure_static_level(level).map_err(|available| LevelChangeError::UnsupportedLevel {
+            requested: level,
+            available,
+        })?;
+        self.level_owner.elevate_level(level, source)
+    }
+
+    /// Restores the staged core's configured baseline through the sole owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns the staged core's typed lifecycle error if reset cannot commit.
+    pub fn reset_level(
+        &mut self,
+        source: LevelChangeSource,
+    ) -> Result<LevelChange, LevelChangeError> {
+        self.level_owner.reset_level(source)
+    }
+
     /// Flushes on a helper thread, bounded by `timeout`; same as [`LogControl::flush`].
     ///
     /// # Errors
@@ -274,7 +323,7 @@ impl LogGuard {
     /// `timeout` (the helper is detached), [`FlushError::Logger`] when a sink flush
     /// fails, and [`FlushError::HelperSpawn`] / [`FlushError::HelperLost`] when the
     /// helper thread cannot start or ends without a result.
-    /// [`FlushError::ShutDown`] cannot occur while the guard is alive.
+    /// [`FlushError::NotRunning`] cannot occur while the guard is alive.
     pub fn flush(&self, timeout: Duration) -> Result<(), FlushError> {
         handle::flush_installed(timeout)
     }
@@ -282,13 +331,13 @@ impl LogGuard {
     /// The final shutdown: threshold → Off, empty the slot, flush, `Logger::shutdown`.
     ///
     /// Bounded by `timeout`. Consumes the guard, so it runs at most once. See
-    /// [`BridgeLifecycle`] for the lifecycle each result leaves behind.
+    /// [`LifecyclePhase`] for the lifecycle each result leaves behind.
     ///
     /// # Errors
     ///
     /// Returns [`ShutdownError::TimedOut`] when sole ownership, the final flush and
     /// the writer join do not finish within `timeout` (a detached helper keeps
-    /// going; the lifecycle is `ShutdownTimedOut` until it completes and publishes
+    /// going; the lifecycle is `Stopping` until it completes and publishes
     /// `Stopped`), [`ShutdownError::FinalFlush`] when the final flush fails (the
     /// logger is still shut down), and [`ShutdownError::HelperSpawn`] /
     /// [`ShutdownError::HelperLost`] for helper thread failures.
@@ -311,8 +360,11 @@ impl LogGuard {
     }
 
     /// Read-only health snapshot; same as [`LogControl::health`].
-    #[must_use]
-    pub fn health(&self) -> BridgeHealthReport {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::Unavailable`] when no readable core report is retained.
+    pub fn health(&self) -> Result<BridgeHealthReport, ControlError> {
         health::snapshot()
     }
 }
@@ -348,6 +400,12 @@ impl Drop for LogGuard {
 ///   automatic hostname discovery cannot produce a hostname (retry allowed).
 /// - [`InitError::Logger`] when `Logger::new` fails (retry allowed).
 pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, InitError> {
+    if let Err(available) = ensure_static_level(config.level) {
+        return Err(InitError::UnsupportedLevel {
+            configured: config.level,
+            available,
+        });
+    }
     if INSTALLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -360,51 +418,98 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
         Ok(identity) => identity,
         Err(source) => {
             INSTALLED.store(false, Ordering::SeqCst); // recoverable: allow a retry
-            return Err(InitError::IdentityResolution { source });
+            return Err(InitError::IdentityResolution {
+                diagnostic: error::diagnostic_from_info(&source),
+            });
         }
     };
-    let (level, service, enable_file_sink, enable_console_sink) = (
-        config.level,
-        config.service_name.clone(),
-        config.enable_file_sink,
-        config.enable_console_sink,
-    );
-    let logger = match sc_observability::Logger::new(config) {
+    let (service, enable_file_sink) = (config.service_name.clone(), config.enable_file_sink);
+    let (logger, level_owner) = match sc_observability::Logger::new_with_level_owner(config) {
         Ok(logger) => logger,
         Err(source) => {
             INSTALLED.store(false, Ordering::SeqCst); // recoverable: allow a retry
-            return Err(InitError::Logger { source });
+            return Err(InitError::Logger {
+                diagnostic: error::diagnostic_from_info(&source),
+            });
         }
     };
-    let active_log_path = enable_file_sink.then(|| logger.health().active_log_path);
+    if let Err(source) = handle::reserve_shutdown_coordinator() {
+        INSTALLED.store(false, Ordering::SeqCst);
+        return Err(InitError::RuntimeStart {
+            diagnostic: OperationDiagnostic {
+                code: error_codes::SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED,
+                message: source.to_string(),
+                remediation: Remediation::recoverable(
+                    "retry initialization after restoring thread resources",
+                    std::iter::empty::<String>(),
+                ),
+                at: Timestamp::now_utc(),
+            },
+        });
+    }
+    let initial_report = logger.health();
+    let active_log_path = enable_file_sink.then(|| initial_report.active_log_path.clone());
+    let level_state = logger.level_state();
     let installed = Arc::new(Installed {
         logger,
         service,
         identity,
         options,
     });
-    if let Err(source) = log::set_boxed_logger(Box::new(bridge::Bridge)) {
+    if let Err(_source) = log::set_boxed_logger(Box::new(bridge::Bridge)) {
         // INSTALLED stays set: the facade slot belongs to the other logger for the
         // rest of the process, so no retry can succeed. Later calls return
         // AlreadyInitialized without building and tearing down another Logger.
         let _ = handle::shutdown_installed(installed, DEFAULT_DROP_SHUTDOWN_TIMEOUT);
-        return Err(InitError::ForeignLoggerInstalled { source });
+        return Err(InitError::ForeignLoggerInstalled);
     }
-    // Install order: slot, then threshold, then the facade level. Records arriving
-    // before the last step are filtered by the facade's initial `Off` level.
-    health::set_sink_config(health::SinkConfig {
-        file_enabled: enable_file_sink,
-        console_enabled: enable_console_sink,
+    // The facade stays at Trace so compiled debug/trace sites survive. The core
+    // LevelOwner is the sole runtime filter for direct, facade, and macro paths.
+    health::set_snapshot_config(health::SinkConfig {
         active_log_path: active_log_path.clone(),
+        level_state,
     });
+    health::store_report(initial_report);
     *SLOT.write().unwrap_or_else(PoisonError::into_inner) = Some(installed);
     handle::set_lifecycle(BridgeLifecycle::Running);
-    THRESHOLD.store(handle::encode_threshold(level), Ordering::SeqCst);
-    log::set_max_level(handle::to_log_level_filter(level));
+    log::set_max_level(log::LevelFilter::Trace);
     Ok(LogGuard {
         active_log_path,
+        level_owner,
         shut_down: false,
     })
+}
+
+fn ensure_static_level(level: LevelFilter) -> Result<(), LevelFilter> {
+    let available = match log::STATIC_MAX_LEVEL {
+        log::LevelFilter::Off => LevelFilter::Off,
+        log::LevelFilter::Error => LevelFilter::Error,
+        log::LevelFilter::Warn => LevelFilter::Warn,
+        log::LevelFilter::Info => LevelFilter::Info,
+        log::LevelFilter::Debug => LevelFilter::Debug,
+        log::LevelFilter::Trace => LevelFilter::Trace,
+    };
+    let requested_rank = match level {
+        LevelFilter::Trace => 0,
+        LevelFilter::Debug => 1,
+        LevelFilter::Info => 2,
+        LevelFilter::Warn => 3,
+        LevelFilter::Error => 4,
+        LevelFilter::Off => 5,
+    };
+    let available_rank = match available {
+        LevelFilter::Trace => 0,
+        LevelFilter::Debug => 1,
+        LevelFilter::Info => 2,
+        LevelFilter::Warn => 3,
+        LevelFilter::Error => 4,
+        LevelFilter::Off => 5,
+    };
+    if requested_rank < available_rank {
+        Err(available)
+    } else {
+        Ok(())
+    }
 }
 
 /// Hidden support for `sc-observability-log-macros` expansions.
@@ -453,10 +558,11 @@ pub mod __private {
         pub fields: Map<String, Value>,
     }
 
-    /// Lock-free check of `level` against the threshold derived from `LoggerConfig.level`.
+    /// The staged core owns runtime filtering; this keeps macro call sites
+    /// available through the conservative facade Trace ceiling.
     #[must_use]
     pub fn enabled(level: sc_observability_types::Level) -> bool {
-        handle::level_enabled(level)
+        handle::core_enabled(level)
     }
 
     /// Submits one event to the installed `Logger` with `try_log`.
