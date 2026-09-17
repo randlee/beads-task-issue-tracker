@@ -75,23 +75,24 @@ fn a1_public_api_is_frozen() {
     // Exhaustive matches: adding, removing or reshaping a variant breaks this test.
     let _ = |e: InitError| match e {
         InitError::AlreadyInitialized => (),
-        InitError::ForeignLoggerInstalled { source: _ } => (),
+        InitError::ForeignLoggerInstalled => (),
         InitError::UnsupportedLevel {
             configured: _,
             available: _,
         } => (),
-        InitError::IdentityResolution { source: _ } => (),
-        InitError::Logger { source: _ } => (),
+        InitError::IdentityResolution { diagnostic: _ } => (),
+        InitError::Logger { diagnostic: _ } => (),
         InitError::RuntimeStart { diagnostic: _ } => (),
     };
     let _ = |e: FlushError| match e {
-        FlushError::TimedOut { timeout: _ } | FlushError::Logger { source: _ } => (),
-        FlushError::HelperSpawn { source: _ } | FlushError::HelperLost => (),
+        FlushError::TimedOut { timeout: _ } | FlushError::Logger { diagnostic: _ } => (),
+        FlushError::HelperSpawn { diagnostic: _ } | FlushError::HelperLost { diagnostic: _ } => (),
         FlushError::NotRunning { phase: _ } | FlushError::InProgress => (),
     };
     let _ = |e: ShutdownError| match e {
-        ShutdownError::TimedOut { timeout: _ } | ShutdownError::FinalFlush { source: _ } => (),
-        ShutdownError::HelperSpawn { source: _ } | ShutdownError::HelperLost => (),
+        ShutdownError::TimedOut { timeout: _ } | ShutdownError::FinalFlush { diagnostic: _ } => (),
+        ShutdownError::HelperSpawn { diagnostic: _ }
+        | ShutdownError::HelperLost { diagnostic: _ } => (),
     };
     let _ = |c: DropCause| match c {
         DropCause::QueueFull | DropCause::InvalidEvent | DropCause::WriterDegraded => (),

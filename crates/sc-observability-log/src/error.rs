@@ -14,6 +14,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BridgeLifecycle, error_codes};
 
+/// Projects a core diagnostic without retaining its opaque source error.
+pub(crate) fn diagnostic_from_info(
+    source: &(impl DiagnosticInfo + std::fmt::Display),
+) -> sc_observability_types::OperationDiagnostic {
+    let diagnostic = source.diagnostic();
+    sc_observability_types::OperationDiagnostic {
+        code: diagnostic.code.clone(),
+        message: source.to_string(),
+        remediation: diagnostic.remediation.clone(),
+        at: diagnostic.timestamp,
+    }
+}
+
 /// Lifecycle projection used by the reviewed B.P3 direct/control contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -254,18 +267,15 @@ impl WaitError {
 }
 
 /// Error returned by [`init`](crate::init).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum InitError {
     /// The bridge is already installed (or being installed) in this process.
     #[error("sc-observability-log is already initialized in this process")]
     AlreadyInitialized,
     /// Another `log::Log` implementation owns the `log` facade.
     #[error("another log::Log implementation is already installed")]
-    ForeignLoggerInstalled {
-        /// Error reported by `log::set_boxed_logger`.
-        #[source]
-        source: log::SetLoggerError,
-    },
+    ForeignLoggerInstalled,
     /// The requested baseline cannot be represented by the executable's
     /// compile-time `log` cap. This is rejected before global installation.
     #[error("configured level {configured:?} exceeds available static level {available:?}")]
@@ -278,16 +288,14 @@ pub enum InitError {
     /// `ProcessIdentityPolicy::Resolver` failed, or `Auto` could not resolve a non-empty hostname.
     #[error("process identity resolution failed")]
     IdentityResolution {
-        /// The identity failure, carrying the stable code and the path-specific remediation.
-        #[source]
-        source: sc_observability_types::IdentityError,
+        /// Stable diagnostic projected from the resolver failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// `sc_observability::Logger::new` failed.
     #[error("sc-observability logger construction failed")]
     Logger {
-        /// Error reported by sc-observability.
-        #[source]
-        source: sc_observability_types::InitError,
+        /// Stable diagnostic projected from the core construction failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// Required lifecycle coordination could not be reserved before facade installation.
     #[error("could not start bridge lifecycle coordination: {diagnostic}")]
@@ -298,7 +306,8 @@ pub enum InitError {
 }
 
 /// Error returned by [`LogGuard::flush`](crate::LogGuard::flush) and [`LogControl::flush`](crate::LogControl::flush).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum FlushError {
     /// The writer did not acknowledge the flush within `timeout`.
     #[error("flush did not complete within {timeout:?}")]
@@ -309,20 +318,21 @@ pub enum FlushError {
     /// A sink flush failed or the writer disconnected.
     #[error("sc-observability flush failed")]
     Logger {
-        /// Error reported by sc-observability.
-        #[source]
-        source: sc_observability_types::FlushError,
+        /// Stable diagnostic projected from the core flush failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The flush helper thread could not be started.
     #[error("could not start the flush helper thread")]
     HelperSpawn {
-        /// Error reported by `std::thread::Builder::spawn`.
-        #[source]
-        source: std::io::Error,
+        /// Stable diagnostic for the helper-start failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The flush helper thread ended without a result.
     #[error("the flush helper thread ended without a result")]
-    HelperLost,
+    HelperLost {
+        /// Stable diagnostic for the missing helper result.
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
     /// The owner has stopped accepting flush requests.
     #[error("the logger is not running: {phase:?}")]
     NotRunning { phase: LifecyclePhase },
@@ -333,7 +343,8 @@ pub enum FlushError {
 }
 
 /// Error returned by [`LogGuard::shutdown`](crate::LogGuard::shutdown).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ShutdownError {
     /// Sole ownership, final flush and writer join did not finish within `timeout`.
     #[error("shutdown did not complete within {timeout:?}")]
@@ -344,20 +355,21 @@ pub enum ShutdownError {
     /// The final flush failed; the logger was still shut down.
     #[error("final flush failed; the logger was still shut down")]
     FinalFlush {
-        /// Error reported by sc-observability.
-        #[source]
-        source: sc_observability_types::FlushError,
+        /// Stable diagnostic projected from the final core flush failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The shutdown helper thread could not be started.
     #[error("could not start the shutdown helper thread")]
     HelperSpawn {
-        /// Error reported by `std::thread::Builder::spawn`.
-        #[source]
-        source: std::io::Error,
+        /// Stable diagnostic for the coordinator-send failure.
+        diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The shutdown helper thread ended without a result.
     #[error("the shutdown helper thread ended without a result")]
-    HelperLost,
+    HelperLost {
+        /// Stable diagnostic for the missing coordinator result.
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
 }
 
 impl InitError {
@@ -366,12 +378,13 @@ impl InitError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::AlreadyInitialized => error_codes::SC_OBSERVABILITY_LOG_ALREADY_INITIALIZED,
-            Self::ForeignLoggerInstalled { .. } => {
+            Self::ForeignLoggerInstalled => {
                 error_codes::SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED
             }
             Self::UnsupportedLevel { .. } => error_codes::SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL,
-            Self::IdentityResolution { source } => source.diagnostic().code.clone(),
-            Self::Logger { source } => source.diagnostic().code.clone(),
+            Self::IdentityResolution { diagnostic } | Self::Logger { diagnostic } => {
+                diagnostic.code.clone()
+            }
             Self::RuntimeStart { diagnostic } => diagnostic.code.clone(),
         }
     }
@@ -383,15 +396,15 @@ impl InitError {
             Self::AlreadyInitialized => Remediation::not_recoverable(
                 "the log facade logger cannot be replaced; keep the first LogGuard",
             ),
-            Self::ForeignLoggerInstalled { .. } => Remediation::recoverable(
-                "remove the other log::Log implementation",
-                ["or call sc_observability_log::init before it is installed"],
-            ),
+            Self::ForeignLoggerInstalled => {
+                Remediation::not_recoverable("choose one application logger before startup")
+            }
             Self::UnsupportedLevel { .. } => Remediation::not_recoverable(
                 "rebuild without the static cap or choose a supported startup baseline",
             ),
-            Self::IdentityResolution { source } => source.diagnostic().remediation.clone(),
-            Self::Logger { source } => source.diagnostic().remediation.clone(),
+            Self::IdentityResolution { diagnostic } | Self::Logger { diagnostic } => {
+                diagnostic.remediation.clone()
+            }
             Self::RuntimeStart { diagnostic } => diagnostic.remediation.clone(),
         }
     }
@@ -403,9 +416,9 @@ impl FlushError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_FLUSH_TIMED_OUT,
-            Self::Logger { source } => source.diagnostic().code.clone(),
-            Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
-            Self::HelperLost => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+            Self::Logger { diagnostic } => diagnostic.code.clone(),
+            Self::HelperSpawn { diagnostic } => diagnostic.code.clone(),
+            Self::HelperLost { diagnostic } => diagnostic.code.clone(),
             Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
             Self::InProgress => error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
         }
@@ -419,14 +432,9 @@ impl FlushError {
                 "retry the flush later or raise the timeout",
                 ["a shutdown before the detached flush returns reports ShutdownError::TimedOut"],
             ),
-            Self::Logger { source } => source.diagnostic().remediation.clone(),
-            Self::HelperSpawn { .. } => {
-                Remediation::recoverable("retry the flush", ["check process thread limits"])
-            }
-            Self::HelperLost => Remediation::recoverable(
-                "shut the LogGuard down",
-                ["the logger may be degraded after a panic inside sc-observability"],
-            ),
+            Self::Logger { diagnostic }
+            | Self::HelperSpawn { diagnostic }
+            | Self::HelperLost { diagnostic } => diagnostic.remediation.clone(),
             Self::NotRunning { .. } => Remediation::not_recoverable(
                 "the lifecycle owner has shut the logger down; the final shutdown flushed what was queued",
             ),
@@ -447,9 +455,9 @@ impl ShutdownError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
-            Self::FinalFlush { source } => source.diagnostic().code.clone(),
-            Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
-            Self::HelperLost => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+            Self::FinalFlush { diagnostic }
+            | Self::HelperSpawn { diagnostic }
+            | Self::HelperLost { diagnostic } => diagnostic.code.clone(),
         }
     }
 
@@ -460,13 +468,9 @@ impl ShutdownError {
             Self::TimedOut { .. } => Remediation::not_recoverable(
                 "none needed at process exit; still-queued events may be lost",
             ),
-            Self::FinalFlush { source } => source.diagnostic().remediation.clone(),
-            Self::HelperSpawn { .. } => Remediation::not_recoverable(
-                "none needed at process exit; the logger slot is already empty",
-            ),
-            Self::HelperLost => Remediation::not_recoverable(
-                "none needed at process exit; the shutdown helper ended without a result",
-            ),
+            Self::FinalFlush { diagnostic }
+            | Self::HelperSpawn { diagnostic }
+            | Self::HelperLost { diagnostic } => diagnostic.remediation.clone(),
         }
     }
 }
@@ -687,25 +691,6 @@ impl DropCause {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sc_observability_types::ErrorContext;
-
-    static NOP: NopLogger = NopLogger;
-    struct NopLogger;
-    impl log::Log for NopLogger {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-            false
-        }
-        fn log(&self, _: &log::Record<'_>) {}
-        fn flush(&self) {}
-    }
-
-    fn context(code: &'static str) -> Box<ErrorContext> {
-        Box::new(ErrorContext::new(
-            ErrorCode::new_static(code),
-            "wrapped failure",
-            Remediation::recoverable("wrapped step", ["second wrapped step"]),
-        ))
-    }
 
     fn assert_non_empty(remediation: &Remediation) {
         match remediation {
@@ -717,10 +702,13 @@ mod tests {
         }
     }
 
-    fn set_logger_error() -> log::SetLoggerError {
-        // A unit-test-only foreign logger: the facade level stays Off, so it is inert.
-        let _ = log::set_logger(&NOP);
-        log::set_logger(&NOP).expect_err("second set_logger must fail")
+    fn projected(code: &'static str) -> sc_observability_types::OperationDiagnostic {
+        sc_observability_types::OperationDiagnostic {
+            code: ErrorCode::new_static(code),
+            message: "projected diagnostic".to_owned(),
+            remediation: Remediation::recoverable("follow the diagnostic", ["then retry"]),
+            at: sc_observability_types::Timestamp::now_utc(),
+        }
     }
 
     #[test]
@@ -731,24 +719,18 @@ mod tests {
                 error_codes::SC_OBSERVABILITY_LOG_ALREADY_INITIALIZED,
             ),
             (
-                InitError::ForeignLoggerInstalled {
-                    source: set_logger_error(),
-                },
+                InitError::ForeignLoggerInstalled,
                 error_codes::SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED,
             ),
             (
                 InitError::IdentityResolution {
-                    source: sc_observability_types::IdentityError(context(
-                        "SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED",
-                    )),
+                    diagnostic: projected("SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED"),
                 },
                 error_codes::SC_OBSERVABILITY_LOG_IDENTITY_RESOLUTION_FAILED,
             ),
             (
                 InitError::Logger {
-                    source: sc_observability_types::InitError(context(
-                        "SC_OBSERVABILITY_LOGGER_INIT_FAILED",
-                    )),
+                    diagnostic: projected("SC_OBSERVABILITY_LOGGER_INIT_FAILED"),
                 },
                 ErrorCode::new_static("SC_OBSERVABILITY_LOGGER_INIT_FAILED"),
             ),
@@ -758,19 +740,19 @@ mod tests {
             assert_non_empty(&error.remediation());
         }
         let wrapped = InitError::Logger {
-            source: sc_observability_types::InitError(context("W")),
+            diagnostic: projected("W"),
         };
         assert_eq!(
             wrapped.remediation(),
-            Remediation::recoverable("wrapped step", ["second wrapped step"])
+            Remediation::recoverable("follow the diagnostic", ["then retry"])
         );
         let identity = InitError::IdentityResolution {
-            source: sc_observability_types::IdentityError(context("I")),
+            diagnostic: projected("I"),
         };
         assert_eq!(identity.code(), ErrorCode::new_static("I"));
         assert_eq!(
             identity.remediation(),
-            Remediation::recoverable("wrapped step", ["second wrapped step"])
+            Remediation::recoverable("follow the diagnostic", ["then retry"])
         );
     }
 
@@ -785,20 +767,20 @@ mod tests {
             ),
             (
                 FlushError::Logger {
-                    source: sc_observability_types::FlushError(context(
-                        "SC_OBSERVABILITY_LOGGER_FLUSH_FAILED",
-                    )),
+                    diagnostic: projected("SC_OBSERVABILITY_LOGGER_FLUSH_FAILED"),
                 },
                 ErrorCode::new_static("SC_OBSERVABILITY_LOGGER_FLUSH_FAILED"),
             ),
             (
                 FlushError::HelperSpawn {
-                    source: std::io::Error::other("spawn"),
+                    diagnostic: projected("SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED"),
                 },
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
             ),
             (
-                FlushError::HelperLost,
+                FlushError::HelperLost {
+                    diagnostic: projected("SC_OBSERVABILITY_LOG_HELPER_LOST"),
+                },
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
             ),
             (
@@ -829,20 +811,20 @@ mod tests {
             ),
             (
                 ShutdownError::FinalFlush {
-                    source: sc_observability_types::FlushError(context(
-                        "SC_OBSERVABILITY_LOGGER_WRITER_DEGRADED",
-                    )),
+                    diagnostic: projected("SC_OBSERVABILITY_LOGGER_WRITER_DEGRADED"),
                 },
                 ErrorCode::new_static("SC_OBSERVABILITY_LOGGER_WRITER_DEGRADED"),
             ),
             (
                 ShutdownError::HelperSpawn {
-                    source: std::io::Error::other("spawn"),
+                    diagnostic: projected("SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED"),
                 },
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
             ),
             (
-                ShutdownError::HelperLost,
+                ShutdownError::HelperLost {
+                    diagnostic: projected("SC_OBSERVABILITY_LOG_HELPER_LOST"),
+                },
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
             ),
         ];

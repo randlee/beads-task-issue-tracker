@@ -415,7 +415,9 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
         Ok(identity) => identity,
         Err(source) => {
             INSTALLED.store(false, Ordering::SeqCst); // recoverable: allow a retry
-            return Err(InitError::IdentityResolution { source });
+            return Err(InitError::IdentityResolution {
+                diagnostic: error::diagnostic_from_info(&source),
+            });
         }
     };
     let (service, enable_file_sink, enable_console_sink) = (
@@ -427,7 +429,9 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
         Ok(logger) => logger,
         Err(source) => {
             INSTALLED.store(false, Ordering::SeqCst); // recoverable: allow a retry
-            return Err(InitError::Logger { source });
+            return Err(InitError::Logger {
+                diagnostic: error::diagnostic_from_info(&source),
+            });
         }
     };
     if let Err(source) = handle::reserve_shutdown_coordinator() {
@@ -451,12 +455,12 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
         identity,
         options,
     });
-    if let Err(source) = log::set_boxed_logger(Box::new(bridge::Bridge)) {
+    if let Err(_source) = log::set_boxed_logger(Box::new(bridge::Bridge)) {
         // INSTALLED stays set: the facade slot belongs to the other logger for the
         // rest of the process, so no retry can succeed. Later calls return
         // AlreadyInitialized without building and tearing down another Logger.
         let _ = handle::shutdown_installed(installed, DEFAULT_DROP_SHUTDOWN_TIMEOUT);
-        return Err(InitError::ForeignLoggerInstalled { source });
+        return Err(InitError::ForeignLoggerInstalled);
     }
     // The facade stays at Trace so compiled debug/trace sites survive. The core
     // LevelOwner is the sole runtime filter for direct, facade, and macro paths.

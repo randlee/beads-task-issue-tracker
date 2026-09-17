@@ -633,7 +633,12 @@ pub(crate) fn shutdown_installed(
                 source.to_string(),
             ),
         });
-        return Err(ShutdownError::HelperSpawn { source });
+        return Err(ShutdownError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
     };
     let work = coordinator.work.clone();
     let (result_tx, result_rx) = mpsc::sync_channel(1);
@@ -677,11 +682,18 @@ pub(crate) fn shutdown_installed(
                 source.to_string(),
             ),
         });
-        return Err(ShutdownError::HelperSpawn { source });
+        return Err(ShutdownError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
     }
     match result_rx.recv_timeout(timeout) {
         Ok(WorkerOutcome::Completed(Ok(()))) => Ok(()),
-        Ok(WorkerOutcome::Completed(Err(source))) => Err(ShutdownError::FinalFlush { source }),
+        Ok(WorkerOutcome::Completed(Err(source))) => Err(ShutdownError::FinalFlush {
+            diagnostic: crate::error::diagnostic_from_info(&source),
+        }),
         Ok(WorkerOutcome::Panicked) | Err(RecvTimeoutError::Disconnected) => {
             save_unconfirmed(UnconfirmedShutdown::HelperLost {
                 diagnostic: diagnostic(
@@ -689,7 +701,12 @@ pub(crate) fn shutdown_installed(
                     "the reserved shutdown worker ended without a result".to_owned(),
                 ),
             });
-            Err(ShutdownError::HelperLost)
+            Err(ShutdownError::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the reserved shutdown worker ended without a result".to_owned(),
+                ),
+            })
         }
         Err(RecvTimeoutError::Timeout) => Err(ShutdownError::TimedOut { timeout }),
     }
@@ -758,10 +775,22 @@ pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
     };
     match run_bounded(timeout, flush) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(source)) => Err(FlushError::Logger { source }),
+        Ok(Err(source)) => Err(FlushError::Logger {
+            diagnostic: crate::error::diagnostic_from_info(&source),
+        }),
         Err(BoundedError::TimedOut) => Err(FlushError::TimedOut { timeout }),
-        Err(BoundedError::Spawn { source }) => Err(FlushError::HelperSpawn { source }),
-        Err(BoundedError::WorkerLost) => Err(FlushError::HelperLost),
+        Err(BoundedError::Spawn { source }) => Err(FlushError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        }),
+        Err(BoundedError::WorkerLost) => Err(FlushError::HelperLost {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                "the flush helper ended without a result".to_owned(),
+            ),
+        }),
     }
 }
 

@@ -169,7 +169,7 @@ impl FlushError {
             },
             Self::Logger { .. } => FlushFailure::Logger,
             Self::HelperSpawn { .. } => FlushFailure::HelperSpawn,
-            Self::HelperLost => FlushFailure::HelperLost,
+            Self::HelperLost { .. } => FlushFailure::HelperLost,
             Self::NotRunning { .. } => FlushFailure::ShutDown,
             Self::InProgress => FlushFailure::InProgress,
         };
@@ -192,7 +192,7 @@ impl ShutdownError {
             },
             Self::FinalFlush { .. } => ShutdownFailure::FinalFlush,
             Self::HelperSpawn { .. } => ShutdownFailure::HelperSpawn,
-            Self::HelperLost => ShutdownFailure::HelperLost,
+            Self::HelperLost { .. } => ShutdownFailure::HelperLost,
         };
         report(
             Failure::Shutdown(failure),
@@ -222,6 +222,15 @@ mod tests {
 
     use super::*;
     use crate::{BridgeLifecycle, InvalidInputReason, error_codes};
+
+    fn projected(code: ErrorCode, message: &str) -> sc_observability_types::OperationDiagnostic {
+        sc_observability_types::OperationDiagnostic {
+            code,
+            message: message.to_owned(),
+            remediation: Remediation::not_recoverable("test-only diagnostic"),
+            at: sc_observability_types::Timestamp::now_utc(),
+        }
+    }
 
     #[test]
     fn submit_report_has_tagged_failure_code_and_remediation() {
@@ -256,7 +265,10 @@ mod tests {
                 timeout: Duration::from_secs(2),
             }
             .report(),
-            ShutdownError::HelperLost.report(),
+            ShutdownError::HelperLost {
+                diagnostic: projected(crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST, "lost"),
+            }
+            .report(),
             SubmitError::Stopped {
                 lifecycle: BridgeLifecycle::Stopped,
             }
