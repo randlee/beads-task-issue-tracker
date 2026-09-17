@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 use sc_observability::{RedactionPolicy, Redactor};
 use sc_observability_log::{
     ActionName, AdmissionOutcome, BridgeEvent, BridgeOptions, EmitError, EventLevel, LevelFilter,
-    LifecyclePhase, LoggerConfig, ServiceName, ShutdownError, TargetCategory, WaitError,
+    LifecyclePhase, LoggerConfig, ServiceName, ShutdownError, ShutdownOutcome, TargetCategory,
+    WaitError,
 };
+use sc_observability_types::WriterState;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(150);
 const LATE_COMPLETION_DEADLINE: Duration = Duration::from_secs(20);
@@ -131,6 +133,10 @@ fn timed_out_owner_shutdown_completes_late_for_repeated_control_waiters() {
     }
     let first = control.wait_stopped(Duration::ZERO).unwrap();
     let second = control.wait_stopped(Duration::ZERO).unwrap();
+    assert!(matches!(first.outcome, ShutdownOutcome::Stopped));
+    assert_eq!(first.health.lifecycle, LifecyclePhase::Stopped);
+    assert_eq!(first.health.logging.writer_state, WriterState::Stopped);
+    assert_eq!(first.health.logging.queue_depth, 0);
     assert_eq!(
         serde_json::to_value(first).unwrap(),
         serde_json::to_value(second).unwrap()

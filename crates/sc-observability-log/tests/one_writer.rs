@@ -15,6 +15,7 @@ use sc_observability_log::{
     ActionName, AdmissionOutcome, BridgeEvent, BridgeOptions, DropCause, EmitError, EventLevel,
     FieldKeyError, LevelFilter, LogControl, LoggerConfig, ServiceName, TargetCategory,
 };
+use serde_json::Value;
 
 static CONTROL: OnceLock<LogControl> = OnceLock::new();
 static NESTED: Mutex<Vec<Result<AdmissionOutcome, EmitError>>> = Mutex::new(Vec::new());
@@ -161,6 +162,12 @@ fn direct_facade_and_macro_share_guard_accounting_and_envelope() {
             Err(EmitError::Panicked)
         ));
     });
+    counted_once(&control, DropCause::LoggerPanicked, || {
+        log::info!(target: "one_writer", panic = true; "panicking facade");
+    });
+    counted_once(&control, DropCause::LoggerPanicked, || {
+        sc_observability_log::info!(target: "one_writer", panic = true, "panicking macro");
+    });
     std::panic::set_hook(old_hook);
 
     control.flush(Duration::from_secs(5)).unwrap();
@@ -171,15 +178,32 @@ fn direct_facade_and_macro_share_guard_accounting_and_envelope() {
             Err(EmitError::NotRunning { .. })
         ));
     });
-    let contents = std::fs::read_to_string(path).unwrap();
-    for message in [
+    let events: Vec<Value> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let expected_messages = [
         "direct record",
         "facade record",
         "macro record",
         "outer macro",
         "outer direct",
-    ] {
-        assert!(contents.contains(message), "missing {message:?}");
+    ];
+    assert_eq!(events.len(), expected_messages.len());
+    for message in expected_messages {
+        let record = events
+            .iter()
+            .find(|event| event["message"] == message)
+            .unwrap_or_else(|| panic!("missing {message:?}"));
+        assert_eq!(record["level"], "Info");
+        assert_eq!(record["service"], "one-writer");
+        assert_eq!(record["target"], "one_writer");
+        assert_eq!(record["action"], "log.record");
+        assert_eq!(record["identity"]["pid"], u64::from(std::process::id()));
+        assert!(record["version"].is_string());
+        assert!(record["timestamp"].is_string());
     }
     for message in [
         "filtered direct record",
@@ -187,8 +211,23 @@ fn direct_facade_and_macro_share_guard_accounting_and_envelope() {
         "nested direct record",
         "nested facade record",
         "panicking direct",
+        "panicking facade",
+        "panicking macro",
         "post-stop direct",
     ] {
-        assert!(!contents.contains(message), "unexpected {message:?}");
+        assert!(
+            events.iter().all(|event| event["message"] != message),
+            "unexpected {message:?}"
+        );
     }
+    let jsonl_files: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|candidate| {
+            candidate
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        })
+        .collect();
+    assert_eq!(jsonl_files, vec![path]);
 }
