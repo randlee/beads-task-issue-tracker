@@ -11,7 +11,7 @@ decision. Those remain separately owned gates.
 | BTIT implementation SHA | `c31095326bde604557dd1aa51c7252db7b3d6284` |
 | BTIT branch / target | `feature/sc-obs-B-P3-runtime-bridge` → `develop` |
 | Draft review | [BTIT PR #86](https://github.com/randlee/beads-task-issue-tracker/pull/86) |
-| Reviewed target and runtime contracts | `84b32e9d6718418371ffd25a3de52346278725ca` |
+| Accepted target design / reviewed runtime contract | `84b32e9d6718418371ffd25a3de52346278725ca`; runtime public-source acceptance remains owner-deferred |
 | B.P2 candidate | `1.3.0`, staged only; never published |
 | B.P2 package source | `561f89923c7f4fdfa9cd0fafa929a5d6dc94dfe5` |
 | B.P2 stage manifest SHA-256 | `822ff4494dcfbf92b3dcf47fa3fceac8df00b7e28baf7777b6a5aa1147078077` |

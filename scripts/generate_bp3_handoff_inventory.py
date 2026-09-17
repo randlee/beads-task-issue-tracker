@@ -10,6 +10,7 @@ changes.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 from pathlib import Path
 
@@ -29,40 +30,138 @@ def resolved_revision(root: Path, revision: str) -> str:
     ).strip()
 
 
-def require(source: str, needle: str, label: str) -> None:
-    if needle not in source:
-        raise SystemExit(f"inventory source check failed: {label} ({needle!r})")
+LEDGER_GROUPS = {
+    "Root contract declarations": [
+        "crates/sc-observability-log/src/lib.rs",
+        "crates/sc-observability-log/src/control.rs",
+        "crates/sc-observability-log/src/error.rs",
+        "crates/sc-observability-log/src/health.rs",
+        "crates/sc-observability-log/src/error_codes.rs",
+    ],
+    "Hidden exact-version macro support": [
+        "crates/sc-observability-log/src/callsite.rs",
+        "crates/sc-observability-log/src/context.rs",
+        "crates/sc-observability-log/src/mapping.rs",
+    ],
+    "Macro facade": ["crates/sc-observability-log-macros/src/lib.rs"],
+}
+
+
+def compact(lines: list[str]) -> str:
+    """Keep signatures readable while preserving their source spelling."""
+    return re.sub(r"\s+", " ", " ".join(line.strip() for line in lines)).strip()
+
+
+def balanced_end(lines: list[str], start: int) -> int:
+    """Return the end of the braced source item beginning at ``start``."""
+    depth = 0
+    seen_open = False
+    for index in range(start, len(lines)):
+        line = lines[index]
+        depth += line.count("{") - line.count("}")
+        seen_open = seen_open or "{" in line
+        if seen_open and depth == 0:
+            return index
+    raise SystemExit(f"unclosed source item beginning on line {start + 1}")
+
+
+def signature_end(lines: list[str], start: int) -> int:
+    """Return the end of a declaration header or semicolon-delimited item."""
+    for index in range(start, len(lines)):
+        if "{" in lines[index] or ";" in lines[index]:
+            return index
+    raise SystemExit(f"unterminated source item beginning on line {start + 1}")
+
+
+def declarations(path: str, source: str) -> tuple[list[str], int, int, int]:
+    """Extract source declarations instead of maintaining a hand-written API list.
+
+    Rust's visibility is lexical; this ledger intentionally records every public
+    declaration, derive, and impl in the nominated root or `__private` source
+    files. Enum/struct/trait blocks retain their actual fields, payloads and
+    trait methods. Impl headers plus public methods retain inherent/trait/Drop
+    behavior without serializing implementation bodies.
+    """
+    lines = source.splitlines()
+    entries: list[str] = []
+    derive_count = impl_count = public_count = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if (
+            stripped == "#[cfg(test)]"
+            and index + 1 < len(lines)
+            and re.match(r"\s*mod\s+tests\s*\{", lines[index + 1])
+        ):
+            index = balanced_end(lines, index + 1) + 1
+            continue
+        if stripped.startswith("#[derive("):
+            entries.append(f"- L{index + 1} derive: `{compact([line])}`")
+            derive_count += 1
+            index += 1
+            continue
+        if re.match(r"(?:pub\s+)?impl(?:<|\s)", stripped):
+            end = signature_end(lines, index)
+            entries.append(f"- L{index + 1} impl: `{compact(lines[index : end + 1])}`")
+            impl_count += 1
+            index += 1
+            continue
+        if not stripped.startswith("pub "):
+            index += 1
+            continue
+        public_count += 1
+        if re.match(r"pub\s+(?:struct|enum|trait|mod)\b", stripped) and "{" in line:
+            end = balanced_end(lines, index)
+            block = "\n".join(lines[index : end + 1])
+            entries.extend(
+                [
+                    f"- L{index + 1} public declaration:",
+                    "```rust",
+                    block,
+                    "```",
+                ]
+            )
+            index = end + 1
+            continue
+        end = signature_end(lines, index)
+        entries.append(
+            f"- L{index + 1} public declaration: `{compact(lines[index : end + 1])}`"
+        )
+        index = end + 1
+    return entries, public_count, impl_count, derive_count
+
+
+def extracted_ledger(sources: dict[str, str]) -> str:
+    sections = [
+        "\n## Source-derived declaration ledger\n",
+        "This ledger is generated directly from the pinned source, not from the",
+        "summary tables above. It captures public declarations (including complete",
+        "struct/enum/trait blocks for fields, payloads and trait methods), every",
+        "`#[derive(...)]`, every `impl` header (including trait and `Drop` impls),",
+        "and the public signatures in the designated source files. The grouped",
+        "disposition applies to every ledger entry in that section: root entries are",
+        "the retained/revised native target contract unless explicitly internal;",
+        "hidden entries are retained solely as exact-version macro support; macro",
+        "entries are preserved tracing-compatible façade exports. This over-includes",
+        "private-module `pub` implementation helpers so review can prove they are not",
+        "silently mistaken for a root export.",
+    ]
+    for group, paths in LEDGER_GROUPS.items():
+        sections.extend([f"\n### {group}\n"])
+        for path in paths:
+            entries, public_count, impl_count, derive_count = declarations(path, sources[path])
+            sections.extend(
+                [
+                    f"#### `{path}`\n",
+                    f"Source-derived counts: {public_count} public declarations, {impl_count} impl headers, {derive_count} derive lists.\n",
+                    *entries,
+                ]
+            )
+    return "\n".join(sections) + "\n"
 
 
 def markdown(revision: str, sources: dict[str, str]) -> str:
-    lib = sources["crates/sc-observability-log/src/lib.rs"]
-    control = sources["crates/sc-observability-log/src/control.rs"]
-    errors = sources["crates/sc-observability-log/src/error.rs"]
-    health = sources["crates/sc-observability-log/src/health.rs"]
-    codes = sources["crates/sc-observability-log/src/error_codes.rs"]
-    macros = sources["crates/sc-observability-log-macros/src/lib.rs"]
-
-    # These assertions turn this deliberately readable manifest into a source
-    # check: adding or removing a named member must update both the source and
-    # the inventory before the generator can be used as evidence.
-    checks = [
-        (lib, "pub use control::{BridgeEvent, EmitOutcome, LogControl};", "control reexports"),
-        (lib, "pub use error::{", "error reexports"),
-        (lib, "pub use health::{BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport};", "health reexports"),
-        (lib, "pub use sc_observability_log_macros::{debug, error, event, info, instrument, trace, warn};", "macro reexports"),
-        (lib, "pub mod __private {", "hidden support module"),
-        (lib, "pub use handle::fail_next_shutdown_coordinator_reservation;", "test hook reexport"),
-        (control, "pub struct BridgeEvent", "BridgeEvent"),
-        (control, "pub struct LogControl", "LogControl"),
-        (errors, "pub enum EmitError", "EmitError"),
-        (errors, "pub enum DropCause", "DropCause"),
-        (health, "pub struct BridgeHealthReport", "BridgeHealthReport"),
-        (codes, "pub const ALL: &[ErrorCode]", "error-code registry"),
-        (macros, "pub fn instrument", "instrument macro"),
-    ]
-    for source, needle, label in checks:
-        require(source, needle, label)
-
     return f"""# B.P3 implementation API and macro-support inventory
 
 Generated from implementation revision `{revision}`. Do not edit this file by
@@ -75,8 +174,9 @@ python3 scripts/generate_bp3_handoff_inventory.py \\
 ```
 
 The generator reads each listed file with `git show REV:path`, so this artifact
-does not accidentally describe the handoff branch. The accepted target and
-runtime contracts are `84b32e9d6718418371ffd25a3de52346278725ca`.
+does not accidentally describe the handoff branch. The accepted target design
+and reviewed runtime contract are `84b32e9d6718418371ffd25a3de52346278725ca`;
+runtime public-source acceptance remains owner-deferred.
 
 ## Root contract and re-exports
 
@@ -105,25 +205,25 @@ below.
 
 | Symbol | Complete public shape at `{revision}` | Target disposition |
 | --- | --- | --- |
-| `BridgeEvent` | `#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]`; fields `level`, `target`, `action`, `message`, `outcome`, `fields`, `request_id`, `correlation_id`, `trace` | Retain typed direct producer input; bridge-owned identity/timestamp remain absent. |
-| `LogControl` | `#[derive(Debug, Clone)]`; `flush(timeout)`, `health()`, `active_log_path()`, `dropped_events()`, `wait_stopped(timeout)`, `try_log(event)`, `query(query)` | Retain cloneable, non-owning read/admission control; no elevate, reset, shutdown, owner conversion, or mutable logger access. |
+| `BridgeEvent` | `#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]`; public fields `level: EventLevel`, `target: TargetCategory`, `action: Option<ActionName>`, `message: Option<String>`, `outcome: Option<OutcomeLabel>`, `fields: serde_json::Map<String, serde_json::Value>`, `request_id: Option<CorrelationId>`, `correlation_id: Option<CorrelationId>`, `trace: Option<TraceContext>` | Retain typed direct producer input; bridge-owned identity/timestamp remain absent. |
+| `LogControl` | `#[derive(Debug, Clone)]`; `flush(&self, Duration) -> Result<(), FlushError>`, `health(&self) -> Result<BridgeHealthReport, ControlError>`, `active_log_path(&self) -> Result<Option<PathBuf>, ControlError>`, `dropped_events(&self) -> DroppedEvents`, `wait_stopped(&self, Duration) -> Result<ShutdownReport, WaitError>`, `try_log(&self, BridgeEvent) -> Result<EmitOutcome, EmitError>`, `query(&self, &LogQuery) -> Result<LogSnapshot, ControlError>` | Retain cloneable, non-owning read/admission control; no elevate, reset, shutdown, owner conversion, or mutable logger access. |
 | `Level` | `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]`; associated constants `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`; `From<Level> for sc_observability_types::Level` | Retain fixed tracing-style API and staged-core conversion. |
 | `BridgeOptions` | `#[derive(Debug, Clone)]`; public fields `default_action: ActionName`, `parse_bracket_action: bool` | Retain target action/default behavior. |
-| `DroppedEvents` | `#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]`; `get(cause)`, `total()` | Retain exact-once counters; fields intentionally remain private. |
-| `LogGuard` | `#[derive(Debug)]`, deliberately not `Clone`; `control()`, `elevate_level(level, source)`, `reset_level(source)`, `flush(timeout)`, `shutdown(timeout)`, `dropped_events()`, `active_log_path()`, `health()` | Retain sole ownership of runtime-level mutation and shutdown. |
-| `BridgeHealthReport` | `#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]`; public fields `schema_version`, `logging`, `dropped`, `lifecycle`, `active_log_path`, `configured_level`, `effective_level`, `level_revision` | Retain native health v1 with the staged core report and bridge lifecycle/accounting fields. |
-| `ShutdownReport` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; public fields `outcome`, `health` | Retain final/pending shutdown observation without claiming an unconfirmed stop. |
+| `DroppedEvents` | `#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]`; `get(&self, DropCause) -> u64`, `total(&self) -> u64` | Retain exact-once counters; fields intentionally remain private. |
+| `LogGuard` | `#[derive(Debug)]`, deliberately not `Clone`; `control(&self) -> LogControl`, `elevate_level(&mut self, LevelFilter, LevelChangeSource) -> Result<LevelChange, LevelChangeError>`, `reset_level(&mut self, LevelChangeSource) -> Result<LevelChange, LevelChangeError>`, `flush(&self, Duration) -> Result<(), FlushError>`, `shutdown(self, Duration) -> Result<(), ShutdownError>`, `dropped_events(&self) -> DroppedEvents`, `active_log_path(&self) -> Option<&Path>`, `health(&self) -> Result<BridgeHealthReport, ControlError>`; `Drop` is the bounded fallback | Retain sole ownership of runtime-level mutation and shutdown. |
+| `BridgeHealthReport` | `#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]`; public fields `schema_version: u32`, `logging: LoggingHealthReport`, `dropped: DroppedEvents`, `lifecycle: LifecyclePhase`, `active_log_path: Option<PathBuf>`, `configured_level: LevelFilter`, `effective_level: LevelFilter`, `level_revision: u64` | Retain native health v1 with the staged core report and bridge lifecycle/accounting fields. |
+| `ShutdownReport` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; public fields `outcome: ShutdownOutcome`, `health: BridgeHealthReport` | Retain final/pending shutdown observation without claiming an unconfirmed stop. |
 | `DropCause` | `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]`; variants `QueueFull`, `InvalidEvent`, `WriterDegraded`, `ShutdownTimedOut`, `NotInstalled`, `LoggerPanicked`, `ReentrantEmit`; `ALL` | Retain seven exact accounting categories and declaration order. |
 | `LifecyclePhase` | `#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]`; variants `Running`, `Stopping`, `Stopped`, `Failed` | Retain observable lifecycle projection. |
-| `FieldKeyError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; variants `Empty`, `ReservedPrefix`, `Collision {{ other_raw_key }}` | Retain typed field-label rejection. |
-| `EmitError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `InvalidField {{ raw_key, reason }}`, `InvalidEvent {{ diagnostic }}`, `QueueFull {{ diagnostic }}`, `WriterDegraded {{ diagnostic }}`, `ShutdownTimedOut {{ diagnostic }}`, `NotRunning {{ phase }}`, `Reentrant`, `Panicked`; `code()`, `remediation()` | Retain typed direct-admission rejection and exact-once disposition. |
-| `ControlError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `NotRunning {{ phase }}`, `Query {{ diagnostic }}`, `Unavailable {{ diagnostic }}`; `code()`, `remediation()` | Retain typed read-only control failure. |
-| `WaitError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `NotStarted`, `TimedOut {{ timeout }}`, `Unavailable {{ diagnostic }}`; `code()`, `remediation()` | Retain owner-shutdown observation failure. |
-| `UnconfirmedShutdown` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; `HelperSpawn {{ diagnostic }}`, `HelperLost {{ diagnostic }}` | Retain explicit non-confirmation states. |
-| `ShutdownOutcome` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; `Stopped`, `StoppedWithFlushError {{ diagnostic }}`, `Unconfirmed {{ cause }}` | Retain completion truthfulness: unconfirmed is never stopped. |
-| `InitError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `AlreadyInitialized`, `ForeignLoggerInstalled`, `UnsupportedLevel {{ configured, available }}`, `IdentityResolution {{ diagnostic }}`, `Logger {{ diagnostic }}`, `RuntimeStart {{ diagnostic }}`; `code()`, `remediation()` | Retain typed installation/lifecycle failure. |
-| `FlushError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `TimedOut {{ timeout }}`, `Logger {{ diagnostic }}`, `HelperSpawn {{ diagnostic }}`, `HelperLost {{ diagnostic }}`, `NotRunning {{ phase }}`, `InProgress`; `code()`, `remediation()` | Retain bounded helper-flush semantics. |
-| `ShutdownError` | `#[derive(Debug, Clone, Serialize, Deserialize, Error)]`; `TimedOut {{ timeout }}`, `FinalFlush {{ diagnostic }}`, `HelperSpawn {{ diagnostic }}`, `HelperLost {{ diagnostic }}`; `code()`, `remediation()` | Retain sole-owner bounded shutdown semantics. |
+| `FieldKeyError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; variants `Empty`, `ReservedPrefix`, `Collision {{ other_raw_key: String }}` | Retain typed field-label rejection. |
+| `EmitError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `InvalidField {{ raw_key: String, reason: FieldKeyError }}`, `InvalidEvent {{ diagnostic: OperationDiagnostic }}`, `QueueFull {{ diagnostic: OperationDiagnostic }}`, `WriterDegraded {{ diagnostic: OperationDiagnostic }}`, `ShutdownTimedOut {{ diagnostic: OperationDiagnostic }}`, `NotRunning {{ phase: LifecyclePhase }}`, `Reentrant`, `Panicked`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain typed direct-admission rejection and exact-once disposition. |
+| `ControlError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `NotRunning {{ phase: LifecyclePhase }}`, `Query {{ diagnostic: OperationDiagnostic }}`, `Unavailable {{ diagnostic: OperationDiagnostic }}`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain typed read-only control failure. |
+| `WaitError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `NotStarted`, `TimedOut {{ timeout: Duration }}`, `Unavailable {{ diagnostic: OperationDiagnostic }}`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain owner-shutdown observation failure. |
+| `UnconfirmedShutdown` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; `HelperSpawn {{ diagnostic: OperationDiagnostic }}`, `HelperLost {{ diagnostic: OperationDiagnostic }}` | Retain explicit non-confirmation states. |
+| `ShutdownOutcome` | `#[derive(Debug, Clone, Serialize, Deserialize)]`; `Stopped`, `StoppedWithFlushError {{ diagnostic: OperationDiagnostic }}`, `Unconfirmed {{ cause: UnconfirmedShutdown }}` | Retain completion truthfulness: unconfirmed is never stopped. |
+| `InitError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `AlreadyInitialized`, `ForeignLoggerInstalled`, `UnsupportedLevel {{ configured: LevelFilter, available: LevelFilter }}`, `IdentityResolution {{ diagnostic: OperationDiagnostic }}`, `Logger {{ diagnostic: OperationDiagnostic }}`, `RuntimeStart {{ diagnostic: OperationDiagnostic }}`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain typed installation/lifecycle failure. |
+| `FlushError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `TimedOut {{ timeout: Duration }}`, `Logger {{ diagnostic: OperationDiagnostic }}`, `HelperSpawn {{ diagnostic: OperationDiagnostic }}`, `HelperLost {{ diagnostic: OperationDiagnostic }}`, `NotRunning {{ phase: LifecyclePhase }}`, `InProgress`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain bounded helper-flush semantics. |
+| `ShutdownError` | `#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]`; `TimedOut {{ timeout: Duration }}`, `FinalFlush {{ diagnostic: OperationDiagnostic }}`, `HelperSpawn {{ diagnostic: OperationDiagnostic }}`, `HelperLost {{ diagnostic: OperationDiagnostic }}`; `code(&self) -> ErrorCode`, `remediation(&self) -> Remediation` | Retain sole-owner bounded shutdown semantics. |
 
 Every enum above that has `Serialize`/`Deserialize` uses its source-declared
 snake_case tagged representation (`kind`/`value`) except `LifecyclePhase`,
@@ -178,7 +278,7 @@ The source task's required removals remain absent at this revision:
 `encode_threshold`, `level_enabled`, and `to_log_level_filter`. The target
 disposition for every listed spelling is removed; the source handoff's
 whole-crate scan is recorded separately in the validation evidence.
-"""
+""" + extracted_ledger(sources)
 
 
 def main() -> None:
@@ -198,6 +298,9 @@ def main() -> None:
         "crates/sc-observability-log/src/error.rs",
         "crates/sc-observability-log/src/health.rs",
         "crates/sc-observability-log/src/error_codes.rs",
+        "crates/sc-observability-log/src/callsite.rs",
+        "crates/sc-observability-log/src/context.rs",
+        "crates/sc-observability-log/src/mapping.rs",
         "crates/sc-observability-log-macros/src/lib.rs",
     ]
     sources = {path: git_show(root, revision, path) for path in paths}
