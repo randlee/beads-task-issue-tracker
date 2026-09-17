@@ -73,6 +73,18 @@ def signature_end(lines: list[str], start: int) -> int:
     raise SystemExit(f"unterminated source item beginning on line {start + 1}")
 
 
+def semicolon_end(lines: list[str], start: int) -> int:
+    """Return the semicolon ending a use/type/const declaration.
+
+    A multiline ``pub use foo::{...};`` contains an opening brace before its
+    terminating semicolon, so it must not use ``signature_end``.
+    """
+    for index in range(start, len(lines)):
+        if ";" in lines[index]:
+            return index
+    raise SystemExit(f"unterminated semicolon item beginning on line {start + 1}")
+
+
 def declarations(path: str, source: str) -> tuple[list[str], int, int, int]:
     """Extract source declarations instead of maintaining a hand-written API list.
 
@@ -111,6 +123,13 @@ def declarations(path: str, source: str) -> tuple[list[str], int, int, int]:
             index += 1
             continue
         public_count += 1
+        if re.match(r"pub\s+use\b", stripped):
+            end = semicolon_end(lines, index)
+            entries.append(
+                f"- L{index + 1} public declaration: `{compact(lines[index : end + 1])}`"
+            )
+            index = end + 1
+            continue
         if re.match(r"pub\s+(?:struct|enum|trait|mod)\b", stripped) and "{" in line:
             end = balanced_end(lines, index)
             block = "\n".join(lines[index : end + 1])
@@ -175,8 +194,9 @@ python3 scripts/generate_bp3_handoff_inventory.py \\
 
 The generator reads each listed file with `git show REV:path`, so this artifact
 does not accidentally describe the handoff branch. The accepted target design
-and reviewed runtime contract are `84b32e9d6718418371ffd25a3de52346278725ca`;
-runtime public-source acceptance remains owner-deferred.
+and reviewed runtime contract are `84b32e9d6718418371ffd25a3de52346278725ca`.
+Source acceptance is pending independent QA; only runtime public-API acceptance
+remains owner-deferred.
 
 ## Root contract and re-exports
 
