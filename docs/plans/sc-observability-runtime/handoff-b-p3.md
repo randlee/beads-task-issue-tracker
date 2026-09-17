@@ -82,10 +82,7 @@ Final platform qualification is [CI run 35185604331](https://github.com/randlee/
 | `crates (macos-latest)` | PASS |
 | `crates (windows-latest)` | PASS |
 | `rust quality` on Ubuntu/macOS/Windows | PASS |
-
-The unrelated `backend (windows-latest)` repository job was still running when
-this handoff was written; it is not substituted for, or claimed as, B.P3 bridge
-qualification. Retain its final state with the CI record.
+| Remaining repository jobs, including `backend (windows-latest)` | PASS |
 
 ## Handoff boundary
 
