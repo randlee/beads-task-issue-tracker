@@ -747,7 +747,7 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
 /// `LogGuard::flush` / `LogControl::flush`: the helper owns an `Arc` clone until
 /// sc-observability's flush returns.
 ///
-/// An empty slot means shutdown has taken the logger: `FlushError::ShutDown`. A
+/// An empty slot means shutdown has taken the logger: `FlushError::NotRunning`. A
 /// flush whose helper already holds its clone when shutdown starts is awaited by
 /// the shutdown's `take_sole`, within the shutdown's own timeout.
 ///

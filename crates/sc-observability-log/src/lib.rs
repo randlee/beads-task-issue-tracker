@@ -60,7 +60,7 @@
 //!   admission. No control operation can shut the logger down,
 //!   keep it alive, or yield a `LogGuard` or the mutable `Logger`.
 //! - **One submission core, one writer.** The facade, the macros and
-//!   [`LogControl::submit`] enter the same guarded core (panic containment and
+//!   [`LogControl::try_log`] enter the same guarded core (panic containment and
 //!   reentrancy detection, entered once per record) and reach the same
 //!   `Logger`. Every rejection is counted under exactly one [`DropCause`]; the
 //!   facade and macros keep their unit return and discard the result only after
@@ -69,9 +69,9 @@
 //!   process identity (resolved once at `init`), trace context, redaction and
 //!   sink routing are filled by the bridge; no producer can supply them.
 //! - **Timeout versus final stop.** A shutdown that returns
-//!   [`ShutdownError::TimedOut`] leaves [`BridgeLifecycle::ShutdownTimedOut`]
-//!   while a detached helper finishes; late completion is observable as
-//!   [`BridgeLifecycle::Stopped`]. `Stopped` is final.
+//!   [`ShutdownError::TimedOut`] leaves [`LifecyclePhase::Stopping`] while a
+//!   detached helper finishes; late completion is observable as
+//!   [`LifecyclePhase::Stopped`]. `Stopped` is final.
 //! - **Serializable contracts.** [`BridgeHealthReport`] (versioned by
 //!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`BridgeEvent`] and the native operation
 //!   errors are plain serde data with `snake_case` tagged discriminants and
@@ -323,7 +323,7 @@ impl LogGuard {
     /// `timeout` (the helper is detached), [`FlushError::Logger`] when a sink flush
     /// fails, and [`FlushError::HelperSpawn`] / [`FlushError::HelperLost`] when the
     /// helper thread cannot start or ends without a result.
-    /// [`FlushError::ShutDown`] cannot occur while the guard is alive.
+    /// [`FlushError::NotRunning`] cannot occur while the guard is alive.
     pub fn flush(&self, timeout: Duration) -> Result<(), FlushError> {
         handle::flush_installed(timeout)
     }
@@ -331,13 +331,13 @@ impl LogGuard {
     /// The final shutdown: threshold → Off, empty the slot, flush, `Logger::shutdown`.
     ///
     /// Bounded by `timeout`. Consumes the guard, so it runs at most once. See
-    /// [`BridgeLifecycle`] for the lifecycle each result leaves behind.
+    /// [`LifecyclePhase`] for the lifecycle each result leaves behind.
     ///
     /// # Errors
     ///
     /// Returns [`ShutdownError::TimedOut`] when sole ownership, the final flush and
     /// the writer join do not finish within `timeout` (a detached helper keeps
-    /// going; the lifecycle is `ShutdownTimedOut` until it completes and publishes
+    /// going; the lifecycle is `Stopping` until it completes and publishes
     /// `Stopped`), [`ShutdownError::FinalFlush`] when the final flush fails (the
     /// logger is still shut down), and [`ShutdownError::HelperSpawn`] /
     /// [`ShutdownError::HelperLost`] for helper thread failures.
