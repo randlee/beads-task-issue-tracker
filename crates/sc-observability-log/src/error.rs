@@ -16,12 +16,12 @@ use crate::error_codes;
 
 /// Projects a core diagnostic without retaining its opaque source error.
 pub(crate) fn diagnostic_from_info(
-    source: &(impl DiagnosticInfo + std::fmt::Display),
+    source: &impl DiagnosticInfo,
 ) -> sc_observability_types::OperationDiagnostic {
     let diagnostic = source.diagnostic();
     sc_observability_types::OperationDiagnostic {
         code: diagnostic.code.clone(),
-        message: source.to_string(),
+        message: diagnostic.message.clone(),
         remediation: diagnostic.remediation.clone(),
         at: diagnostic.timestamp,
     }
