@@ -136,6 +136,21 @@ static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
 
 type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
 
+#[cfg(test)]
+static SHUTDOWN_WORK_HOOK: OnceLock<Mutex<Option<ShutdownCommand>>> = OnceLock::new();
+
+#[cfg(test)]
+fn run_shutdown_work_hook() {
+    let hook = SHUTDOWN_WORK_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// Reserves the sole shutdown worker before the global facade is installed.
 /// A failed reservation is therefore an initialization failure rather than a
 /// partially usable bridge that discovers it cannot complete its lifecycle.
@@ -609,6 +624,8 @@ pub(crate) fn shutdown_installed(
     let (result_tx, result_rx) = mpsc::sync_channel(1);
     let command: ShutdownCommand = Box::new(move || {
         let result = catch_unwind(AssertUnwindSafe(|| {
+            #[cfg(test)]
+            run_shutdown_work_hook();
             let sole = take_sole(installed);
             let flushed = sole.logger.flush();
             let stopped = sole.logger.shutdown();
@@ -758,29 +775,55 @@ mod tests {
 
     #[test]
     fn reserved_shutdown_worker_publishes_failure_after_a_waiter_times_out() {
+        let root = std::env::temp_dir().join(format!("bp3-worker-{}", std::process::id()));
+        let service = sc_observability_types::ServiceName::new("bp3-worker");
+        assert!(service.is_ok());
+        let Some(service) = service.ok() else {
+            return;
+        };
+        let mut config = sc_observability::LoggerConfig::default_for(service.clone(), root);
+        config.enable_console_sink = false;
+        let logger = sc_observability::Logger::new(config);
+        assert!(logger.is_ok());
+        let Some(logger) = logger.ok() else {
+            return;
+        };
+        let action = sc_observability_types::ActionName::new("log.record");
+        assert!(action.is_ok());
+        let Some(action) = action.ok() else {
+            return;
+        };
+        let installed = Arc::new(Installed {
+            logger,
+            service,
+            identity: sc_observability_types::ProcessIdentity::default(),
+            options: crate::BridgeOptions {
+                default_action: action,
+                parse_bracket_action: false,
+            },
+        });
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        *SHUTDOWN_WORK_HOOK
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(move || {
+            let _ = entered_tx.send(());
+            let _ = release_rx.recv();
+            panic!("test worker failure");
+        }));
         assert!(reserve_shutdown_coordinator().is_ok());
         assert!(begin_shutdown());
         set_lifecycle(BridgeLifecycle::ShuttingDown);
-        let Some(coordinator) = shutdown_coordinator() else {
-            return;
-        };
-        let sent = coordinator.work.send(Box::new(|| {
-            std::thread::sleep(Duration::from_millis(40));
-            let panic = catch_unwind(AssertUnwindSafe(|| panic!("test worker failure")));
-            if panic.is_err() {
-                save_unconfirmed(UnconfirmedShutdown::HelperLost {
-                    diagnostic: diagnostic(
-                        crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
-                        "test worker failed after owner timeout".to_owned(),
-                    ),
-                });
-            }
-        }));
-        assert!(sent.is_ok());
+        let owner =
+            std::thread::spawn(move || shutdown_installed(installed, Duration::from_millis(1)));
+        assert!(entered_rx.recv().is_ok());
         assert!(matches!(
             wait_stopped(Duration::from_millis(1)),
             Err(crate::WaitError::TimedOut { .. })
         ));
+        assert!(release_tx.send(()).is_ok());
+        assert!(owner.join().is_ok());
         assert!(matches!(
             wait_stopped(Duration::from_secs(1)),
             Ok(ShutdownReport {
