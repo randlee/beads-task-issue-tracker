@@ -1,6 +1,6 @@
 ---
 id: SC-OBS-B.P3-source
-status: in_progress
+status: complete
 qa_status: not_dispatched
 merge_status: unmerged
 branch: feature/sc-obs-B-P3-runtime-bridge

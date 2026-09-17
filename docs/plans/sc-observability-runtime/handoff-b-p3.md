@@ -1,27 +1,25 @@
-# B.P3 BTIT source implementation progress record
+# B.P3 BTIT source handoff
 
-This is a provisional progress record, not source-completion evidence. The
-active source layer remains under contract correction and is not ready for
-independent critical review. It does not approve the destination copy, runtime
-public API, registry publication, merge, or QA.
+This is the complete BTIT source-implementation record. It is not independent
+source QA or acceptance, a destination copy, a merge decision, or a publication
+decision. Those remain separately owned gates.
 
-## Revisions and staged package provenance
+## Immutable inputs and source revision
 
 | Item | Value |
 | --- | --- |
-| Initial implementation source | `8c8e2565ab44a222bb1c64b8f855f597cf2086db` |
-| Reviewed target bridge contract | `84b32e9d6718418371ffd25a3de52346278725ca` |
-| B.P2 candidate version | `1.3.0` (staged; never published) |
+| BTIT implementation SHA | `c31095326bde604557dd1aa51c7252db7b3d6284` |
+| BTIT branch / target | `feature/sc-obs-B-P3-runtime-bridge` → `develop` |
+| Draft review | [BTIT PR #86](https://github.com/randlee/beads-task-issue-tracker/pull/86) |
+| Reviewed target and runtime contracts | `84b32e9d6718418371ffd25a3de52346278725ca` |
+| B.P2 candidate | `1.3.0`, staged only; never published |
 | B.P2 package source | `561f89923c7f4fdfa9cd0fafa929a5d6dc94dfe5` |
 | B.P2 stage manifest SHA-256 | `822ff4494dcfbf92b3dcf47fa3fceac8df00b7e28baf7777b6a5aa1147078077` |
-| B.P2 retained platform qualification | run `35179919596`, validation head `31d47d3d62572dbf46fc31189638cfa38c3b19b8` |
+| B.P2 qualification | run `35179919596`, validation `31d47d3d62572dbf46fc31189638cfa38c3b19b8` |
 
-The workspace never selects a sibling source checkout or a presumed registry
-release. `scripts/prepare_bp2_stage.py` validates the exact final manifest,
-candidate identity, every consumed archive digest and its declared package file
-list before extracting the two Cargo dependencies to ignored `.bp2-stage/`.
-The CI workflow downloads the same `bp2-candidate-stage` artifact before every
-Rust job and runs that verifier.
+`scripts/prepare_bp2_stage.py` verifies candidate identity, manifest, archive
+digests, and declared file lists before extracting consumed packages under
+ignored `.bp2-stage/`. The source never selects a sibling checkout or registry release.
 
 | Archive | SHA-256 |
 | --- | --- |
@@ -30,54 +28,67 @@ Rust job and runs that verifier.
 | `sc-observe-1.3.0.crate` | `6834769a32ee2c741a6ee050cc10a9b1a4a20f5cc0284a158b522ca22d6d581b` |
 | `sc-observability-otlp-1.3.0.crate` | `56bfd2a95dca677d4b173559070c17a1cdab6875a57904fe10e329cba4198a59` |
 
-## Implemented progress (not final disposition)
+## Export and boundary disposition
 
-- Removed the independent bridge `THRESHOLD`, `THRESHOLD_OFF`,
-  `encode_threshold`, `level_enabled`, and `to_log_level_filter` policy path.
-  `LevelOwner` from the staged core is the one mutable filter state; the fixed
-  `log` facade ceiling remains Trace so compiled Debug/Trace callsites survive.
-- Added owner-only `LogGuard::elevate_level` and `reset_level`; each rejects an
-  unavailable static cap before mutating core state. `LogControl` remains
-  cloneable, non-owning, and has no owner/shutdown/mutation conversion.
-- Added typed `BridgeEvent`, `EmitOutcome` (the core `AdmissionOutcome` alias),
-  direct `try_log`, query, non-owning drop snapshot and `wait_stopped` surface.
-  Direct, facade, and macro paths use staged `try_log_with_outcome` and the
-  same reentrancy/containment/drop accounting boundary. Lifecycle/result
-  retention, old export reconciliation and the complete fixture matrix remain
-  active correction work.
-- Added the reviewed direct/control errors and `LifecyclePhase`, tagged Serde
-  forms, stable code/remediation methods, typed field-key rejection and
-  unconfirmed-shutdown result. Retained control observation does not assert a
-  stopped writer when completion is unconfirmed.
-- Extended bridge health with the staged core’s configured/effective level and
-  revision snapshot; existing compatibility projections remain available while
-  B.1 owns final destination export acceptance.
+The final root inventory was inspected from `lib.rs`, `control.rs`, `error.rs`,
+`health.rs`, `error_codes.rs`, and macro roots at the implementation SHA.
 
-## Provisional validation and raw evidence
+| Family | Final disposition |
+| --- | --- |
+| Existing bridge root | `init`, `BridgeOptions`, tracing-style `Level`, `DroppedEvents`, `DropCause`, `LogGuard`, default timeout, and macros are preserved with target lifecycle/accounting behavior. `LogGuard` alone owns elevation/reset and shutdown. |
+| Core/neutral values | `LoggerConfig`, core name/value types, `LogEvent`, query/snapshot, correlation/trace/outcome, `OperationDiagnostic`, `AdmissionOutcome` as `EmitOutcome`, and runtime level types/errors are re-exported. |
+| Direct/control surface | `BridgeEvent`, cloneable non-owning `LogControl`, `try_log`, query, bounded flush, health, path, drop snapshot, and `wait_stopped` are native. Control has no elevation, reset, shutdown, or owner conversion. |
+| Errors/completion | Typed `InitError`, `FlushError`, `ShutdownError`, `EmitError`, `ControlError`, `WaitError`, `FieldKeyError`, `LifecyclePhase`, `ShutdownOutcome`, `UnconfirmedShutdown`, and `ShutdownReport` replace opaque adapters. Operation errors are tagged serde data with stable code/remediation and no source chain. |
+| Health/registry | `BridgeHealthReport` v1 retains core logging health, exact drop/lifecycle/path and coherent level state. The seven baseline codes plus nine target codes are in unique `ALL`. |
+| Removed adapter surface | Deleted `report.rs`, `StructuredRecord`, `SubmitOutcome`, `SubmitError`, `FailureReport`, `CONTROL_SCHEMA_VERSION`, and `THRESHOLD`, `THRESHOLD_OFF`, `encode_threshold`, `level_enabled`, `to_log_level_filter`; final whole-crate scan is empty. |
+| Hidden macro support | `__private` remains exact-version macro support: callsite/context/mapping, fields/labels, event assembly, guard/accounting dispatch, and parser expansion. External macro grammar and compile-fail ownership fixtures are the boundary. |
 
-Performed locally after reconstructing exact archives from:
+The staged-core `LevelOwner` is the single direct/facade/macro filter authority.
+The fixed facade ceiling is Trace; unsupported levels fail before mutation/global
+installation. Lifecycle, bounded flush, one shutdown coordinator, retained
+completion, panic/reentrancy containment, and exact-once rejection accounting
+are covered by the source fixtures.
 
-`/Users/randlee/.config/atm/share/sc-obs/bp2-evidence/ci-35179919596/bp2-candidate-stage/`
+## Final validation and retained evidence
+
+Local commands at `c31095326bde604557dd1aa51c7252db7b3d6284`:
 
 ```text
-python3 scripts/prepare_bp2_stage.py --stage …/bp2-candidate-stage
-verified B.P2 stage …/stage-manifest.json (822ff449…7078077)
-cargo test --workspace
-all workspace tests passed
-cargo clippy --no-deps -p beads-issue-tracker -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings
-Finished …
-cargo fmt --check --all
-python3 scripts/check_version_sync.py
-version sync OK: app 1.24.5, rust toolchain 1.98.1
+cargo test --workspace                                      PASS
+cargo fmt --check -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check  PASS
+cargo clippy --locked --no-deps -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings  PASS
+cargo test --release --locked -p sc-observability-log --test runtime_level_bridge  PASS
+cargo test --release --locked -p sc-observability-log --features static_level_cap_test --test static_level_cap  PASS
+cargo test --locked -p sc-observability-log --features test_hooks --test init_runtime_start  PASS
+cargo tree --locked -p sc-observability-log -e normal --target all … | diff - crates/runtime-deps.txt  PASS
+test-isolation contract                                      PASS
+cargo rustdoc --locked -p sc-observability-log -- -D missing-docs  PASS
+cargo rustdoc --locked -p sc-observability-log-macros -- -D missing-docs  PASS
 ```
 
-`crates/sc-observability-log/tests/runtime_level_bridge.rs` is the direct,
-facade, macro, owner, level-revision and shutdown-observation fixture. Existing
-macro grammar, external consumer and compile-fail ownership fixtures remain in
-the package suite. The required three-platform source qualification is prepared
-by `.github/workflows/ci.yml` on the final source branch; its raw run URLs and
-results must be appended by independent QA rather than inferred from B.P2.
+The workspace run includes bridge/macro/API/UI/consumer checks, direct/facade/
+macro accounting, health retention, bounded flush/shutdown races, repeated
+waiters, reinstallation, static-cap, startup failure, native error serde/clone,
+and compile-fail control-ownership fixtures. Lead-focused artifacts are:
 
-Independent critical review/re-review, final source acceptance, and complete
-cross-platform qualification remain pending. No B.1 copy or B.7 publication
-was performed.
+- `~/.config/atm/share/sc-obs/bp3-evidence/d7a26ded/lead-focused-fixtures.log`
+- `~/.config/atm/share/sc-obs/bp3-evidence/c3109532/lead-native-data.log`
+
+Final platform qualification is [CI run 35185604331](https://github.com/randlee/beads-task-issue-tracker/actions/runs/35185604331), explicitly at the implementation SHA and after downloading/verifying the B.P2 stage:
+
+| Required job | Result |
+| --- | --- |
+| `crates (ubuntu-latest)` | PASS, including static-cap, dependency, isolation, rustdoc, and MSRV gates |
+| `crates (macos-latest)` | PASS |
+| `crates (windows-latest)` | PASS |
+| `rust quality` on Ubuntu/macOS/Windows | PASS |
+
+The unrelated `backend (windows-latest)` repository job was still running when
+this handoff was written; it is not substituted for, or claimed as, B.P3 bridge
+qualification. Retain its final state with the CI record.
+
+## Handoff boundary
+
+Implementation completeness is recorded. Independent critical review/re-review
+and source QA, sc-observability acceptance, B.1 destination copy, merge, and
+B.7 publication remain pending and are not implied by this record.
