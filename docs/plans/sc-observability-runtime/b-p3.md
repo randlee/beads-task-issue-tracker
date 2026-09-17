@@ -25,7 +25,10 @@ summarizes rather than narrows them.
 
 Phase lead aobs accepts the target design at that revision for BTIT implementation,
 based on [independent contract QA2 PASS](https://github.com/randlee/sc-observability/pull/111#issuecomment-5708115438).
-This is not acceptance of BTIT source. Runtime public-API acceptance remains
+QA later disclosed missing mandatory service-hardening coverage; source work
+requires the registered `phase-b-bp3-service-addendum` result before starting.
+The design decision is conditional on that coverage passing or a documented
+reviewer scope-skip. This is not acceptance of BTIT source. Runtime public-API acceptance remains
 owner-deferred to phase completion; publication remains deferred to B.7.
 
 Consume the final immutable B.P2 staged 1.3.0 package set from the completed
