@@ -125,6 +125,10 @@ pub use sc_observability_types::{
     ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
     TargetCategory, Timestamp,
 };
+
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub use handle::fail_next_shutdown_coordinator_reservation;
 #[doc(inline)]
 pub use sc_observability_types::{
     AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource,

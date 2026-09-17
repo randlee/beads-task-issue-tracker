@@ -134,6 +134,9 @@ struct ShutdownCoordinator {
 
 static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
 
+#[cfg(feature = "test_hooks")]
+static FAIL_NEXT_COORDINATOR_RESERVATION: AtomicBool = AtomicBool::new(false);
+
 type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
 
 #[cfg(test)]
@@ -155,6 +158,12 @@ fn run_shutdown_work_hook() {
 /// A failed reservation is therefore an initialization failure rather than a
 /// partially usable bridge that discovers it cannot complete its lifecycle.
 pub(crate) fn reserve_shutdown_coordinator() -> Result<(), std::io::Error> {
+    #[cfg(feature = "test_hooks")]
+    if FAIL_NEXT_COORDINATOR_RESERVATION.swap(false, Ordering::SeqCst) {
+        return Err(std::io::Error::other(
+            "injected coordinator reservation failure",
+        ));
+    }
     if SHUTDOWN_COORDINATOR.get().is_some() {
         return Ok(());
     }
@@ -175,6 +184,12 @@ pub(crate) fn reserve_shutdown_coordinator() -> Result<(), std::io::Error> {
         work,
     });
     Ok(())
+}
+
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn fail_next_shutdown_coordinator_reservation() {
+    FAIL_NEXT_COORDINATOR_RESERVATION.store(true, Ordering::SeqCst);
 }
 
 fn shutdown_coordinator() -> Option<&'static ShutdownCoordinator> {
