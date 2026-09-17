@@ -645,7 +645,9 @@ mod tests {
                 timeout: LOG_IO_TIMEOUT,
             },
             ClearError::Flush {
-                source: FlushError::ShutDown,
+                source: FlushError::NotRunning {
+                    phase: sc_observability_log::LifecyclePhase::Stopped,
+                },
             },
             ClearError::Truncate {
                 source: std::io::Error::other("truncate"),
