@@ -837,11 +837,11 @@ mod tests {
             wait_stopped(Duration::from_millis(1)),
             Err(crate::WaitError::TimedOut { .. })
         ));
-        assert!(release_tx.send(()).is_ok());
         assert!(matches!(
             owner.join(),
             Ok(Err(ShutdownError::TimedOut { .. }))
         ));
+        assert!(release_tx.send(()).is_ok());
         assert!(matches!(
             wait_stopped(Duration::from_secs(1)),
             Ok(ShutdownReport {
