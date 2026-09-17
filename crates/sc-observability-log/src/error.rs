@@ -200,13 +200,11 @@ impl EmitError {
             Self::NotRunning { .. } => {
                 Remediation::not_recoverable("the owner has stopped the bridge")
             }
-            Self::Reentrant => Remediation::recoverable(
-                "emit after the enclosing logger callback returns",
-                std::iter::empty::<String>(),
+            Self::Reentrant => Remediation::not_recoverable(
+                "remove logging from formatter, redactor, or diagnostic callbacks",
             ),
-            Self::Panicked => Remediation::recoverable(
-                "inspect the sink or redactor callback",
-                std::iter::empty::<String>(),
+            Self::Panicked => Remediation::not_recoverable(
+                "repair the panicking callback; do not retry implicitly",
             ),
         }
     }
@@ -218,9 +216,8 @@ impl ControlError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
-            Self::Query { diagnostic } | Self::Unavailable { diagnostic } => {
-                diagnostic.code.clone()
-            }
+            Self::Query { diagnostic } => diagnostic.code.clone(),
+            Self::Unavailable { .. } => error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE,
         }
     }
 
@@ -228,9 +225,10 @@ impl ControlError {
     #[must_use]
     pub fn remediation(&self) -> Remediation {
         match self {
-            Self::Query { diagnostic } | Self::Unavailable { diagnostic } => {
-                diagnostic.remediation.clone()
-            }
+            Self::Query { diagnostic } => diagnostic.remediation.clone(),
+            Self::Unavailable { .. } => Remediation::not_recoverable(
+                "inspect retained logger health and lifecycle evidence",
+            ),
             Self::NotRunning { .. } => {
                 Remediation::not_recoverable("the owner has stopped the bridge")
             }
@@ -245,7 +243,7 @@ impl WaitError {
         match self {
             Self::NotStarted => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED,
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
-            Self::Unavailable { diagnostic } => diagnostic.code.clone(),
+            Self::Unavailable { .. } => error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE,
         }
     }
 
@@ -253,7 +251,9 @@ impl WaitError {
     #[must_use]
     pub fn remediation(&self) -> Remediation {
         match self {
-            Self::Unavailable { diagnostic } => diagnostic.remediation.clone(),
+            Self::Unavailable { .. } => Remediation::not_recoverable(
+                "inspect retained logger health and lifecycle evidence",
+            ),
             Self::NotStarted => Remediation::recoverable(
                 "initialize the bridge before waiting",
                 std::iter::empty::<String>(),
@@ -286,13 +286,13 @@ pub enum InitError {
         available: LevelFilter,
     },
     /// `ProcessIdentityPolicy::Resolver` failed, or `Auto` could not resolve a non-empty hostname.
-    #[error("process identity resolution failed")]
+    #[error("process identity resolution failed: {diagnostic}")]
     IdentityResolution {
         /// Stable diagnostic projected from the resolver failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// `sc_observability::Logger::new` failed.
-    #[error("sc-observability logger construction failed")]
+    #[error("sc-observability logger construction failed: {diagnostic}")]
     Logger {
         /// Stable diagnostic projected from the core construction failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
@@ -316,19 +316,19 @@ pub enum FlushError {
         timeout: Duration,
     },
     /// A sink flush failed or the writer disconnected.
-    #[error("sc-observability flush failed")]
+    #[error("sc-observability flush failed: {diagnostic}")]
     Logger {
         /// Stable diagnostic projected from the core flush failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The flush helper thread could not be started.
-    #[error("could not start the flush helper thread")]
+    #[error("could not start the flush helper thread: {diagnostic}")]
     HelperSpawn {
         /// Stable diagnostic for the helper-start failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The flush helper thread ended without a result.
-    #[error("the flush helper thread ended without a result")]
+    #[error("the flush helper thread ended without a result: {diagnostic}")]
     HelperLost {
         /// Stable diagnostic for the missing helper result.
         diagnostic: sc_observability_types::OperationDiagnostic,
@@ -353,19 +353,19 @@ pub enum ShutdownError {
         timeout: Duration,
     },
     /// The final flush failed; the logger was still shut down.
-    #[error("final flush failed; the logger was still shut down")]
+    #[error("final flush failed; the logger was still shut down: {diagnostic}")]
     FinalFlush {
         /// Stable diagnostic projected from the final core flush failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The shutdown helper thread could not be started.
-    #[error("could not start the shutdown helper thread")]
+    #[error("could not start the shutdown helper thread: {diagnostic}")]
     HelperSpawn {
         /// Stable diagnostic for the coordinator-send failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The shutdown helper thread ended without a result.
-    #[error("the shutdown helper thread ended without a result")]
+    #[error("the shutdown helper thread ended without a result: {diagnostic}")]
     HelperLost {
         /// Stable diagnostic for the missing coordinator result.
         diagnostic: sc_observability_types::OperationDiagnostic,
@@ -385,7 +385,7 @@ impl InitError {
             Self::IdentityResolution { diagnostic } | Self::Logger { diagnostic } => {
                 diagnostic.code.clone()
             }
-            Self::RuntimeStart { diagnostic } => diagnostic.code.clone(),
+            Self::RuntimeStart { .. } => error_codes::SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED,
         }
     }
 
@@ -405,7 +405,10 @@ impl InitError {
             Self::IdentityResolution { diagnostic } | Self::Logger { diagnostic } => {
                 diagnostic.remediation.clone()
             }
-            Self::RuntimeStart { diagnostic } => diagnostic.remediation.clone(),
+            Self::RuntimeStart { .. } => Remediation::recoverable(
+                "inspect thread and resource availability, then retry initialization explicitly",
+                std::iter::empty::<String>(),
+            ),
         }
     }
 }
@@ -416,9 +419,9 @@ impl FlushError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_FLUSH_TIMED_OUT,
-            Self::Logger { diagnostic }
-            | Self::HelperSpawn { diagnostic }
-            | Self::HelperLost { diagnostic } => diagnostic.code.clone(),
+            Self::Logger { diagnostic } => diagnostic.code.clone(),
+            Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+            Self::HelperLost { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
             Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
             Self::InProgress => error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
         }
@@ -432,18 +435,19 @@ impl FlushError {
                 "retry the flush later or raise the timeout",
                 ["a shutdown before the detached flush returns reports ShutdownError::TimedOut"],
             ),
-            Self::Logger { diagnostic }
-            | Self::HelperSpawn { diagnostic }
-            | Self::HelperLost { diagnostic } => diagnostic.remediation.clone(),
+            Self::Logger { diagnostic } => diagnostic.remediation.clone(),
+            Self::HelperSpawn { .. } => Remediation::not_recoverable(
+                "inspect resource availability and retained logger health; completion is unconfirmed",
+            ),
+            Self::HelperLost { .. } => Remediation::not_recoverable(
+                "inspect retained lifecycle and health; do not claim worker completion",
+            ),
             Self::NotRunning { .. } => Remediation::not_recoverable(
                 "the lifecycle owner has shut the logger down; the final shutdown flushed what was queued",
             ),
             Self::InProgress => Remediation::recoverable(
                 "wait for the previous flush to finish, then retry",
-                [
-                    "BridgeHealthReport.helpers.flush_in_flight turns false when it finishes",
-                    "a flush that never finishes points at a stuck sink or disk",
-                ],
+                ["wait for the in-flight flush before making an explicit new request"],
             ),
         }
     }
@@ -455,9 +459,9 @@ impl ShutdownError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT,
-            Self::FinalFlush { diagnostic }
-            | Self::HelperSpawn { diagnostic }
-            | Self::HelperLost { diagnostic } => diagnostic.code.clone(),
+            Self::FinalFlush { diagnostic } => diagnostic.code.clone(),
+            Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+            Self::HelperLost { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
         }
     }
 
@@ -465,12 +469,17 @@ impl ShutdownError {
     #[must_use]
     pub fn remediation(&self) -> Remediation {
         match self {
-            Self::TimedOut { .. } => Remediation::not_recoverable(
-                "none needed at process exit; still-queued events may be lost",
+            Self::TimedOut { .. } => Remediation::recoverable(
+                "use control.wait_stopped to observe the original shutdown",
+                std::iter::empty::<String>(),
             ),
-            Self::FinalFlush { diagnostic }
-            | Self::HelperSpawn { diagnostic }
-            | Self::HelperLost { diagnostic } => diagnostic.remediation.clone(),
+            Self::FinalFlush { diagnostic } => diagnostic.remediation.clone(),
+            Self::HelperSpawn { .. } => Remediation::not_recoverable(
+                "inspect resource availability and logger health; completion is unconfirmed",
+            ),
+            Self::HelperLost { .. } => Remediation::not_recoverable(
+                "inspect saved lifecycle and health; do not claim worker completion",
+            ),
         }
     }
 }
@@ -832,6 +841,210 @@ mod tests {
             assert_eq!(error.code(), code);
             assert_non_empty(&error.remediation());
         }
+    }
+
+    fn assert_native_error_contract<T>(error: &T)
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + std::error::Error,
+    {
+        assert!(std::error::Error::source(error).is_none());
+        assert!(!error.to_string().is_empty());
+        let encoded = serde_json::to_value(error).unwrap();
+        let decoded: T = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+
+    macro_rules! assert_operation_contract {
+        ($error:expr, $code:expr) => {{
+            let error = $error;
+            assert_eq!(error.code(), $code);
+            assert_non_empty(&error.remediation());
+            assert_native_error_contract(&error);
+        }};
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the target contract requires this one exhaustive, auditable variant fixture"
+    )]
+    fn every_native_operation_error_variant_is_data_only_and_round_trips() {
+        let diagnostic = || projected("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC");
+
+        assert_operation_contract!(
+            InitError::AlreadyInitialized,
+            error_codes::SC_OBSERVABILITY_LOG_ALREADY_INITIALIZED
+        );
+        assert_operation_contract!(
+            InitError::ForeignLoggerInstalled,
+            error_codes::SC_OBSERVABILITY_LOG_FOREIGN_LOGGER_INSTALLED
+        );
+        assert_operation_contract!(
+            InitError::UnsupportedLevel {
+                configured: LevelFilter::Trace,
+                available: LevelFilter::Info,
+            },
+            error_codes::SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL
+        );
+        assert_operation_contract!(
+            InitError::IdentityResolution {
+                diagnostic: diagnostic(),
+            },
+            ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+        );
+        assert_operation_contract!(
+            InitError::Logger {
+                diagnostic: diagnostic(),
+            },
+            ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+        );
+        assert_operation_contract!(
+            InitError::RuntimeStart {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED
+        );
+
+        assert_operation_contract!(
+            FlushError::TimedOut {
+                timeout: Duration::from_millis(1),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_FLUSH_TIMED_OUT
+        );
+        assert_operation_contract!(
+            FlushError::Logger {
+                diagnostic: diagnostic(),
+            },
+            ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+        );
+        assert_operation_contract!(
+            FlushError::HelperSpawn {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED
+        );
+        assert_operation_contract!(
+            FlushError::HelperLost {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST
+        );
+        assert_operation_contract!(
+            FlushError::InProgress,
+            error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS
+        );
+        assert_operation_contract!(
+            FlushError::NotRunning {
+                phase: LifecyclePhase::Stopped,
+            },
+            error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING
+        );
+
+        assert_operation_contract!(
+            ShutdownError::TimedOut {
+                timeout: Duration::from_millis(1),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT
+        );
+        assert_operation_contract!(
+            ShutdownError::FinalFlush {
+                diagnostic: diagnostic(),
+            },
+            ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+        );
+        assert_operation_contract!(
+            ShutdownError::HelperSpawn {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED
+        );
+        assert_operation_contract!(
+            ShutdownError::HelperLost {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST
+        );
+
+        assert_operation_contract!(
+            EmitError::InvalidField {
+                raw_key: "invalid".to_owned(),
+                reason: FieldKeyError::Collision {
+                    other_raw_key: "other".to_owned(),
+                },
+            },
+            error_codes::SC_OBSERVABILITY_LOG_INVALID_FIELD
+        );
+        for error in [
+            EmitError::InvalidEvent {
+                diagnostic: diagnostic(),
+            },
+            EmitError::QueueFull {
+                diagnostic: diagnostic(),
+            },
+            EmitError::WriterDegraded {
+                diagnostic: diagnostic(),
+            },
+            EmitError::ShutdownTimedOut {
+                diagnostic: diagnostic(),
+            },
+        ] {
+            assert_eq!(
+                error.code(),
+                ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+            );
+            assert_non_empty(&error.remediation());
+            assert_native_error_contract(&error);
+        }
+        assert_operation_contract!(
+            EmitError::NotRunning {
+                phase: LifecyclePhase::Stopped,
+            },
+            error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING
+        );
+        assert_operation_contract!(
+            EmitError::Reentrant,
+            error_codes::SC_OBSERVABILITY_LOG_REENTRANT_EMIT
+        );
+        assert_operation_contract!(
+            EmitError::Panicked,
+            error_codes::SC_OBSERVABILITY_LOG_LOGGER_PANICKED
+        );
+
+        assert_operation_contract!(
+            ControlError::NotRunning {
+                phase: LifecyclePhase::Stopped,
+            },
+            error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING
+        );
+        assert_operation_contract!(
+            ControlError::Query {
+                diagnostic: diagnostic(),
+            },
+            ErrorCode::new_static("SC_OBSERVABILITY_LOG_NATIVE_DIAGNOSTIC")
+        );
+        assert_operation_contract!(
+            ControlError::Unavailable {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE
+        );
+
+        assert_operation_contract!(
+            WaitError::NotStarted,
+            error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_NOT_STARTED
+        );
+        assert_operation_contract!(
+            WaitError::TimedOut {
+                timeout: Duration::from_millis(1),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_SHUTDOWN_TIMED_OUT
+        );
+        assert_operation_contract!(
+            WaitError::Unavailable {
+                diagnostic: diagnostic(),
+            },
+            error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE
+        );
     }
 
     fn submit_errors() -> Vec<SubmitError> {
