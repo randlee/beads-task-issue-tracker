@@ -96,6 +96,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
+use crate::health::BridgeLifecycle;
+
 #[doc(inline)]
 pub use control::{
     BridgeEvent, EmitOutcome, JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome,
@@ -108,11 +110,7 @@ pub use error::{
 #[doc(inline)]
 pub use error::{ShutdownOutcome, ShutdownReport, UnconfirmedShutdown};
 #[doc(inline)]
-pub use health::{
-    BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport, BridgeHealthState, BridgeLifecycle,
-    FileSinkHealth, HealthDiagnostic, HelperHealth, LoggerHealth, QueueHealth, SinkHealthSnapshot,
-    SinkStatus, WriterStatus,
-};
+pub use health::{BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport};
 #[doc(inline)]
 pub use report::{
     CONTROL_SCHEMA_VERSION, Failure, FailureReport, FlushFailure, InitFailure, ShutdownFailure,
@@ -122,8 +120,8 @@ pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
 #[doc(inline)]
 pub use sc_observability_types::{
-    ActionName, ErrorCode, LevelFilter, ProcessIdentityPolicy, Remediation, ServiceName,
-    TargetCategory, Timestamp,
+    ActionName, ErrorCode, LevelFilter, LoggingHealthReport, ProcessIdentityPolicy, Remediation,
+    ServiceName, TargetCategory, Timestamp,
 };
 
 #[cfg(feature = "test_hooks")]
@@ -360,8 +358,11 @@ impl LogGuard {
     }
 
     /// Read-only health snapshot; same as [`LogControl::health`].
-    #[must_use]
-    pub fn health(&self) -> BridgeHealthReport {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::Unavailable`] when no readable core report is retained.
+    pub fn health(&self) -> Result<BridgeHealthReport, ControlError> {
         health::snapshot()
     }
 }
@@ -420,11 +421,7 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             });
         }
     };
-    let (service, enable_file_sink, enable_console_sink) = (
-        config.service_name.clone(),
-        config.enable_file_sink,
-        config.enable_console_sink,
-    );
+    let (service, enable_file_sink) = (config.service_name.clone(), config.enable_file_sink);
     let (logger, level_owner) = match sc_observability::Logger::new_with_level_owner(config) {
         Ok(logger) => logger,
         Err(source) => {
@@ -448,7 +445,9 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             },
         });
     }
-    let active_log_path = enable_file_sink.then(|| logger.health().active_log_path);
+    let initial_report = logger.health();
+    let active_log_path = enable_file_sink.then(|| initial_report.active_log_path.clone());
+    let level_state = logger.level_state();
     let installed = Arc::new(Installed {
         logger,
         service,
@@ -464,11 +463,11 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
     }
     // The facade stays at Trace so compiled debug/trace sites survive. The core
     // LevelOwner is the sole runtime filter for direct, facade, and macro paths.
-    health::set_sink_config(health::SinkConfig {
-        file_enabled: enable_file_sink,
-        console_enabled: enable_console_sink,
+    health::set_snapshot_config(health::SinkConfig {
         active_log_path: active_log_path.clone(),
+        level_state,
     });
+    health::store_report(initial_report);
     *SLOT.write().unwrap_or_else(PoisonError::into_inner) = Some(installed);
     handle::set_lifecycle(BridgeLifecycle::Running);
     log::set_max_level(log::LevelFilter::Trace);

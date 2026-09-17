@@ -86,7 +86,7 @@ fn run_child(root: &Path) {
         "foreign_logger_rejected": foreign_rejected,
         "submit_after": submit_after,
         "flush_after": flush_after,
-        "health": control.health(),
+        "health": control.health().unwrap(),
         "active_log_path": control.active_log_path(),
     });
     // libtest may print "test <name> ... " on the same line first.
@@ -141,9 +141,8 @@ fn run_parent() {
     );
     assert_eq!(result["flush_after"]["failure"]["kind"], "shut_down");
     assert_eq!(result["health"]["lifecycle"], "stopped");
-    assert_eq!(result["health"]["state"], "unavailable");
-    assert_eq!(result["health"]["logger"]["writer_state"], "stopped");
-    assert_eq!(result["health"]["dropped_events"]["not_installed"], 1);
+    assert_eq!(result["health"]["logging"]["writer_state"], "Stopped");
+    assert_eq!(result["health"]["dropped"]["not_installed"], 1);
 
     let path = PathBuf::from(result["active_log_path"].as_str().unwrap());
     assert!(path.starts_with(root.path()));

@@ -132,7 +132,7 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
         );
     }
 
-    let health = guard.health();
+    let health = guard.health().unwrap();
     assert_eq!(health.configured_level, LevelFilter::Info);
     assert_eq!(health.effective_level, LevelFilter::Trace);
     assert!(health.level_revision >= 2);

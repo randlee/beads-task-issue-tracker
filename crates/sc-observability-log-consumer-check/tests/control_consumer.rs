@@ -13,8 +13,8 @@
 use std::time::Duration;
 
 use sc_observability_log::{
-    ActionName, BridgeHealthState, BridgeLifecycle, BridgeOptions, Failure, FlushFailure,
-    LevelFilter, LoggerConfig, ServiceName, SinkStatus,
+    ActionName, BridgeOptions, Failure, FlushFailure, LevelFilter, LifecyclePhase, LoggerConfig,
+    ServiceName,
 };
 use sc_observability_log_consumer_check::status::read_status;
 
@@ -49,10 +49,9 @@ fn consumer_reads_health_and_flushes_through_control_only() {
     sc_observability_log::info!(target: "consumer", "record seen by the consumer");
     let running = read_status(&control, Duration::from_secs(5));
     assert_eq!(running.flush, Ok(()));
-    assert_eq!(running.health.lifecycle, BridgeLifecycle::Running);
-    assert_eq!(running.health.state, BridgeHealthState::Healthy);
-    assert_eq!(running.health.file_sink.status, SinkStatus::Healthy);
-    let path = running.health.file_sink.active_log_path.clone().unwrap();
+    let running_health = running.health.unwrap();
+    assert_eq!(running_health.lifecycle, LifecyclePhase::Running);
+    let path = running_health.active_log_path.clone().unwrap();
     assert!(
         std::fs::read_to_string(&path)
             .unwrap()
@@ -68,5 +67,5 @@ fn consumer_reads_health_and_flushes_through_control_only() {
         report.code,
         sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING
     );
-    assert_eq!(stopped.health.lifecycle, BridgeLifecycle::Stopped);
+    assert_eq!(stopped.health.unwrap().lifecycle, LifecyclePhase::Stopped);
 }

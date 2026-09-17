@@ -12,7 +12,7 @@ use std::time::Duration;
 use sc_observability_types::{DiagnosticInfo, ErrorCode, LevelFilter, Remediation};
 use serde::{Deserialize, Serialize};
 
-use crate::{BridgeLifecycle, error_codes};
+use crate::error_codes;
 
 /// Projects a core diagnostic without retaining its opaque source error.
 pub(crate) fn diagnostic_from_info(
@@ -416,9 +416,9 @@ impl FlushError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::TimedOut { .. } => error_codes::SC_OBSERVABILITY_LOG_FLUSH_TIMED_OUT,
-            Self::Logger { diagnostic } => diagnostic.code.clone(),
-            Self::HelperSpawn { diagnostic } => diagnostic.code.clone(),
-            Self::HelperLost { diagnostic } => diagnostic.code.clone(),
+            Self::Logger { diagnostic }
+            | Self::HelperSpawn { diagnostic }
+            | Self::HelperLost { diagnostic } => diagnostic.code.clone(),
             Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
             Self::InProgress => error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
         }
@@ -494,7 +494,7 @@ pub enum SubmitError {
     #[error("the logger is not running (lifecycle {lifecycle:?}); the record was dropped")]
     Stopped {
         /// The lifecycle phase observed when the record was rejected.
-        lifecycle: BridgeLifecycle,
+        lifecycle: LifecyclePhase,
     },
     /// Submitted while this thread was already inside a submission (a sink, redactor or panic hook).
     #[error("submitted from inside another submission on this thread; the record was dropped")]
@@ -608,7 +608,7 @@ impl SubmitError {
             DropCause::WriterDegraded => Self::WriterDegraded,
             DropCause::ShutdownTimedOut => Self::BackendShutdownTimedOut,
             DropCause::NotInstalled => Self::Stopped {
-                lifecycle: crate::handle::lifecycle(),
+                lifecycle: crate::handle::lifecycle_phase(),
             },
             DropCause::LoggerPanicked => Self::ContainedPanic,
             DropCause::ReentrantEmit => Self::Reentrant,
@@ -846,7 +846,7 @@ mod tests {
             }),
             SubmitError::InvalidInput(InvalidInputReason::RejectedByLogger),
             SubmitError::Stopped {
-                lifecycle: BridgeLifecycle::Stopped,
+                lifecycle: LifecyclePhase::Stopped,
             },
             SubmitError::Reentrant,
             SubmitError::WriterDegraded,
@@ -884,7 +884,7 @@ mod tests {
             serde_json::json!({"kind": "invalid_input", "reason": "reserved_field_key", "key": "sc_observability_log.x"})
         );
         let stopped = SubmitError::Stopped {
-            lifecycle: BridgeLifecycle::Failed,
+            lifecycle: LifecyclePhase::Failed,
         };
         assert_eq!(
             serde_json::to_value(&stopped).unwrap(),

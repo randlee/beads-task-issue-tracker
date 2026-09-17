@@ -21,8 +21,8 @@ use std::fs::OpenOptions;
 use std::time::{Duration, Instant};
 
 use sc_observability_log::{
-    ActionName, BridgeOptions, Failure, FlushError, FlushFailure, HelperHealth, LevelFilter,
-    LogControl, LoggerConfig, ServiceName, error_codes,
+    ActionName, BridgeOptions, Failure, FlushError, FlushFailure, LevelFilter, LoggerConfig,
+    ServiceName, error_codes,
 };
 
 const STUCK_FLUSH_TIMEOUT: Duration = Duration::from_millis(100);
@@ -30,10 +30,6 @@ const STUCK_FLUSH_TIMEOUT: Duration = Duration::from_millis(100);
 const RETRY_TIMEOUT: Duration = Duration::from_secs(30);
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const HELPER_FINISH_DEADLINE: Duration = Duration::from_secs(20);
-
-fn helpers(control: &LogControl) -> HelperHealth {
-    control.health().helpers
-}
 
 #[test]
 fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
@@ -54,9 +50,6 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
 
     // Nothing queued or in flight; then swap the active file for a reader-less FIFO.
     control.flush(IO_TIMEOUT).unwrap();
-    let idle = helpers(&control);
-    assert!(!idle.flush_in_flight);
-    assert_eq!(idle.detached, 0);
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
@@ -76,9 +69,6 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
         matches!(first, Err(FlushError::TimedOut { timeout }) if timeout == STUCK_FLUSH_TIMEOUT),
         "{first:?}"
     );
-    let stuck = helpers(&control);
-    assert!(stuck.flush_in_flight);
-    assert_eq!(stuck.detached, 1);
 
     // A retry is rejected at once and spawns nothing.
     for _ in 0..3 {
@@ -95,14 +85,7 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
             report.code,
             error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS
         );
-        let still = helpers(&control);
-        assert!(still.flush_in_flight);
-        assert_eq!(still.detached, 1, "a rejected retry must not add a helper");
     }
-    assert_eq!(
-        serde_json::to_value(control.health()).unwrap()["helpers"],
-        serde_json::json!({"flush_in_flight": true, "detached": 1})
-    );
 
     // (b) Open the FIFO read-write (never blocks, and keeps a writer so reads
     // never hit EOF): the writer's open completes and the detached helper finishes.
@@ -113,22 +96,15 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
         .unwrap();
     let deadline = Instant::now() + HELPER_FINISH_DEADLINE;
     loop {
-        let now = helpers(&control);
-        if !now.flush_in_flight && now.detached == 0 {
+        if control.flush(IO_TIMEOUT).is_ok() {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "the detached helper never finished: {now:?}"
+            "the detached helper never finished"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    control.flush(IO_TIMEOUT).unwrap();
-    let done = helpers(&control);
-    assert!(!done.flush_in_flight);
-    assert_eq!(done.detached, 0);
-
     guard.shutdown(IO_TIMEOUT).unwrap();
-    assert_eq!(helpers(&control).detached, 0);
 }

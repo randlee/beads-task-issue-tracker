@@ -13,9 +13,10 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::__private::EventParts;
+use crate::health::BridgeLifecycle;
 use crate::{
-    BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, ShutdownOutcome,
-    ShutdownReport, UnconfirmedShutdown, health,
+    DropCause, DroppedEvents, FlushError, ShutdownError, ShutdownOutcome, ShutdownReport,
+    UnconfirmedShutdown, health,
 };
 use sc_observability::TryLogError;
 use sc_observability_types::DiagnosticInfo;
@@ -223,10 +224,10 @@ fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     if !matches!(&*state, ShutdownState::Complete(_)) {
-        *state = ShutdownState::Complete(Box::new(ShutdownReport {
-            outcome,
-            health: health::snapshot(),
-        }));
+        let Ok(health) = health::snapshot() else {
+            return;
+        };
+        *state = ShutdownState::Complete(Box::new(ShutdownReport { outcome, health }));
         coordinator.complete.notify_all();
     }
 }
@@ -508,14 +509,6 @@ impl Drop for Flight {
     }
 }
 
-/// Health of the bounded-operation helper threads.
-pub(crate) fn helper_health() -> crate::HelperHealth {
-    crate::HelperHealth {
-        flush_in_flight: FLUSH_IN_FLIGHT.load(Ordering::SeqCst),
-        detached: DETACHED_HELPERS.load(Ordering::SeqCst),
-    }
-}
-
 /// Runs `work` on a named helper thread and waits at most `timeout` for its result.
 ///
 /// A helper left running past `timeout` is counted in the process-wide detached
@@ -650,7 +643,7 @@ pub(crate) fn shutdown_installed(
             let flushed = sole.logger.flush();
             let stopped = sole.logger.shutdown();
             if let Some(report) = health::read_report(&stopped) {
-                health::store_final_report(report);
+                health::store_report(report);
             }
             let outcome = match &flushed {
                 Ok(()) => ShutdownOutcome::Stopped,
@@ -832,6 +825,12 @@ mod tests {
         let Some(logger) = logger.ok() else {
             return;
         };
+        let initial_report = logger.health();
+        health::set_snapshot_config(health::SinkConfig {
+            active_log_path: Some(initial_report.active_log_path.clone()),
+            level_state: logger.level_state(),
+        });
+        health::store_report(initial_report);
         let action = sc_observability_types::ActionName::new("log.record");
         assert!(action.is_ok());
         let Some(action) = action.ok() else {

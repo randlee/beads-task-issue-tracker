@@ -22,9 +22,8 @@ use std::time::{Duration, Instant};
 
 use sc_observability::{RedactionPolicy, Redactor};
 use sc_observability_log::{
-    ActionName, BridgeHealthState, BridgeLifecycle, BridgeOptions, JsonValue, Level, LevelFilter,
-    LoggerConfig, ServiceName, ShutdownError, StructuredRecord, SubmitError, SubmitOutcome,
-    WaitError, WriterStatus,
+    ActionName, BridgeOptions, JsonValue, Level, LevelFilter, LifecyclePhase, LoggerConfig,
+    ServiceName, ShutdownError, StructuredRecord, SubmitError, SubmitOutcome, WaitError,
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(150);
@@ -105,23 +104,18 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
     );
 
     // 2. Timed out is not final: lifecycle says so, nothing is accepted, no final report yet.
-    let pending = control.health();
-    assert_eq!(pending.lifecycle, BridgeLifecycle::ShuttingDown);
-    assert_eq!(pending.state, BridgeHealthState::Unavailable);
-    assert!(
-        pending.logger.is_none(),
-        "no final report before completion"
-    );
+    let pending = control.health().unwrap();
+    assert_eq!(pending.lifecycle, LifecyclePhase::Stopping);
     assert_eq!(
         serde_json::to_value(&pending).unwrap()["lifecycle"],
-        "shutting_down"
+        "stopping"
     );
-    assert_eq!(
+    assert!(matches!(
         control.submit(StructuredRecord::new(Level::ERROR, "shutdown_timeout")),
         Err(SubmitError::Stopped {
-            lifecycle: BridgeLifecycle::ShuttingDown
+            lifecycle: LifecyclePhase::Stopping
         })
-    );
+    ));
     assert!(matches!(
         control.wait_stopped(Duration::from_millis(10)),
         Err(WaitError::TimedOut { .. })
@@ -132,8 +126,8 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
     assert_eq!(blocked.join().unwrap(), Ok(SubmitOutcome::Accepted));
     let deadline = Instant::now() + LATE_COMPLETION_DEADLINE;
     let stopped = loop {
-        let health = control.health();
-        if health.lifecycle == BridgeLifecycle::Stopped {
+        let health = control.health().unwrap();
+        if health.lifecycle == LifecyclePhase::Stopped {
             break health;
         }
         assert!(
@@ -142,12 +136,11 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
         );
         std::thread::sleep(Duration::from_millis(10));
     };
-    let logger = stopped
-        .logger
-        .as_ref()
-        .expect("final report after late completion");
-    assert_eq!(logger.writer_state, WriterStatus::Stopped);
-    assert_eq!(logger.queue.depth, 0);
+    assert_eq!(
+        serde_json::to_value(stopped.logging.writer_state).unwrap(),
+        "Stopped"
+    );
+    assert_eq!(stopped.logging.queue_depth, 0);
     let first_report = control.wait_stopped(Duration::ZERO).unwrap();
     let second_report = control.wait_stopped(Duration::ZERO).unwrap();
     assert_eq!(

@@ -14,9 +14,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::health::BridgeLifecycle;
 use crate::{
-    BridgeHealthReport, BridgeLifecycle, ControlError, EmitError, FieldKeyError, FlushError, Level,
-    LifecyclePhase, SubmitError, handle, health, mapping,
+    BridgeHealthReport, ControlError, EmitError, FieldKeyError, FlushError, Level, LifecyclePhase,
+    SubmitError, handle, health, mapping,
 };
 
 /// A JSON value, as stored in `LogEvent.fields` (re-exported `serde_json::Value`).
@@ -94,8 +95,11 @@ impl LogControl {
     ///
     /// Never blocks on I/O or the writer queue and never panics. See
     /// [`BridgeHealthReport`] for the fields and the post-shutdown contract.
-    #[must_use]
-    pub fn health(&self) -> BridgeHealthReport {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::Unavailable`] when no readable core report is retained.
+    pub fn health(&self) -> Result<BridgeHealthReport, ControlError> {
         health::snapshot()
     }
 
@@ -160,13 +164,12 @@ impl LogControl {
     /// A record below `LoggerConfig.level` is `Ok(SubmitOutcome::Filtered)` and
     /// counts nothing.
     pub fn submit(&self, record: StructuredRecord) -> Result<SubmitOutcome, SubmitError> {
-        let lifecycle = handle::lifecycle();
-        if lifecycle != BridgeLifecycle::Running {
-            return Err(stopped(lifecycle));
+        if handle::lifecycle() != BridgeLifecycle::Running {
+            return Err(stopped(lifecycle_phase()));
         }
         handle::submit_guarded(|| {
             let installed = handle::current_installed().ok_or(SubmitError::Stopped {
-                lifecycle: handle::lifecycle(),
+                lifecycle: handle::lifecycle_phase(),
             })?;
             let parts = mapping::structured_to_parts(record).map_err(SubmitError::InvalidInput)?;
             handle::submit_to(&installed, parts).map_err(SubmitError::from_drop_cause)
@@ -326,7 +329,7 @@ fn core_emit_error(error: &sc_observability::TryLogError) -> EmitError {
 }
 
 /// Counts and returns a rejection outside the guard (lifecycle not running).
-fn stopped(lifecycle: BridgeLifecycle) -> SubmitError {
+fn stopped(lifecycle: LifecyclePhase) -> SubmitError {
     let error = SubmitError::Stopped { lifecycle };
     handle::record_drop(error.drop_cause());
     error

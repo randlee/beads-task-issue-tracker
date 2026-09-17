@@ -221,7 +221,8 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{BridgeLifecycle, InvalidInputReason, error_codes};
+    use crate::LifecyclePhase;
+    use crate::{InvalidInputReason, error_codes};
 
     fn projected(code: ErrorCode, message: &str) -> sc_observability_types::OperationDiagnostic {
         sc_observability_types::OperationDiagnostic {
@@ -270,7 +271,7 @@ mod tests {
             }
             .report(),
             SubmitError::Stopped {
-                lifecycle: BridgeLifecycle::Stopped,
+                lifecycle: LifecyclePhase::Stopped,
             }
             .report(),
             SubmitError::QueueFull.report(),

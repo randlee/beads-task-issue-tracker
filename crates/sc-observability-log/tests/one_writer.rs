@@ -21,9 +21,9 @@ use std::time::Duration;
 
 use sc_observability::{RedactionPolicy, Redactor};
 use sc_observability_log::{
-    ActionName, BridgeLifecycle, BridgeOptions, DropCause, DroppedEvents, InvalidInputReason,
-    JsonValue, Level, LevelFilter, LogControl, LoggerConfig, ServiceName, StructuredRecord,
-    SubmitError, SubmitOutcome,
+    ActionName, BridgeOptions, DropCause, DroppedEvents, InvalidInputReason, JsonValue, Level,
+    LevelFilter, LogControl, LoggerConfig, ServiceName, StructuredRecord, SubmitError,
+    SubmitOutcome,
 };
 use serde_json::Value;
 
@@ -67,9 +67,9 @@ fn read_events(path: &Path) -> Vec<Value> {
 
 /// Runs `body` and asserts it changed exactly one counter, `cause`, by exactly one.
 fn assert_counted_once(control: &LogControl, cause: DropCause, label: &str, body: impl FnOnce()) {
-    let before: DroppedEvents = control.health().dropped_events;
+    let before: DroppedEvents = control.health().unwrap().dropped;
     body();
-    let after = control.health().dropped_events;
+    let after = control.health().unwrap().dropped;
     for other in DropCause::ALL {
         let expected = before.get(other) + u64::from(other == cause);
         assert_eq!(after.get(other), expected, "{label}: counter {other:?}");
@@ -78,9 +78,9 @@ fn assert_counted_once(control: &LogControl, cause: DropCause, label: &str, body
 }
 
 fn assert_counts_nothing(control: &LogControl, label: &str, body: impl FnOnce()) {
-    let before = control.health().dropped_events;
+    let before = control.health().unwrap().dropped;
     body();
-    assert_eq!(control.health().dropped_events, before, "{label}");
+    assert_eq!(control.health().unwrap().dropped, before, "{label}");
 }
 
 fn submit(control: &LogControl, record: StructuredRecord) -> Result<SubmitOutcome, SubmitError> {
@@ -280,7 +280,7 @@ fn facade_macro_and_submit_share_one_core_and_one_writer() {
     cross_producer_reentrancy(&control);
     contained_panics(&control);
     // Fresh process: the counters hold exactly the rejections above.
-    let dropped = control.health().dropped_events;
+    let dropped = control.health().unwrap().dropped;
     assert_eq!(dropped.total(), 7);
     assert_eq!(dropped.get(DropCause::ReentrantEmit), 3);
     assert_eq!(dropped.get(DropCause::LoggerPanicked), 3);
@@ -301,7 +301,7 @@ fn facade_macro_and_submit_share_one_core_and_one_writer() {
             assert_eq!(
                 stopped,
                 Err(SubmitError::Stopped {
-                    lifecycle: BridgeLifecycle::Stopped
+                    lifecycle: sc_observability_log::LifecyclePhase::Stopped
                 })
             );
         },

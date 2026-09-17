@@ -34,12 +34,10 @@
 )]
 
 use sc_observability_log::{
-    BridgeHealthReport, BridgeHealthState, BridgeLifecycle, BridgeOptions, DropCause,
-    DroppedEvents, Failure, FailureReport, FileSinkHealth, FlushError, FlushFailure,
-    HealthDiagnostic, HelperHealth, InitError, InitFailure, InvalidInputReason, JsonMap, JsonValue,
-    Level, LogControl, LogGuard, LoggerConfig, LoggerHealth, QueueHealth, ShutdownError,
-    ShutdownFailure, SinkHealthSnapshot, SinkStatus, StructuredRecord, SubmitError, SubmitOutcome,
-    WriterStatus,
+    BridgeHealthReport, BridgeOptions, ControlError, DropCause, DroppedEvents, Failure,
+    FailureReport, FlushError, FlushFailure, InitError, InitFailure, InvalidInputReason, JsonMap,
+    JsonValue, Level, LifecyclePhase, LogControl, LogGuard, LoggerConfig, LoggingHealthReport,
+    ShutdownError, ShutdownFailure, StructuredRecord, SubmitError, SubmitOutcome,
 };
 use sc_observability_log::{ErrorCode, Remediation};
 use std::path::PathBuf;
@@ -104,7 +102,7 @@ fn a1_public_api_is_frozen() {
 
 #[test]
 fn a5_health_api_is_frozen() {
-    let _: fn(&LogGuard) -> BridgeHealthReport = LogGuard::health;
+    let _: fn(&LogGuard) -> Result<BridgeHealthReport, ControlError> = LogGuard::health;
     let _: sc_observability_log::ErrorCode =
         sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN;
     let _: sc_observability_log::ErrorCode =
@@ -112,72 +110,15 @@ fn a5_health_api_is_frozen() {
     let _: u32 = sc_observability_log::BRIDGE_HEALTH_SCHEMA_VERSION;
     fn serde_derives<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     fn snapshot_derives<T: std::fmt::Debug + Clone + PartialEq>() {}
-    fn state_derives<T: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash>() {}
     serde_derives::<DroppedEvents>();
     serde_derives::<BridgeHealthReport>();
     snapshot_derives::<BridgeHealthReport>();
-    snapshot_derives::<LoggerHealth>();
-    snapshot_derives::<QueueHealth>();
-    snapshot_derives::<FileSinkHealth>();
-    snapshot_derives::<SinkHealthSnapshot>();
-    snapshot_derives::<HealthDiagnostic>();
-    fn helper_derives<
-        T: std::fmt::Debug + Clone + Copy + Default + PartialEq + Eq + std::hash::Hash,
-    >() {
-    }
-    serde_derives::<HelperHealth>();
-    helper_derives::<HelperHealth>();
-    state_derives::<BridgeLifecycle>();
-    state_derives::<BridgeHealthState>();
-    state_derives::<WriterStatus>();
-    state_derives::<SinkStatus>();
-    // Field names and types: renaming, retyping or removing a field breaks this test.
     let _ = |h: BridgeHealthReport| {
-        let _: (u32, BridgeLifecycle, BridgeHealthState) = (h.schema_version, h.lifecycle, h.state);
-        let _: (Option<LoggerHealth>, FileSinkHealth) = (h.logger, h.file_sink);
-        let _: (SinkHealthSnapshot, DroppedEvents) = (h.console_sink, h.dropped_events);
-        let _: HelperHealth = h.helpers;
-    };
-    let _ = |h: HelperHealth| -> (bool, u32) { (h.flush_in_flight, h.detached) };
-    let _ = |l: LoggerHealth| {
-        let _: (WriterStatus, QueueHealth) = (l.writer_state, l.queue);
-        let _: (Option<HealthDiagnostic>, Option<HealthDiagnostic>) =
-            (l.last_writer_error, l.last_error);
-        let _: (u64, u64) = (l.dropped_events_total, l.flush_errors_total);
-    };
-    let _ = |q: QueueHealth| -> [u64; 4] {
-        [q.depth, q.capacity, q.high_water_mark, q.full_drops_total]
-    };
-    let _ = |f: FileSinkHealth| {
-        let _: (SinkStatus, Option<std::path::PathBuf>) = (f.status, f.active_log_path);
-        let _: Option<HealthDiagnostic> = f.last_error;
-    };
-    let _ = |c: SinkHealthSnapshot| -> (SinkStatus, Option<HealthDiagnostic>) {
-        (c.status, c.last_error)
-    };
-    let _ = |d: HealthDiagnostic| {
-        let _: (Option<sc_observability_log::ErrorCode>, String) = (d.code, d.message);
-        let _: (
-            sc_observability_log::Timestamp,
-            sc_observability_log::Remediation,
-        ) = (d.at, d.remediation);
-    };
-    // Exhaustive matches over the state enums.
-    let _ = |l: BridgeLifecycle| match l {
-        BridgeLifecycle::Running | BridgeLifecycle::ShuttingDown => (),
-        BridgeLifecycle::Failed | BridgeLifecycle::Stopped => (),
-    };
-    let _ = |s: BridgeHealthState| match s {
-        BridgeHealthState::Healthy
-        | BridgeHealthState::Degraded
-        | BridgeHealthState::Unavailable => (),
-    };
-    let _ = |w: WriterStatus| match w {
-        WriterStatus::Running | WriterStatus::Degraded | WriterStatus::Stopped => (),
-    };
-    let _ = |s: SinkStatus| match s {
-        SinkStatus::Disabled | SinkStatus::Healthy => (),
-        SinkStatus::DegradedDropping | SinkStatus::Unavailable => (),
+        let _: (u32, LoggingHealthReport, DroppedEvents, LifecyclePhase) =
+            (h.schema_version, h.logging, h.dropped, h.lifecycle);
+        let _: (Option<PathBuf>, sc_observability_log::LevelFilter) =
+            (h.active_log_path, h.configured_level);
+        let _: (sc_observability_log::LevelFilter, u64) = (h.effective_level, h.level_revision);
     };
 }
 
@@ -186,7 +127,7 @@ fn a5_control_api_is_frozen() {
     // Lifecycle owner vs control: every exported signature.
     let _: fn(&LogGuard) -> LogControl = LogGuard::control;
     let _: fn(&LogControl, Duration) -> Result<(), FlushError> = LogControl::flush;
-    let _: fn(&LogControl) -> BridgeHealthReport = LogControl::health;
+    let _: fn(&LogControl) -> Result<BridgeHealthReport, ControlError> = LogControl::health;
     let _: fn(&LogControl) -> Option<PathBuf> = LogControl::active_log_path;
     let _: fn(&LogControl, StructuredRecord) -> Result<SubmitOutcome, SubmitError> =
         LogControl::submit;
