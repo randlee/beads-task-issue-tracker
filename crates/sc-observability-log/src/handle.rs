@@ -642,6 +642,7 @@ pub(crate) fn shutdown_installed(
             let sole = take_sole(installed);
             let flushed = sole.logger.flush();
             let stopped = sole.logger.shutdown();
+            health::store_level_state(stopped.level_state());
             if let Some(report) = health::read_report(&stopped) {
                 health::store_report(report);
             }
@@ -721,6 +722,12 @@ pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> 
     // second threshold policy.
     log::set_max_level(log::LevelFilter::Off);
     let taken = SLOT.write().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(installed) = &taken {
+        health::store_level_state(installed.logger.level_state());
+        if let Some(report) = health::read_report(&installed.logger) {
+            health::store_report(report);
+        }
+    }
     let no_logger = taken.is_none();
     let result = match taken {
         Some(installed) => shutdown_installed(installed, timeout),

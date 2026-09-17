@@ -98,6 +98,10 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
     );
     sc_observability_log::debug!(target: "bp3.macro", "macro debug event");
     log::debug!(target: "bp3.facade", "facade debug event");
+    let health = guard.health().unwrap();
+    assert_eq!(health.configured_level, LevelFilter::Info);
+    assert_eq!(health.effective_level, LevelFilter::Debug);
+    assert!(health.level_revision >= 1);
     assert!(matches!(
         guard
             .elevate_level(LevelFilter::Trace, LevelChangeSource::DiagnosticSession)
@@ -131,12 +135,11 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
             "missing {expected:?}: {contents}"
         );
     }
-
-    let health = guard.health().unwrap();
-    assert_eq!(health.configured_level, LevelFilter::Info);
-    assert_eq!(health.effective_level, LevelFilter::Trace);
-    assert!(health.level_revision >= 2);
     guard.shutdown(Duration::from_secs(5)).unwrap();
+    let stopped_health = control.health().unwrap();
+    assert_eq!(stopped_health.configured_level, LevelFilter::Info);
+    assert_eq!(stopped_health.effective_level, LevelFilter::Trace);
+    assert!(stopped_health.level_revision >= 2);
     let before_post_stop = control.dropped_events().get(DropCause::NotInstalled);
     assert!(matches!(
         control.try_log(direct()),

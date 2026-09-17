@@ -55,15 +55,24 @@ pub(crate) struct SinkConfig {
 
 static SNAPSHOT_CONFIG: OnceLock<SinkConfig> = OnceLock::new();
 static LAST_REPORT: Mutex<Option<LoggingHealthReport>> = Mutex::new(None);
+static LAST_LEVEL_STATE: Mutex<Option<sc_observability_types::LevelState>> = Mutex::new(None);
 
 /// Records initial bridge evidence after successful global installation.
 pub(crate) fn set_snapshot_config(config: SinkConfig) {
+    store_level_state(config.level_state);
     let _ = SNAPSHOT_CONFIG.set(config);
 }
 
 /// Retains the most recent readable core report for stopped or failed lifecycle inspection.
 pub(crate) fn store_report(report: LoggingHealthReport) {
     *LAST_REPORT.lock().unwrap_or_else(PoisonError::into_inner) = Some(report);
+}
+
+/// Retains the latest coherent core level state once the logger is consumed.
+pub(crate) fn store_level_state(level_state: sc_observability_types::LevelState) {
+    *LAST_LEVEL_STATE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(level_state);
 }
 
 /// Init-cached active JSONL path.
@@ -99,6 +108,7 @@ pub(crate) fn snapshot() -> Result<BridgeHealthReport, ControlError> {
     let installed = handle::current_installed();
     let (report, level_state) = if let Some(installed) = installed {
         let level_state = installed.logger.level_state();
+        store_level_state(level_state);
         let report = read_report(&installed.logger);
         if let Some(report) = &report {
             store_report(report.clone());
@@ -111,7 +121,10 @@ pub(crate) fn snapshot() -> Result<BridgeHealthReport, ControlError> {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone(),
-            config.level_state,
+            LAST_LEVEL_STATE
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .unwrap_or(config.level_state),
         )
     };
     let logging = report.ok_or_else(unavailable)?;
