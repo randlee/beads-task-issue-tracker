@@ -42,7 +42,7 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
     )
     .unwrap();
     let control = guard.control();
-    let path = control.active_log_path().unwrap();
+    let path = control.active_log_path().unwrap().unwrap();
     assert!(
         matches!(
             control.wait_stopped(Duration::ZERO),

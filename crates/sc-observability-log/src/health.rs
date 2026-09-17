@@ -67,10 +67,11 @@ pub(crate) fn store_report(report: LoggingHealthReport) {
 }
 
 /// Init-cached active JSONL path.
-pub(crate) fn active_log_path() -> Option<PathBuf> {
+pub(crate) fn active_log_path() -> Result<Option<PathBuf>, ControlError> {
     SNAPSHOT_CONFIG
         .get()
-        .and_then(|config| config.active_log_path.clone())
+        .map(|config| config.active_log_path.clone())
+        .ok_or_else(unavailable)
 }
 
 /// Reads core health without permitting an upstream mutex panic to unwind the bridge.

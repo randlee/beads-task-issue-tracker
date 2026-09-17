@@ -78,7 +78,7 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
     };
     let guard = sc_observability_log::init(config, options).unwrap();
     let control = guard.control();
-    let path = control.active_log_path().unwrap();
+    let path = control.active_log_path().unwrap().unwrap();
 
     // A submission that holds the installed logger until released.
     let blocked_control = control.clone();

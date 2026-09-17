@@ -128,7 +128,7 @@ fn a5_control_api_is_frozen() {
     let _: fn(&LogGuard) -> LogControl = LogGuard::control;
     let _: fn(&LogControl, Duration) -> Result<(), FlushError> = LogControl::flush;
     let _: fn(&LogControl) -> Result<BridgeHealthReport, ControlError> = LogControl::health;
-    let _: fn(&LogControl) -> Option<PathBuf> = LogControl::active_log_path;
+    let _: fn(&LogControl) -> Result<Option<PathBuf>, ControlError> = LogControl::active_log_path;
     let _: fn(&LogControl, StructuredRecord) -> Result<SubmitOutcome, SubmitError> =
         LogControl::submit;
     fn control_derives<T: std::fmt::Debug + Clone + Send + Sync + 'static>() {}

@@ -120,8 +120,8 @@ pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
 #[doc(inline)]
 pub use sc_observability_types::{
-    ActionName, ErrorCode, LevelFilter, LoggingHealthReport, ProcessIdentityPolicy, Remediation,
-    ServiceName, TargetCategory, Timestamp,
+    ActionName, CorrelationId, ErrorCode, LevelFilter, LoggingHealthReport, OutcomeLabel,
+    ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory, Timestamp, TraceContext,
 };
 
 #[cfg(feature = "test_hooks")]
@@ -130,7 +130,7 @@ pub use handle::fail_next_shutdown_coordinator_reservation;
 #[doc(inline)]
 pub use sc_observability_types::{
     AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource,
-    LevelState, LogQuery, LogSnapshot, OperationDiagnostic,
+    LevelState, LogEvent, LogQuery, LogSnapshot, OperationDiagnostic,
 };
 // `sc_observability_types::Level` is intentionally NOT re-exported: the crate
 // root `Level` below is the tracing-style type (associated consts TRACE..ERROR).

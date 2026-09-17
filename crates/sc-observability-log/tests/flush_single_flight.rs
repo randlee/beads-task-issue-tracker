@@ -46,7 +46,7 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
     };
     let guard = sc_observability_log::init(config, options).unwrap();
     let control = guard.control();
-    let path = control.active_log_path().unwrap();
+    let path = control.active_log_path().unwrap().unwrap();
 
     // Nothing queued or in flight; then swap the active file for a reader-less FIFO.
     control.flush(IO_TIMEOUT).unwrap();

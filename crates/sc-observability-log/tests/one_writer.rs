@@ -273,7 +273,7 @@ fn facade_macro_and_submit_share_one_core_and_one_writer() {
     let guard = sc_observability_log::init(config, options).unwrap();
     let control = guard.control();
     CONTROL.set(control.clone()).unwrap();
-    let path = control.active_log_path().unwrap();
+    let path = control.active_log_path().unwrap().unwrap();
 
     admitted_records(&control);
     rejected_input(&control);

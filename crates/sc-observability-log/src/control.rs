@@ -107,8 +107,11 @@ impl LogControl {
     ///
     /// `None` when `LoggerConfig.enable_file_sink` is false. The path stays
     /// available after shutdown (the file remains on disk).
-    #[must_use]
-    pub fn active_log_path(&self) -> Option<PathBuf> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlError::Unavailable`] before bridge initialization.
+    pub fn active_log_path(&self) -> Result<Option<PathBuf>, ControlError> {
         health::active_log_path()
     }
 

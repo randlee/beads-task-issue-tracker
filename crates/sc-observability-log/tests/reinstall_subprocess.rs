@@ -87,7 +87,7 @@ fn run_child(root: &Path) {
         "submit_after": submit_after,
         "flush_after": flush_after,
         "health": control.health().unwrap(),
-        "active_log_path": control.active_log_path(),
+        "active_log_path": control.active_log_path().unwrap(),
     });
     // libtest may print "test <name> ... " on the same line first.
     println!("{RESULT_PREFIX}{result}");
