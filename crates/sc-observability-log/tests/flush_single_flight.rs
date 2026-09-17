@@ -21,8 +21,7 @@ use std::fs::OpenOptions;
 use std::time::{Duration, Instant};
 
 use sc_observability_log::{
-    ActionName, BridgeOptions, Failure, FlushError, FlushFailure, LevelFilter, LoggerConfig,
-    ServiceName, error_codes,
+    ActionName, BridgeOptions, FlushError, LevelFilter, LoggerConfig, ServiceName, error_codes,
 };
 
 const STUCK_FLUSH_TIMEOUT: Duration = Duration::from_millis(100);
@@ -79,10 +78,8 @@ fn stuck_flush_keeps_one_detached_helper_and_rejects_retries() {
             started.elapsed() < RETRY_TIMEOUT / 4,
             "InProgress must not wait for the flush timeout"
         );
-        let report = retry.unwrap_err().report();
-        assert_eq!(report.failure, Failure::Flush(FlushFailure::InProgress));
         assert_eq!(
-            report.code,
+            retry.unwrap_err().code(),
             error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS
         );
     }

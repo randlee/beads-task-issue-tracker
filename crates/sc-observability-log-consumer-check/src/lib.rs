@@ -19,13 +19,13 @@ include!("../../sc-observability-log/tests/compat/instrument.rs");
 pub mod status {
     use std::time::Duration;
 
-    use sc_observability_log::{BridgeHealthReport, ControlError, FailureReport, LogControl};
+    use sc_observability_log::{BridgeHealthReport, ControlError, FlushError, LogControl};
 
     /// One status reading: a bounded flush result and the health report, both plain data.
     #[derive(Debug, Clone)]
     pub struct StatusReading {
-        /// `Ok` when the flush completed; otherwise its serializable report.
-        pub flush: Result<(), FailureReport>,
+        /// `Ok` when the flush completed; otherwise its native typed error.
+        pub flush: Result<(), FlushError>,
         /// The health result taken after the flush.
         pub health: Result<BridgeHealthReport, ControlError>,
     }
@@ -34,7 +34,7 @@ pub mod status {
     #[must_use]
     pub fn read_status(control: &LogControl, timeout: Duration) -> StatusReading {
         StatusReading {
-            flush: control.flush(timeout).map_err(|error| error.report()),
+            flush: control.flush(timeout),
             health: control.health(),
         }
     }

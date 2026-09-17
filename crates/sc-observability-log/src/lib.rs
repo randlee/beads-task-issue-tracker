@@ -10,7 +10,7 @@
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use sc_observability_log::{ActionName, BridgeOptions, Level, LoggerConfig, ServiceName, StructuredRecord};
+//! use sc_observability_log::{ActionName, BridgeEvent, BridgeOptions, EventLevel, LoggerConfig, ServiceName, TargetCategory};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = LoggerConfig::default_for(
@@ -27,7 +27,17 @@
 //! let control = guard.control();
 //!
 //! log::info!(target: "my_app::sync", "[sync.start] syncing {} items", 3);
-//! control.submit(StructuredRecord::new(Level::INFO, "my_app.ui").with_message("clicked"))?;
+//! control.try_log(BridgeEvent {
+//!     level: EventLevel::Info,
+//!     target: TargetCategory::new("my_app.ui")?,
+//!     action: None,
+//!     message: Some("clicked".to_owned()),
+//!     outcome: None,
+//!     fields: serde_json::Map::new(),
+//!     request_id: None,
+//!     correlation_id: None,
+//!     trace: None,
+//! })?;
 //! control.flush(Duration::from_secs(1))?;
 //! println!("{}", serde_json::to_string(&control.health())?);
 //!
@@ -46,8 +56,8 @@
 //!   [`LogGuard::shutdown`] (or, as a fallback, `Drop for LogGuard`) stops the
 //!   logger, and it does so once.
 //! - **Control is not ownership.** [`LogGuard::control`] returns a cloneable
-//!   [`LogControl`] with bounded flush, health, the active path and nonblocking
-//!   structured submission. No control operation can shut the logger down,
+//!   [`LogControl`] with bounded flush, health, the active path and direct event
+//!   admission. No control operation can shut the logger down,
 //!   keep it alive, or yield a `LogGuard` or the mutable `Logger`.
 //! - **One submission core, one writer.** The facade, the macros and
 //!   [`LogControl::submit`] enter the same guarded core (panic containment and
@@ -63,10 +73,9 @@
 //!   while a detached helper finishes; late completion is observable as
 //!   [`BridgeLifecycle::Stopped`]. `Stopped` is final.
 //! - **Serializable contracts.** [`BridgeHealthReport`] (versioned by
-//!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`StructuredRecord`], [`SubmitOutcome`],
-//!   [`SubmitError`] and [`FailureReport`] (versioned by
-//!   [`CONTROL_SCHEMA_VERSION`]) are plain serde data with `snake_case` tagged
-//!   discriminants and stable code / remediation fields.
+//!   [`BRIDGE_HEALTH_SCHEMA_VERSION`]), [`BridgeEvent`] and the native operation
+//!   errors are plain serde data with `snake_case` tagged discriminants and
+//!   stable code / remediation fields.
 //! - **Field keys.** One sanitizer and one reserved prefix
 //!   (`sc_observability_log.`) for every producer; see `docs/mapping.md`,
 //!   "Field keys", for the per-producer and collision rules.
@@ -89,7 +98,6 @@ mod error;
 mod handle;
 mod health;
 mod mapping;
-mod report;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -99,22 +107,16 @@ use std::time::Duration;
 use crate::health::BridgeLifecycle;
 
 #[doc(inline)]
-pub use control::{
-    BridgeEvent, EmitOutcome, JsonMap, JsonValue, LogControl, StructuredRecord, SubmitOutcome,
-};
+pub use control::{BridgeEvent, EmitOutcome, LogControl};
 #[doc(inline)]
 pub use error::{
-    ControlError, DropCause, EmitError, FieldKeyError, FlushError, InitError, InvalidInputReason,
-    LifecyclePhase, ShutdownError, SubmitError, WaitError,
+    ControlError, DropCause, EmitError, FieldKeyError, FlushError, InitError, LifecyclePhase,
+    ShutdownError, WaitError,
 };
 #[doc(inline)]
 pub use error::{ShutdownOutcome, ShutdownReport, UnconfirmedShutdown};
 #[doc(inline)]
 pub use health::{BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport};
-#[doc(inline)]
-pub use report::{
-    CONTROL_SCHEMA_VERSION, Failure, FailureReport, FlushFailure, InitFailure, ShutdownFailure,
-};
 #[doc(inline)]
 pub use sc_observability::LoggerConfig;
 // Re-exported so consumers need no direct sc-observability-types dependency.
