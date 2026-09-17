@@ -53,7 +53,10 @@ pub enum FieldKeyError {
     ReservedPrefix,
     /// Two distinct raw keys normalize to the same output key.
     #[error("field key collides with {other_raw_key:?}")]
-    Collision { other_raw_key: String },
+    Collision {
+        /// The distinct raw key that normalized to the same output key.
+        other_raw_key: String,
+    },
 }
 
 /// Typed direct-admission failure; each path has already recorded exactly one drop cause.
@@ -63,32 +66,41 @@ pub enum EmitError {
     /// A producer field cannot be represented safely.
     #[error("invalid field {raw_key:?}: {reason}")]
     InvalidField {
+        /// The producer-supplied key that was rejected.
         raw_key: String,
+        /// The specific key-validation failure.
         reason: FieldKeyError,
     },
     /// The core rejected the assembled event.
     #[error("invalid event: {diagnostic}")]
     InvalidEvent {
+        /// The core diagnostic explaining the invalid event.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The core queue is full.
     #[error("writer queue is full: {diagnostic}")]
     QueueFull {
+        /// The core diagnostic describing queue saturation.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The writer cannot accept more work.
     #[error("writer is degraded: {diagnostic}")]
     WriterDegraded {
+        /// The core diagnostic describing the writer failure.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The core shutdown deadline has elapsed.
     #[error("logger shutdown timed out: {diagnostic}")]
     ShutdownTimedOut {
+        /// The core diagnostic describing the elapsed shutdown deadline.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The lifecycle is no longer running.
     #[error("logger is not running: {phase:?}")]
-    NotRunning { phase: LifecyclePhase },
+    NotRunning {
+        /// The lifecycle phase observed when emission was attempted.
+        phase: LifecyclePhase,
+    },
     /// The producer re-entered the guarded path.
     #[error("reentrant emission")]
     Reentrant,
@@ -103,15 +115,20 @@ pub enum EmitError {
 pub enum ControlError {
     /// The lifecycle does not permit the request.
     #[error("logger is not running: {phase:?}")]
-    NotRunning { phase: LifecyclePhase },
+    NotRunning {
+        /// The lifecycle phase observed when the control operation was attempted.
+        phase: LifecyclePhase,
+    },
     /// A core query failed.
     #[error("query failed: {diagnostic}")]
     Query {
+        /// The core diagnostic explaining the failed query.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// A snapshot or capability is unavailable.
     #[error("control operation unavailable: {diagnostic}")]
     Unavailable {
+        /// The core diagnostic for the unavailable snapshot or capability.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
 }
@@ -125,10 +142,14 @@ pub enum WaitError {
     NotStarted,
     /// The completed owner result was not observed by the deadline.
     #[error("shutdown wait timed out after {timeout:?}")]
-    TimedOut { timeout: Duration },
+    TimedOut {
+        /// The maximum time the caller waited for an owner result.
+        timeout: Duration,
+    },
     /// Observation state is unavailable.
     #[error("shutdown state unavailable: {diagnostic}")]
     Unavailable {
+        /// The diagnostic explaining why retained state cannot be observed.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
 }
@@ -139,10 +160,12 @@ pub enum WaitError {
 pub enum UnconfirmedShutdown {
     /// The shutdown helper could not be started.
     HelperSpawn {
+        /// The diagnostic for the failed helper startup.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// The shutdown helper disappeared before a final result.
     HelperLost {
+        /// The diagnostic for the helper that ended without a final result.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
 }
@@ -155,10 +178,14 @@ pub enum ShutdownOutcome {
     Stopped,
     /// The writer stopped despite a final flush error.
     StoppedWithFlushError {
+        /// The final flush diagnostic retained alongside the confirmed stop.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
     /// Completion was not confirmed; callers must not infer stopped.
-    Unconfirmed { cause: UnconfirmedShutdown },
+    Unconfirmed {
+        /// The reason completion could not be confirmed.
+        cause: UnconfirmedShutdown,
+    },
 }
 
 /// Read-only shutdown observation returned to controls.
@@ -335,7 +362,10 @@ pub enum FlushError {
     },
     /// The owner has stopped accepting flush requests.
     #[error("the logger is not running: {phase:?}")]
-    NotRunning { phase: LifecyclePhase },
+    NotRunning {
+        /// The lifecycle phase observed when the flush was requested.
+        phase: LifecyclePhase,
+    },
     /// A previous flush helper is still running (possibly detached after its caller's
     /// timeout); no new helper was started and nothing new was flushed.
     #[error("a previous flush is still running; no new flush was started")]
