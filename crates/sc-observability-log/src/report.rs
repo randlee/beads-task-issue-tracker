@@ -77,6 +77,8 @@ pub enum InitFailure {
     IdentityResolution,
     /// [`InitError::Logger`].
     Logger,
+    /// [`InitError::RuntimeStart`].
+    RuntimeStart,
 }
 
 /// Data-only discriminant of [`FlushError`]; tagged by `kind`.
@@ -146,6 +148,7 @@ impl InitError {
             Self::ForeignLoggerInstalled { .. } => InitFailure::ForeignLoggerInstalled,
             Self::UnsupportedLevel { .. } | Self::Logger { .. } => InitFailure::Logger,
             Self::IdentityResolution { .. } => InitFailure::IdentityResolution,
+            Self::RuntimeStart { .. } => InitFailure::RuntimeStart,
         };
         report(
             Failure::Init(failure),

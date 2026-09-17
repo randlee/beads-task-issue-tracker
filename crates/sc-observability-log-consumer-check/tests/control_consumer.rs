@@ -66,7 +66,7 @@ fn consumer_reads_health_and_flushes_through_control_only() {
     assert_eq!(report.failure, Failure::Flush(FlushFailure::ShutDown));
     assert_eq!(
         report.code,
-        sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN
+        sc_observability_log::error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING
     );
     assert_eq!(stopped.health.lifecycle, BridgeLifecycle::Stopped);
 }

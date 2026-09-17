@@ -82,6 +82,7 @@ fn a1_public_api_is_frozen() {
         } => (),
         InitError::IdentityResolution { source: _ } => (),
         InitError::Logger { source: _ } => (),
+        InitError::RuntimeStart { diagnostic: _ } => (),
     };
     let _ = |e: FlushError| match e {
         FlushError::TimedOut { timeout: _ } | FlushError::Logger { source: _ } => (),
@@ -276,7 +277,7 @@ fn a5_control_api_is_frozen() {
     };
     let _ = |f: InitFailure| match f {
         InitFailure::AlreadyInitialized | InitFailure::ForeignLoggerInstalled => (),
-        InitFailure::IdentityResolution | InitFailure::Logger => (),
+        InitFailure::IdentityResolution | InitFailure::Logger | InitFailure::RuntimeStart => (),
     };
     let _ = |f: FlushFailure| match f {
         FlushFailure::TimedOut { timeout_ms: _ } | FlushFailure::Logger => (),

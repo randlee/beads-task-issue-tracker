@@ -129,19 +129,47 @@ enum ShutdownState {
 struct ShutdownCoordinator {
     state: Mutex<ShutdownState>,
     complete: Condvar,
+    work: mpsc::Sender<ShutdownCommand>,
 }
 
 static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
 
-fn shutdown_coordinator() -> &'static ShutdownCoordinator {
-    SHUTDOWN_COORDINATOR.get_or_init(|| ShutdownCoordinator {
+type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
+
+/// Reserves the sole shutdown worker before the global facade is installed.
+/// A failed reservation is therefore an initialization failure rather than a
+/// partially usable bridge that discovers it cannot complete its lifecycle.
+pub(crate) fn reserve_shutdown_coordinator() -> Result<(), std::io::Error> {
+    if SHUTDOWN_COORDINATOR.get().is_some() {
+        return Ok(());
+    }
+    let (work, receiver) = mpsc::channel::<ShutdownCommand>();
+    std::thread::Builder::new()
+        .name("sc-observability-log-shutdown".to_owned())
+        .spawn(move || {
+            // Exactly one lifecycle owner exists, so this worker handles one
+            // final operation and then exits. It is reserved at init rather
+            // than spawned by a timeout caller.
+            if let Ok(command) = receiver.recv() {
+                command();
+            }
+        })?;
+    let _ = SHUTDOWN_COORDINATOR.set(ShutdownCoordinator {
         state: Mutex::new(ShutdownState::NotStarted),
         complete: Condvar::new(),
-    })
+        work,
+    });
+    Ok(())
+}
+
+fn shutdown_coordinator() -> Option<&'static ShutdownCoordinator> {
+    SHUTDOWN_COORDINATOR.get()
 }
 
 pub(crate) fn begin_shutdown() -> bool {
-    let coordinator = shutdown_coordinator();
+    let Some(coordinator) = shutdown_coordinator() else {
+        return false;
+    };
     let mut state = coordinator
         .state
         .lock()
@@ -157,7 +185,9 @@ pub(crate) fn begin_shutdown() -> bool {
 
 fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
     set_lifecycle(lifecycle);
-    let coordinator = shutdown_coordinator();
+    let Some(coordinator) = shutdown_coordinator() else {
+        return;
+    };
     let mut state = coordinator
         .state
         .lock()
@@ -195,7 +225,9 @@ fn save_unconfirmed(cause: UnconfirmedShutdown) {
 /// Waits only for an already-started shutdown and returns its exact retained
 /// result. It never reconstructs a report from the current lifecycle.
 pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::WaitError> {
-    let coordinator = shutdown_coordinator();
+    let Some(coordinator) = shutdown_coordinator() else {
+        return Err(crate::WaitError::NotStarted);
+    };
     let deadline = Instant::now() + timeout;
     let mut state = coordinator
         .state
@@ -557,45 +589,77 @@ pub(crate) fn shutdown_installed(
     installed: Arc<Installed>,
     timeout: Duration,
 ) -> Result<(), ShutdownError> {
-    let outcome = run_bounded(timeout, move || {
-        let sole = take_sole(installed);
-        let flushed = sole.logger.flush();
-        let stopped = sole.logger.shutdown();
-        // Final health for post-shutdown snapshots (writer state `Stopped`).
-        if let Some(report) = health::read_report(&stopped) {
-            health::store_final_report(report);
-        }
-        let outcome = match &flushed {
-            Ok(()) => ShutdownOutcome::Stopped,
-            Err(source) => ShutdownOutcome::StoppedWithFlushError {
-                diagnostic: diagnostic(source.diagnostic().code.clone(), source.to_string()),
-            },
-        };
-        save_shutdown(outcome, BridgeLifecycle::Stopped);
-        flushed
-    });
-    match outcome {
-        Ok(Ok(())) => Ok(()),
-        Err(BoundedError::TimedOut) => Err(ShutdownError::TimedOut { timeout }),
-        Ok(Err(source)) => Err(ShutdownError::FinalFlush { source }),
-        Err(BoundedError::Spawn { source }) => {
-            save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
-                diagnostic: diagnostic(
-                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
-                    source.to_string(),
-                ),
-            });
-            Err(ShutdownError::HelperSpawn { source })
-        }
-        Err(BoundedError::WorkerLost) => {
+    enum WorkerOutcome {
+        Completed(Result<(), sc_observability_types::FlushError>),
+        Panicked,
+    }
+
+    let Some(coordinator) = shutdown_coordinator() else {
+        let source =
+            std::io::Error::other("shutdown coordinator was not reserved at initialization");
+        save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+        return Err(ShutdownError::HelperSpawn { source });
+    };
+    let work = coordinator.work.clone();
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    let command: ShutdownCommand = Box::new(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let sole = take_sole(installed);
+            let flushed = sole.logger.flush();
+            let stopped = sole.logger.shutdown();
+            if let Some(report) = health::read_report(&stopped) {
+                health::store_final_report(report);
+            }
+            let outcome = match &flushed {
+                Ok(()) => ShutdownOutcome::Stopped,
+                Err(source) => ShutdownOutcome::StoppedWithFlushError {
+                    diagnostic: diagnostic(source.diagnostic().code.clone(), source.to_string()),
+                },
+            };
+            save_shutdown(outcome, BridgeLifecycle::Stopped);
+            flushed
+        }));
+        let outcome = if let Ok(flushed) = result {
+            WorkerOutcome::Completed(flushed)
+        } else {
             save_unconfirmed(UnconfirmedShutdown::HelperLost {
                 diagnostic: diagnostic(
                     crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
-                    "the shutdown helper ended without a result".to_owned(),
+                    "the reserved shutdown worker panicked before completion".to_owned(),
+                ),
+            });
+            WorkerOutcome::Panicked
+        };
+        let _ = result_tx.send(outcome);
+    });
+    if let Err(error) = work.send(command) {
+        let source = std::io::Error::other(error.to_string());
+        save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+        return Err(ShutdownError::HelperSpawn { source });
+    }
+    match result_rx.recv_timeout(timeout) {
+        Ok(WorkerOutcome::Completed(Ok(()))) => Ok(()),
+        Ok(WorkerOutcome::Completed(Err(source))) => Err(ShutdownError::FinalFlush { source }),
+        Ok(WorkerOutcome::Panicked) | Err(RecvTimeoutError::Disconnected) => {
+            save_unconfirmed(UnconfirmedShutdown::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the reserved shutdown worker ended without a result".to_owned(),
                 ),
             });
             Err(ShutdownError::HelperLost)
         }
+        Err(RecvTimeoutError::Timeout) => Err(ShutdownError::TimedOut { timeout }),
     }
 }
 
@@ -690,6 +754,41 @@ mod tests {
             panic!("worker panic (expected by this test)");
         });
         assert!(matches!(result, Err(BoundedError::WorkerLost)));
+    }
+
+    #[test]
+    fn reserved_shutdown_worker_publishes_failure_after_a_waiter_times_out() {
+        assert!(reserve_shutdown_coordinator().is_ok());
+        assert!(begin_shutdown());
+        set_lifecycle(BridgeLifecycle::ShuttingDown);
+        let Some(coordinator) = shutdown_coordinator() else {
+            return;
+        };
+        let sent = coordinator.work.send(Box::new(|| {
+            std::thread::sleep(Duration::from_millis(40));
+            let panic = catch_unwind(AssertUnwindSafe(|| panic!("test worker failure")));
+            if panic.is_err() {
+                save_unconfirmed(UnconfirmedShutdown::HelperLost {
+                    diagnostic: diagnostic(
+                        crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                        "test worker failed after owner timeout".to_owned(),
+                    ),
+                });
+            }
+        }));
+        assert!(sent.is_ok());
+        assert!(matches!(
+            wait_stopped(Duration::from_millis(1)),
+            Err(crate::WaitError::TimedOut { .. })
+        ));
+        assert!(matches!(
+            wait_stopped(Duration::from_secs(1)),
+            Ok(ShutdownReport {
+                outcome: ShutdownOutcome::Unconfirmed { .. },
+                ..
+            })
+        ));
+        assert_eq!(lifecycle(), BridgeLifecycle::Failed);
     }
 
     /// Signals its channel when dropped: the work closure has returned.

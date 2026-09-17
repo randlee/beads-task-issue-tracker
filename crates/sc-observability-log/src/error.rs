@@ -289,6 +289,12 @@ pub enum InitError {
         #[source]
         source: sc_observability_types::InitError,
     },
+    /// Required lifecycle coordination could not be reserved before facade installation.
+    #[error("could not start bridge lifecycle coordination: {diagnostic}")]
+    RuntimeStart {
+        /// Stable startup diagnostic without an opaque helper source.
+        diagnostic: sc_observability_types::OperationDiagnostic,
+    },
 }
 
 /// Error returned by [`LogGuard::flush`](crate::LogGuard::flush) and [`LogControl::flush`](crate::LogControl::flush).
@@ -366,6 +372,7 @@ impl InitError {
             Self::UnsupportedLevel { .. } => error_codes::SC_OBSERVABILITY_LOG_UNSUPPORTED_LEVEL,
             Self::IdentityResolution { source } => source.diagnostic().code.clone(),
             Self::Logger { source } => source.diagnostic().code.clone(),
+            Self::RuntimeStart { diagnostic } => diagnostic.code.clone(),
         }
     }
 
@@ -385,6 +392,7 @@ impl InitError {
             ),
             Self::IdentityResolution { source } => source.diagnostic().remediation.clone(),
             Self::Logger { source } => source.diagnostic().remediation.clone(),
+            Self::RuntimeStart { diagnostic } => diagnostic.remediation.clone(),
         }
     }
 }

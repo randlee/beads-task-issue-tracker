@@ -426,6 +426,20 @@ pub fn init(config: LoggerConfig, options: BridgeOptions) -> Result<LogGuard, In
             return Err(InitError::Logger { source });
         }
     };
+    if let Err(source) = handle::reserve_shutdown_coordinator() {
+        INSTALLED.store(false, Ordering::SeqCst);
+        return Err(InitError::RuntimeStart {
+            diagnostic: OperationDiagnostic {
+                code: error_codes::SC_OBSERVABILITY_LOG_RUNTIME_START_FAILED,
+                message: source.to_string(),
+                remediation: Remediation::recoverable(
+                    "retry initialization after restoring thread resources",
+                    std::iter::empty::<String>(),
+                ),
+                at: Timestamp::now_utc(),
+            },
+        });
+    }
     let active_log_path = enable_file_sink.then(|| logger.health().active_log_path);
     let installed = Arc::new(Installed {
         logger,
