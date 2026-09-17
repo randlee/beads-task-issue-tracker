@@ -459,9 +459,8 @@ pub(crate) enum BoundedError {
 
 /// Helpers whose caller timed out and whose work has not finished (flush and shutdown).
 ///
-/// Incremented by the caller when its timeout elapses, decremented by the helper
-/// when its work returns or unwinds. Read by health snapshots
-/// (`BridgeHealthReport.helpers.detached`).
+/// This remains private accounting for bounded helper cleanup; native health
+/// deliberately exposes the staged core report plus bridge lifecycle only.
 static DETACHED_HELPERS: AtomicU32 = AtomicU32::new(0);
 
 /// Set while a flush helper runs: at most one flush helper per installed bridge.
