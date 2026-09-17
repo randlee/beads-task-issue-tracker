@@ -694,13 +694,27 @@ mod tests {
 
     fn assert_native_error_contract<T>(error: &T)
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + std::error::Error,
+        T: Clone + serde::Serialize + serde::de::DeserializeOwned + std::error::Error,
     {
         assert!(std::error::Error::source(error).is_none());
         assert!(!error.to_string().is_empty());
         let encoded = serde_json::to_value(error).unwrap();
+        assert_eq!(serde_json::to_value(error.clone()).unwrap(), encoded);
         let decoded: T = serde_json::from_value(encoded.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+
+    #[test]
+    fn field_key_error_variants_are_cloneable_and_round_trip() {
+        for error in [
+            FieldKeyError::Empty,
+            FieldKeyError::ReservedPrefix,
+            FieldKeyError::Collision {
+                other_raw_key: "other".to_owned(),
+            },
+        ] {
+            assert_native_error_contract(&error);
+        }
     }
 
     macro_rules! assert_operation_contract {
