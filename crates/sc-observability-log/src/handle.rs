@@ -24,7 +24,7 @@ use sc_observability_types::DiagnosticInfo;
 /// A rejected submission: every failure of the guarded core maps to exactly one [`DropCause`].
 ///
 /// Implemented by `DropCause` (the facade and the macros, which discard the
-/// result) and by `SubmitError` (`LogControl::submit`, which returns it).
+/// result) and by [`crate::EmitError`] (`LogControl::try_log`, which returns it).
 pub(crate) trait Rejection: Sized {
     /// The single counter this rejection increments.
     fn drop_cause(&self) -> DropCause;

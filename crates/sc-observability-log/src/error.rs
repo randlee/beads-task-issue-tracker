@@ -4,8 +4,8 @@
 //! read its typed fields. Each public error enum also exposes a stable
 //! [`ErrorCode`] and a mandatory [`Remediation`] per variant; variants wrapping an
 //! sc-observability error return that error's own code and remediation. Each
-//! also projects into the serializable [`FailureReport`](crate::FailureReport) with
-//! `report()`, so bindings never parse a display string.
+//! remains a directly serializable data contract, so consumers never parse a
+//! display string.
 
 use std::time::Duration;
 

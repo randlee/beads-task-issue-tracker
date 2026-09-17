@@ -209,32 +209,31 @@ fn operation_diagnostic(
     }
 }
 
+fn diagnostic_from_context(
+    source: &sc_observability_types::ErrorContext,
+) -> sc_observability_types::OperationDiagnostic {
+    let diagnostic = source.diagnostic();
+    sc_observability_types::OperationDiagnostic {
+        code: diagnostic.code.clone(),
+        message: diagnostic.message.clone(),
+        remediation: diagnostic.remediation.clone(),
+        at: diagnostic.timestamp,
+    }
+}
+
 fn core_emit_error(error: &sc_observability::TryLogError) -> EmitError {
-    let error_text = error.to_string();
-    let diagnostic = |code| {
-        operation_diagnostic(
-            code,
-            error_text.clone(),
-            sc_observability_types::Remediation::recoverable(
-                "inspect the bridge health and retry when the logger is running",
-                std::iter::empty::<String>(),
-            ),
-        )
-    };
     match error {
-        sc_observability::TryLogError::InvalidEvent(_) => EmitError::InvalidEvent {
-            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_INVALID_INPUT),
+        sc_observability::TryLogError::InvalidEvent(source) => EmitError::InvalidEvent {
+            diagnostic: crate::error::diagnostic_from_info(source),
         },
-        sc_observability::TryLogError::QueueFull(_) => EmitError::QueueFull {
-            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_QUEUE_FULL),
+        sc_observability::TryLogError::QueueFull(source) => EmitError::QueueFull {
+            diagnostic: diagnostic_from_context(source),
         },
-        sc_observability::TryLogError::WriterDegraded(_) => EmitError::WriterDegraded {
-            diagnostic: diagnostic(crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_WRITER_DEGRADED),
+        sc_observability::TryLogError::WriterDegraded(source) => EmitError::WriterDegraded {
+            diagnostic: diagnostic_from_context(source),
         },
-        sc_observability::TryLogError::ShutdownTimedOut(_) => EmitError::ShutdownTimedOut {
-            diagnostic: diagnostic(
-                crate::error_codes::SC_OBSERVABILITY_LOG_SUBMIT_BACKEND_SHUTDOWN_TIMED_OUT,
-            ),
+        sc_observability::TryLogError::ShutdownTimedOut(source) => EmitError::ShutdownTimedOut {
+            diagnostic: diagnostic_from_context(source),
         },
     }
 }
