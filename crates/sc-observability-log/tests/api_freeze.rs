@@ -4,12 +4,12 @@
 // - a-5 R-A4-004: `LogGuard::health`, the `BridgeHealthReport` snapshot types,
 //   `BRIDGE_HEALTH_SCHEMA_VERSION`, the `Timestamp` re-export, and
 //   `Serialize`/`Deserialize` on `DroppedEvents`.
-// - a-5 R-A4-001: `FlushError::ShutDown` and its code
+// - a-5 R-A4-001: `FlushError::NotRunning` and its code
 //   `SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN` (flush after shutdown started).
 // - a-5 R-A4-005 (transferable public bridge contract): `LogGuard::control` and
 //   `LogControl` (`flush`, `health`, `active_log_path`, `submit`) replacing the
 //   round-1 `LogHandle`; `BridgeHealth` renamed `BridgeHealthReport`;
-//   `BridgeLifecycle::ShutdownTimedOut`; `StructuredRecord`, `SubmitOutcome`,
+//   `BridgeLifecycle::Failed`; `StructuredRecord`, `SubmitOutcome`,
 //   `SubmitError`, `InvalidInputReason`, `JsonMap`/`JsonValue`; `FailureReport`,
 //   `Failure`, `InitFailure`, `FlushFailure`, `ShutdownFailure`,
 //   `CONTROL_SCHEMA_VERSION` and `report()` on every error; `Serialize`/
@@ -86,7 +86,7 @@ fn a1_public_api_is_frozen() {
     let _ = |e: FlushError| match e {
         FlushError::TimedOut { timeout: _ } | FlushError::Logger { source: _ } => (),
         FlushError::HelperSpawn { source: _ } | FlushError::HelperLost => (),
-        FlushError::ShutDown | FlushError::InProgress => (),
+        FlushError::NotRunning { phase: _ } | FlushError::InProgress => (),
     };
     let _ = |e: ShutdownError| match e {
         ShutdownError::TimedOut { timeout: _ } | ShutdownError::FinalFlush { source: _ } => (),
@@ -163,7 +163,7 @@ fn a5_health_api_is_frozen() {
     // Exhaustive matches over the state enums.
     let _ = |l: BridgeLifecycle| match l {
         BridgeLifecycle::Running | BridgeLifecycle::ShuttingDown => (),
-        BridgeLifecycle::ShutdownTimedOut | BridgeLifecycle::Stopped => (),
+        BridgeLifecycle::Failed | BridgeLifecycle::Stopped => (),
     };
     let _ = |s: BridgeHealthState| match s {
         BridgeHealthState::Healthy

@@ -130,8 +130,8 @@ pub enum BridgeLifecycle {
     Running,
     /// `shutdown` has started: records are no longer accepted.
     ShuttingDown,
-    /// `shutdown` returned `ShutdownError::TimedOut`; a detached helper may still complete it.
-    ShutdownTimedOut,
+    /// Completion is unconfirmed (for example a shutdown helper could not run).
+    Failed,
     /// Final: the logger has shut down, or shutdown ended with nothing left to complete.
     Stopped,
 }
@@ -580,7 +580,7 @@ mod tests {
         let report = report(LoggingHealthState::Healthy, SinkHealthState::Healthy);
         for lifecycle in [
             BridgeLifecycle::ShuttingDown,
-            BridgeLifecycle::ShutdownTimedOut,
+            BridgeLifecycle::Failed,
             BridgeLifecycle::Stopped,
         ] {
             let health = project(

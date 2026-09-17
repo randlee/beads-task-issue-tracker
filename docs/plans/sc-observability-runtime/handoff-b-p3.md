@@ -1,14 +1,15 @@
-# B.P3 BTIT source implementation handoff
+# B.P3 BTIT source implementation progress record
 
-This record identifies the immutable implementation commit for independent
-critical review. It is source completion evidence only: it does not approve
-the destination copy, runtime public API, registry publication, merge, or QA.
+This is a provisional progress record, not source-completion evidence. The
+active source layer remains under contract correction and is not ready for
+independent critical review. It does not approve the destination copy, runtime
+public API, registry publication, merge, or QA.
 
 ## Revisions and staged package provenance
 
 | Item | Value |
 | --- | --- |
-| BTIT implementation source | `8c8e2565ab44a222bb1c64b8f855f597cf2086db` |
+| Initial implementation source | `8c8e2565ab44a222bb1c64b8f855f597cf2086db` |
 | Reviewed target bridge contract | `84b32e9d6718418371ffd25a3de52346278725ca` |
 | B.P2 candidate version | `1.3.0` (staged; never published) |
 | B.P2 package source | `561f89923c7f4fdfa9cd0fafa929a5d6dc94dfe5` |
@@ -29,7 +30,7 @@ Rust job and runs that verifier.
 | `sc-observe-1.3.0.crate` | `6834769a32ee2c741a6ee050cc10a9b1a4a20f5cc0284a158b522ca22d6d581b` |
 | `sc-observability-otlp-1.3.0.crate` | `56bfd2a95dca677d4b173559070c17a1cdab6875a57904fe10e329cba4198a59` |
 
-## Contract disposition and removals
+## Implemented progress (not final disposition)
 
 - Removed the independent bridge `THRESHOLD`, `THRESHOLD_OFF`,
   `encode_threshold`, `level_enabled`, and `to_log_level_filter` policy path.
@@ -41,7 +42,9 @@ Rust job and runs that verifier.
 - Added typed `BridgeEvent`, `EmitOutcome` (the core `AdmissionOutcome` alias),
   direct `try_log`, query, non-owning drop snapshot and `wait_stopped` surface.
   Direct, facade, and macro paths use staged `try_log_with_outcome` and the
-  same reentrancy/containment/drop accounting boundary.
+  same reentrancy/containment/drop accounting boundary. Lifecycle/result
+  retention, old export reconciliation and the complete fixture matrix remain
+  active correction work.
 - Added the reviewed direct/control errors and `LifecyclePhase`, tagged Serde
   forms, stable code/remediation methods, typed field-key rejection and
   unconfirmed-shutdown result. Retained control observation does not assert a
@@ -50,7 +53,7 @@ Rust job and runs that verifier.
   revision snapshot; existing compatibility projections remain available while
   B.1 owns final destination export acceptance.
 
-## Source validation and raw evidence
+## Provisional validation and raw evidence
 
 Performed locally after reconstructing exact archives from:
 
@@ -75,5 +78,6 @@ the package suite. The required three-platform source qualification is prepared
 by `.github/workflows/ci.yml` on the final source branch; its raw run URLs and
 results must be appended by independent QA rather than inferred from B.P2.
 
-Independent critical review/re-review and final source acceptance remain
-pending. No B.1 copy or B.7 publication was performed.
+Independent critical review/re-review, final source acceptance, and complete
+cross-platform qualification remain pending. No B.1 copy or B.7 publication
+was performed.

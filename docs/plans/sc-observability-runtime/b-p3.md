@@ -1,6 +1,6 @@
 ---
 id: SC-OBS-B.P3-source
-status: complete
+status: in_progress
 qa_status: not_dispatched
 merge_status: unmerged
 branch: feature/sc-obs-B-P3-runtime-bridge
@@ -72,9 +72,10 @@ Maintain a worktree-local checklist for all deliverables and contract fixtures:
 first implement every item, then inspect every actual file and its evidence.
 Fix and recheck failures before handoff. Lead completeness review precedes QA.
 
-`status: complete` means source implementation complete only; keep `qa_status`
-and `merge_status` separate. No B.1 destination copy, live publication, binding
-implementation or invented source acceptance belongs in this task.
+Do not set `status: complete` until all target contract rows and fixtures have
+been rechecked on the final source SHA; keep `qa_status` and `merge_status`
+separate. No B.1 destination copy, live publication, binding implementation or
+invented source acceptance belongs in this task.
 
 The installed bd tool currently refuses this legacy Dolt workspace. Preserve
 `.beads` unchanged; record work through the registered ATM task and report this

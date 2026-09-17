@@ -101,7 +101,7 @@ fn health_snapshot_tracks_the_lifecycle() {
     // A control outlives the guard without owning it: a late flush is rejected clearly.
     assert!(matches!(
         control.flush(Duration::from_secs(1)),
-        Err(sc_observability_log::FlushError::ShutDown)
+        Err(sc_observability_log::FlushError::NotRunning { .. })
     ));
 
     // A record after shutdown is filtered before the bridge: not written, not counted.

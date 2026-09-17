@@ -3,7 +3,7 @@
 //! R-A4-005 design evidence 4 (timeout versus final stop). A submission blocks
 //! inside a custom redactor while it holds the installed logger, so the owner's
 //! `shutdown` cannot gain sole ownership within its timeout and returns
-//! `ShutdownError::TimedOut`. The lifecycle is then `ShutdownTimedOut` (not the
+//! `ShutdownError::TimedOut`. The lifecycle remains `ShuttingDown` (not the
 //! final `Stopped`), and new submissions are rejected. Releasing the redactor lets
 //! the detached shutdown helper finish: health reports `Stopped` with the stopped
 //! writer's final report, and the record admitted before the late completion is
@@ -24,7 +24,7 @@ use sc_observability::{RedactionPolicy, Redactor};
 use sc_observability_log::{
     ActionName, BridgeHealthState, BridgeLifecycle, BridgeOptions, JsonValue, Level, LevelFilter,
     LoggerConfig, ServiceName, ShutdownError, StructuredRecord, SubmitError, SubmitOutcome,
-    WriterStatus,
+    WaitError, WriterStatus,
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(150);
@@ -106,7 +106,7 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
 
     // 2. Timed out is not final: lifecycle says so, nothing is accepted, no final report yet.
     let pending = control.health();
-    assert_eq!(pending.lifecycle, BridgeLifecycle::ShutdownTimedOut);
+    assert_eq!(pending.lifecycle, BridgeLifecycle::ShuttingDown);
     assert_eq!(pending.state, BridgeHealthState::Unavailable);
     assert!(
         pending.logger.is_none(),
@@ -114,14 +114,18 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
     );
     assert_eq!(
         serde_json::to_value(&pending).unwrap()["lifecycle"],
-        "shutdown_timed_out"
+        "shutting_down"
     );
     assert_eq!(
         control.submit(StructuredRecord::new(Level::ERROR, "shutdown_timeout")),
         Err(SubmitError::Stopped {
-            lifecycle: BridgeLifecycle::ShutdownTimedOut
+            lifecycle: BridgeLifecycle::ShuttingDown
         })
     );
+    assert!(matches!(
+        control.wait_stopped(Duration::from_millis(10)),
+        Err(WaitError::TimedOut { .. })
+    ));
 
     // 3. Release the blocked submission: the detached helper completes the shutdown late.
     release_tx.send(()).unwrap();
@@ -144,6 +148,13 @@ fn timed_out_shutdown_completes_late_and_is_observable() {
         .expect("final report after late completion");
     assert_eq!(logger.writer_state, WriterStatus::Stopped);
     assert_eq!(logger.queue.depth, 0);
+    let first_report = control.wait_stopped(Duration::ZERO).unwrap();
+    let second_report = control.wait_stopped(Duration::ZERO).unwrap();
+    assert_eq!(
+        serde_json::to_value(&first_report).unwrap(),
+        serde_json::to_value(&second_report).unwrap(),
+        "waiters observe the one retained late result rather than rebuilding it"
+    );
 
     // The late shutdown flushed the record admitted while it was pending.
     let contents = std::fs::read_to_string(&path).unwrap();

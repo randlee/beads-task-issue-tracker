@@ -94,7 +94,7 @@ pub enum FlushFailure {
     HelperSpawn,
     /// [`FlushError::HelperLost`].
     HelperLost,
-    /// [`FlushError::ShutDown`].
+    /// [`FlushError::NotRunning`].
     ShutDown,
     /// [`FlushError::InProgress`]: a previous flush helper is still running.
     InProgress,
@@ -167,7 +167,7 @@ impl FlushError {
             Self::Logger { .. } => FlushFailure::Logger,
             Self::HelperSpawn { .. } => FlushFailure::HelperSpawn,
             Self::HelperLost => FlushFailure::HelperLost,
-            Self::ShutDown => FlushFailure::ShutDown,
+            Self::NotRunning { .. } => FlushFailure::ShutDown,
             Self::InProgress => FlushFailure::InProgress,
         };
         report(
@@ -245,7 +245,10 @@ mod tests {
                 timeout: Duration::from_millis(1500),
             }
             .report(),
-            FlushError::ShutDown.report(),
+            FlushError::NotRunning {
+                phase: crate::LifecyclePhase::Stopped,
+            }
+            .report(),
             ShutdownError::TimedOut {
                 timeout: Duration::from_secs(2),
             }

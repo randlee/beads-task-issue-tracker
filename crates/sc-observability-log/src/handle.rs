@@ -9,12 +9,16 @@ use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, PoisonError, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::__private::EventParts;
-use crate::{BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, health};
+use crate::{
+    BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, ShutdownOutcome,
+    ShutdownReport, UnconfirmedShutdown, health,
+};
 use sc_observability::TryLogError;
+use sc_observability_types::DiagnosticInfo;
 
 /// A rejected submission: every failure of the guarded core maps to exactly one [`DropCause`].
 ///
@@ -75,37 +79,22 @@ pub(crate) struct Installed {
 pub(crate) static SLOT: RwLock<Option<Arc<Installed>>> = RwLock::new(None);
 pub(crate) static INSTALLED: AtomicBool = AtomicBool::new(false);
 
-/// Whether this process has ever successfully claimed bridge initialization.
-pub(crate) fn installed_once() -> bool {
-    INSTALLED.load(Ordering::SeqCst)
-}
-
 /// Encoded [`BridgeLifecycle`]; `Stopped` until `init` succeeds (no guard exists before).
 static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_STOPPED);
 const LIFECYCLE_RUNNING: u8 = 0;
 const LIFECYCLE_SHUTTING_DOWN: u8 = 1;
 const LIFECYCLE_STOPPED: u8 = 2;
-const LIFECYCLE_SHUTDOWN_TIMED_OUT: u8 = 3;
+const LIFECYCLE_FAILED: u8 = 3;
 
 /// Publishes a lifecycle transition; read lock-free by health snapshots.
 pub(crate) fn set_lifecycle(lifecycle: BridgeLifecycle) {
     let encoded = match lifecycle {
         BridgeLifecycle::Running => LIFECYCLE_RUNNING,
         BridgeLifecycle::ShuttingDown => LIFECYCLE_SHUTTING_DOWN,
-        BridgeLifecycle::ShutdownTimedOut => LIFECYCLE_SHUTDOWN_TIMED_OUT,
+        BridgeLifecycle::Failed => LIFECYCLE_FAILED,
         BridgeLifecycle::Stopped => LIFECYCLE_STOPPED,
     };
     LIFECYCLE.store(encoded, Ordering::SeqCst);
-}
-
-/// `ShuttingDown` -> `ShutdownTimedOut`, unless the detached helper already reached `Stopped`.
-fn mark_shutdown_timed_out() {
-    let _ = LIFECYCLE.compare_exchange(
-        LIFECYCLE_SHUTTING_DOWN,
-        LIFECYCLE_SHUTDOWN_TIMED_OUT,
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-    );
 }
 
 /// Current lifecycle phase.
@@ -113,8 +102,124 @@ pub(crate) fn lifecycle() -> BridgeLifecycle {
     match LIFECYCLE.load(Ordering::SeqCst) {
         LIFECYCLE_RUNNING => BridgeLifecycle::Running,
         LIFECYCLE_SHUTTING_DOWN => BridgeLifecycle::ShuttingDown,
-        LIFECYCLE_SHUTDOWN_TIMED_OUT => BridgeLifecycle::ShutdownTimedOut,
+        LIFECYCLE_FAILED => BridgeLifecycle::Failed,
         _ => BridgeLifecycle::Stopped,
+    }
+}
+
+/// Target lifecycle projection shared by the owner and non-owning controls.
+pub(crate) fn lifecycle_phase() -> crate::LifecyclePhase {
+    match lifecycle() {
+        BridgeLifecycle::Running => crate::LifecyclePhase::Running,
+        BridgeLifecycle::ShuttingDown => crate::LifecyclePhase::Stopping,
+        BridgeLifecycle::Stopped => crate::LifecyclePhase::Stopped,
+        BridgeLifecycle::Failed => crate::LifecyclePhase::Failed,
+    }
+}
+
+/// Completion state belongs to one bridge-wide coordinator, independent of the
+/// owner and every control. A timeout ends only one caller's wait, never this
+/// operation.
+enum ShutdownState {
+    NotStarted,
+    InProgress,
+    Complete(Box<ShutdownReport>),
+}
+
+struct ShutdownCoordinator {
+    state: Mutex<ShutdownState>,
+    complete: Condvar,
+}
+
+static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
+
+fn shutdown_coordinator() -> &'static ShutdownCoordinator {
+    SHUTDOWN_COORDINATOR.get_or_init(|| ShutdownCoordinator {
+        state: Mutex::new(ShutdownState::NotStarted),
+        complete: Condvar::new(),
+    })
+}
+
+pub(crate) fn begin_shutdown() -> bool {
+    let coordinator = shutdown_coordinator();
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match &*state {
+        ShutdownState::NotStarted => {
+            *state = ShutdownState::InProgress;
+            true
+        }
+        ShutdownState::InProgress | ShutdownState::Complete(_) => false,
+    }
+}
+
+fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
+    set_lifecycle(lifecycle);
+    let coordinator = shutdown_coordinator();
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if !matches!(&*state, ShutdownState::Complete(_)) {
+        *state = ShutdownState::Complete(Box::new(ShutdownReport {
+            outcome,
+            health: health::snapshot(),
+        }));
+        coordinator.complete.notify_all();
+    }
+}
+
+fn diagnostic(
+    code: sc_observability_types::ErrorCode,
+    message: String,
+) -> sc_observability_types::OperationDiagnostic {
+    sc_observability_types::OperationDiagnostic {
+        code,
+        message,
+        remediation: sc_observability_types::Remediation::not_recoverable(
+            "inspect retained lifecycle health; writer completion is unconfirmed",
+        ),
+        at: sc_observability_types::Timestamp::now_utc(),
+    }
+}
+
+fn save_unconfirmed(cause: UnconfirmedShutdown) {
+    save_shutdown(
+        ShutdownOutcome::Unconfirmed { cause },
+        BridgeLifecycle::Failed,
+    );
+}
+
+/// Waits only for an already-started shutdown and returns its exact retained
+/// result. It never reconstructs a report from the current lifecycle.
+pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::WaitError> {
+    let coordinator = shutdown_coordinator();
+    let deadline = Instant::now() + timeout;
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    loop {
+        match &*state {
+            ShutdownState::NotStarted => return Err(crate::WaitError::NotStarted),
+            ShutdownState::Complete(report) => return Ok(*report.clone()),
+            ShutdownState::InProgress => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(crate::WaitError::TimedOut { timeout });
+                }
+                let (next, result) = coordinator
+                    .complete
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(PoisonError::into_inner);
+                state = next;
+                if result.timed_out() && matches!(&*state, ShutdownState::InProgress) {
+                    return Err(crate::WaitError::TimedOut { timeout });
+                }
+            }
+        }
     }
 }
 
@@ -460,15 +565,37 @@ pub(crate) fn shutdown_installed(
         if let Some(report) = health::read_report(&stopped) {
             health::store_final_report(report);
         }
-        set_lifecycle(BridgeLifecycle::Stopped);
+        let outcome = match &flushed {
+            Ok(()) => ShutdownOutcome::Stopped,
+            Err(source) => ShutdownOutcome::StoppedWithFlushError {
+                diagnostic: diagnostic(source.diagnostic().code.clone(), source.to_string()),
+            },
+        };
+        save_shutdown(outcome, BridgeLifecycle::Stopped);
         flushed
     });
     match outcome {
         Ok(Ok(())) => Ok(()),
         Err(BoundedError::TimedOut) => Err(ShutdownError::TimedOut { timeout }),
         Ok(Err(source)) => Err(ShutdownError::FinalFlush { source }),
-        Err(BoundedError::Spawn { source }) => Err(ShutdownError::HelperSpawn { source }),
-        Err(BoundedError::WorkerLost) => Err(ShutdownError::HelperLost),
+        Err(BoundedError::Spawn { source }) => {
+            save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                    source.to_string(),
+                ),
+            });
+            Err(ShutdownError::HelperSpawn { source })
+        }
+        Err(BoundedError::WorkerLost) => {
+            save_unconfirmed(UnconfirmedShutdown::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the shutdown helper ended without a result".to_owned(),
+                ),
+            });
+            Err(ShutdownError::HelperLost)
+        }
     }
 }
 
@@ -479,20 +606,22 @@ pub(crate) fn shutdown_installed(
 /// leaves `ShutdownTimedOut` until the detached helper completes and publishes
 /// `Stopped` (see [`shutdown_installed`]).
 pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> {
+    if !begin_shutdown() {
+        return Ok(());
+    }
     set_lifecycle(BridgeLifecycle::ShuttingDown);
     // Runtime admission belongs exclusively to the staged core logger.  The
     // facade is disabled only because shutdown has started; it is never a
     // second threshold policy.
     log::set_max_level(log::LevelFilter::Off);
     let taken = SLOT.write().unwrap_or_else(PoisonError::into_inner).take();
+    let no_logger = taken.is_none();
     let result = match taken {
         Some(installed) => shutdown_installed(installed, timeout),
         None => Ok(()),
     };
-    if matches!(result, Err(ShutdownError::TimedOut { .. })) {
-        mark_shutdown_timed_out();
-    } else {
-        set_lifecycle(BridgeLifecycle::Stopped);
+    if no_logger {
+        save_shutdown(ShutdownOutcome::Stopped, BridgeLifecycle::Stopped);
     }
     result
 }
@@ -513,8 +642,15 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
 /// caller timed out and detached it), a new flush spawns nothing and returns
 /// `FlushError::InProgress`, so a stuck sink cannot accumulate helper threads.
 pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
+    if lifecycle() != BridgeLifecycle::Running {
+        return Err(FlushError::NotRunning {
+            phase: lifecycle_phase(),
+        });
+    }
     let Some(installed) = current_installed() else {
-        return Err(FlushError::ShutDown);
+        return Err(FlushError::NotRunning {
+            phase: lifecycle_phase(),
+        });
     };
     let Some(flight) = Flight::claim(&FLUSH_IN_FLIGHT) else {
         return Err(FlushError::InProgress);

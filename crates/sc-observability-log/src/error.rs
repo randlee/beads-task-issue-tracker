@@ -317,9 +317,9 @@ pub enum FlushError {
     /// The flush helper thread ended without a result.
     #[error("the flush helper thread ended without a result")]
     HelperLost,
-    /// Shutdown has started (or finished): there is no logger left to flush.
-    #[error("the logger is shutting down or has shut down; nothing was flushed")]
-    ShutDown,
+    /// The owner has stopped accepting flush requests.
+    #[error("the logger is not running: {phase:?}")]
+    NotRunning { phase: LifecyclePhase },
     /// A previous flush helper is still running (possibly detached after its caller's
     /// timeout); no new helper was started and nothing new was flushed.
     #[error("a previous flush is still running; no new flush was started")]
@@ -398,7 +398,7 @@ impl FlushError {
             Self::Logger { source } => source.diagnostic().code.clone(),
             Self::HelperSpawn { .. } => error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
             Self::HelperLost => error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
-            Self::ShutDown => error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+            Self::NotRunning { .. } => error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
             Self::InProgress => error_codes::SC_OBSERVABILITY_LOG_FLUSH_IN_PROGRESS,
         }
     }
@@ -419,7 +419,7 @@ impl FlushError {
                 "shut the LogGuard down",
                 ["the logger may be degraded after a panic inside sc-observability"],
             ),
-            Self::ShutDown => Remediation::not_recoverable(
+            Self::NotRunning { .. } => Remediation::not_recoverable(
                 "the lifecycle owner has shut the logger down; the final shutdown flushed what was queued",
             ),
             Self::InProgress => Remediation::recoverable(
@@ -794,8 +794,10 @@ mod tests {
                 error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
             ),
             (
-                FlushError::ShutDown,
-                error_codes::SC_OBSERVABILITY_LOG_FLUSH_AFTER_SHUTDOWN,
+                FlushError::NotRunning {
+                    phase: LifecyclePhase::Stopped,
+                },
+                error_codes::SC_OBSERVABILITY_LOG_NOT_RUNNING,
             ),
             (
                 FlushError::InProgress,
@@ -892,11 +894,11 @@ mod tests {
             serde_json::json!({"kind": "invalid_input", "reason": "reserved_field_key", "key": "sc_observability_log.x"})
         );
         let stopped = SubmitError::Stopped {
-            lifecycle: BridgeLifecycle::ShutdownTimedOut,
+            lifecycle: BridgeLifecycle::Failed,
         };
         assert_eq!(
             serde_json::to_value(&stopped).unwrap(),
-            serde_json::json!({"kind": "stopped", "lifecycle": "shutdown_timed_out"})
+            serde_json::json!({"kind": "stopped", "lifecycle": "failed"})
         );
         for error in submit_errors() {
             let round_trip: SubmitError =

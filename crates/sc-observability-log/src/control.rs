@@ -126,42 +126,7 @@ impl LogControl {
         &self,
         timeout: Duration,
     ) -> Result<crate::ShutdownReport, crate::WaitError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            match handle::lifecycle() {
-                BridgeLifecycle::Stopped => {
-                    if !handle::installed_once() {
-                        return Err(crate::WaitError::NotStarted);
-                    }
-                    return Ok(crate::ShutdownReport {
-                        outcome: crate::ShutdownOutcome::Stopped,
-                        health: health::snapshot(),
-                    });
-                }
-                BridgeLifecycle::ShutdownTimedOut => {
-                    return Ok(crate::ShutdownReport {
-                        outcome: crate::ShutdownOutcome::Unconfirmed {
-                            cause: crate::UnconfirmedShutdown::HelperLost {
-                                diagnostic: operation_diagnostic(
-                                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
-                                    "shutdown completion is not confirmed".to_owned(),
-                                    sc_observability_types::Remediation::recoverable(
-                                        "wait for the owner shutdown to complete",
-                                        std::iter::empty::<String>(),
-                                    ),
-                                ),
-                            },
-                        },
-                        health: health::snapshot(),
-                    });
-                }
-                BridgeLifecycle::Running | BridgeLifecycle::ShuttingDown => {}
-            }
-            if std::time::Instant::now() >= deadline {
-                return Err(crate::WaitError::TimedOut { timeout });
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        handle::wait_stopped(timeout)
     }
 
     /// Submits one structured record to the installed writer without blocking.
@@ -220,10 +185,10 @@ impl LogControl {
     /// Returns [`EmitError`] after exact-once rejection accounting when the
     /// input, lifecycle, queue, writer, or guarded callback rejects admission.
     pub fn try_log(&self, event: BridgeEvent) -> Result<EmitOutcome, EmitError> {
-        if handle::lifecycle() != BridgeLifecycle::Running {
-            return Err(not_running());
-        }
         handle::submit_guarded(|| {
+            if handle::lifecycle() != BridgeLifecycle::Running {
+                return Err(not_running());
+            }
             let installed = handle::current_installed().ok_or_else(not_running)?;
             let event = direct_event(event, &installed)?;
             installed
@@ -264,6 +229,7 @@ fn direct_event(
     installed: &handle::Installed,
 ) -> Result<sc_observability_types::LogEvent, EmitError> {
     let mut fields = JsonMap::new();
+    let mut raw_keys = std::collections::BTreeMap::new();
     for (raw, value) in event.fields {
         let key = mapping::field_key_label(&raw)
             .map_err(|error| EmitError::InvalidField {
@@ -276,12 +242,13 @@ fn direct_event(
                 },
             })?
             .into_owned();
-        if let Some(other_raw_key) = fields.insert(key.clone(), value).map(|_| raw.clone()) {
+        if let Some(other_raw_key) = raw_keys.insert(key.clone(), raw.clone()) {
             return Err(EmitError::InvalidField {
                 raw_key: raw,
                 reason: FieldKeyError::Collision { other_raw_key },
             });
         }
+        fields.insert(key, value);
     }
     let observation = sc_observability_types::Observation::new(installed.service.clone(), ());
     Ok(sc_observability_types::LogEvent {
@@ -306,12 +273,7 @@ fn direct_event(
 }
 
 fn lifecycle_phase() -> LifecyclePhase {
-    match handle::lifecycle() {
-        BridgeLifecycle::Running => LifecyclePhase::Running,
-        BridgeLifecycle::ShuttingDown => LifecyclePhase::Stopping,
-        BridgeLifecycle::Stopped => LifecyclePhase::Stopped,
-        BridgeLifecycle::ShutdownTimedOut => LifecyclePhase::Failed,
-    }
+    handle::lifecycle_phase()
 }
 
 fn not_running() -> EmitError {

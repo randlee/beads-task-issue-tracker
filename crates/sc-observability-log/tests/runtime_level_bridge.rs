@@ -3,14 +3,16 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
+    clippy::too_many_lines,
     reason = "integration fixture keeps one process-global bridge installation"
 )]
 
 use std::time::Duration;
 
 use sc_observability_log::{
-    ActionName, AdmissionOutcome, BridgeEvent, BridgeOptions, LevelChange, LevelChangeSource,
-    LevelFilter, LoggerConfig, ServiceName, TargetCategory,
+    ActionName, AdmissionOutcome, BridgeEvent, BridgeOptions, DropCause, EmitError, FieldKeyError,
+    LevelChange, LevelChangeSource, LevelFilter, LoggerConfig, ServiceName, TargetCategory,
+    WaitError,
 };
 
 struct Scratch(std::path::PathBuf);
@@ -40,6 +42,14 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
     )
     .unwrap();
     let control = guard.control();
+    let path = control.active_log_path().unwrap();
+    assert!(
+        matches!(
+            control.wait_stopped(Duration::ZERO),
+            Err(WaitError::NotStarted)
+        ),
+        "a control observes but never starts owner shutdown"
+    );
     let direct = || BridgeEvent {
         level: sc_observability_log::EventLevel::Debug,
         target: TargetCategory::new("bp3.direct").unwrap(),
@@ -51,6 +61,26 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
         correlation_id: None,
         trace: None,
     };
+
+    let mut colliding_fields = serde_json::Map::new();
+    colliding_fields.insert("bp3.field".to_owned(), serde_json::json!(1));
+    colliding_fields.insert("bp3::field".to_owned(), serde_json::json!(2));
+    let before_collision = control.dropped_events().get(DropCause::InvalidEvent);
+    assert!(matches!(
+        control.try_log(BridgeEvent {
+            fields: colliding_fields,
+            ..direct()
+        }),
+        Err(EmitError::InvalidField {
+            raw_key,
+            reason: FieldKeyError::Collision { other_raw_key },
+        }) if raw_key == "bp3::field" && other_raw_key == "bp3.field"
+    ));
+    assert_eq!(
+        control.dropped_events().get(DropCause::InvalidEvent),
+        before_collision + 1,
+        "a rejected direct collision is accounted exactly once"
+    );
 
     assert_eq!(
         control.try_log(direct()).unwrap(),
@@ -68,17 +98,64 @@ fn direct_facade_and_macro_admission_share_the_core_level_owner() {
     );
     sc_observability_log::debug!(target: "bp3.macro", "macro debug event");
     log::debug!(target: "bp3.facade", "facade debug event");
+    assert!(matches!(
+        guard
+            .elevate_level(LevelFilter::Trace, LevelChangeSource::DiagnosticSession)
+            .unwrap(),
+        LevelChange::Changed { .. }
+    ));
+    assert_eq!(
+        control
+            .try_log(BridgeEvent {
+                level: sc_observability_log::EventLevel::Trace,
+                message: Some("direct trace event".to_owned()),
+                ..direct()
+            })
+            .unwrap(),
+        AdmissionOutcome::Accepted
+    );
+    sc_observability_log::trace!(target: "bp3.macro", "macro trace event");
+    log::trace!(target: "bp3.facade", "facade trace event");
+    guard.flush(Duration::from_secs(5)).unwrap();
+    let contents = std::fs::read_to_string(&path).unwrap();
+    for expected in [
+        "direct debug event",
+        "macro debug event",
+        "facade debug event",
+        "direct trace event",
+        "macro trace event",
+        "facade trace event",
+    ] {
+        assert!(
+            contents.contains(expected),
+            "missing {expected:?}: {contents}"
+        );
+    }
 
     let health = guard.health();
     assert_eq!(health.configured_level, LevelFilter::Info);
-    assert_eq!(health.effective_level, LevelFilter::Debug);
-    assert!(health.level_revision >= 1);
+    assert_eq!(health.effective_level, LevelFilter::Trace);
+    assert!(health.level_revision >= 2);
     guard.shutdown(Duration::from_secs(5)).unwrap();
+    let before_post_stop = control.dropped_events().get(DropCause::NotInstalled);
     assert!(matches!(
-        control
-            .wait_stopped(Duration::from_secs(1))
-            .unwrap()
-            .outcome,
+        control.try_log(direct()),
+        Err(EmitError::NotRunning { .. })
+    ));
+    assert_eq!(
+        control.dropped_events().get(DropCause::NotInstalled),
+        before_post_stop + 1,
+        "post-stop direct rejection is accounted exactly once"
+    );
+    let first_report = control.wait_stopped(Duration::from_secs(1)).unwrap();
+    assert!(matches!(
+        first_report.outcome,
         sc_observability_log::ShutdownOutcome::Stopped
     ));
+    let second_report = control.wait_stopped(Duration::ZERO).unwrap();
+    assert_eq!(
+        serde_json::to_value(&first_report).unwrap(),
+        serde_json::to_value(&second_report).unwrap(),
+        "all controls receive the one saved shutdown result"
+    );
 }

@@ -227,6 +227,14 @@ jobs:
       - name: Test
         run: cargo test --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check
 
+      - name: Release runtime-level bridge fixture
+        run: cargo test --release --locked -p sc-observability-log --test runtime_level_bridge
+
+      - name: Capped startup fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo test --release --locked -p sc-observability-log --features static_level_cap_test --test static_level_cap
+
       # The remaining steps are host-independent, so they run once, on Linux, in bash.
       # CARGO_TERM_COLOR=always (set by the toolchain/cache actions) colors cargo tree's
       # `(*)` marker, which the sed filter would then miss.
