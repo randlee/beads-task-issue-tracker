@@ -381,7 +381,7 @@ impl Drop for EmitScope {
 /// The guarded submission core: reentrancy guard plus panic containment.
 ///
 /// This is the single outermost boundary of every submission, shared by the
-/// `log` facade, the event macros / `#[instrument]` and `LogControl::submit`:
+/// `log` facade, the event macros / `#[instrument]` and `LogControl::try_log`:
 /// exactly one call per record. A rejection is counted under its one
 /// [`DropCause`] *before* it is returned, so a caller that discards the result
 /// (the facade and the macros) still leaves exactly-once drop accounting.

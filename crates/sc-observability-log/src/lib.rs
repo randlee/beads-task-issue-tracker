@@ -4,7 +4,7 @@
 //! a `sc_observability_types::LogEvent` and writes it through one process-wide
 //! `sc_observability::Logger`. Existing `log::info!` (and friends) call sites keep
 //! working unchanged; the tracing-compatible event macros, `#[instrument]` and
-//! [`LogControl::submit`] write through the same logger.
+//! [`LogControl::try_log`] write through the same logger.
 //!
 //! # Quick start
 //!

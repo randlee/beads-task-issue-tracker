@@ -5,7 +5,7 @@ use crate::{DropCause, mapping};
 
 /// Maps every enabled `log` record to a `LogEvent` and submits it through the
 /// guarded submission core (one guard per record, shared with `__private::emit`
-/// and `LogControl::submit`).
+/// and `LogControl::try_log`).
 #[derive(Debug)]
 pub(crate) struct Bridge;
 
