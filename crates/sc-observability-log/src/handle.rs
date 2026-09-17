@@ -140,6 +140,18 @@ static FAIL_NEXT_COORDINATOR_RESERVATION: AtomicBool = AtomicBool::new(false);
 
 type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
 
+#[cfg(feature = "test_hooks")]
+struct SaveShutdownHook {
+    entered: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+}
+
+#[cfg(feature = "test_hooks")]
+static SAVE_SHUTDOWN_HOOK: OnceLock<Mutex<Option<SaveShutdownHook>>> = OnceLock::new();
+
+#[cfg(feature = "test_hooks")]
+static WAIT_STOPPED_HOOK: OnceLock<Mutex<Option<mpsc::SyncSender<()>>>> = OnceLock::new();
+
 #[cfg(test)]
 static SHUTDOWN_WORK_HOOK: OnceLock<Mutex<Option<ShutdownCommand>>> = OnceLock::new();
 
@@ -193,6 +205,51 @@ pub fn fail_next_shutdown_coordinator_reservation() {
     FAIL_NEXT_COORDINATOR_RESERVATION.store(true, Ordering::SeqCst);
 }
 
+/// Pauses the next terminal shutdown save before it locks the coordinator.
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn block_next_shutdown_save(entered: mpsc::SyncSender<()>, release: mpsc::Receiver<()>) {
+    *SAVE_SHUTDOWN_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(SaveShutdownHook { entered, release });
+}
+
+/// Signals immediately before the next in-progress waiter sleeps on completion.
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn notify_next_wait_stopped(entered: mpsc::SyncSender<()>) {
+    *WAIT_STOPPED_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(entered);
+}
+
+#[cfg(feature = "test_hooks")]
+fn run_save_shutdown_hook() {
+    let hook = SAVE_SHUTDOWN_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(hook) = hook {
+        let _ = hook.entered.send(());
+        let _ = hook.release.recv();
+    }
+}
+
+#[cfg(feature = "test_hooks")]
+fn notify_wait_stopped_hook() {
+    if let Some(entered) = WAIT_STOPPED_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+    {
+        let _ = entered.send(());
+    }
+}
+
 fn shutdown_coordinator() -> Option<&'static ShutdownCoordinator> {
     SHUTDOWN_COORDINATOR.get()
 }
@@ -219,6 +276,8 @@ fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
     let Some(coordinator) = shutdown_coordinator() else {
         return;
     };
+    #[cfg(feature = "test_hooks")]
+    run_save_shutdown_hook();
     let mut state = coordinator
         .state
         .lock()
@@ -286,6 +345,8 @@ pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::W
                 if remaining.is_zero() {
                     return Err(crate::WaitError::TimedOut { timeout });
                 }
+                #[cfg(feature = "test_hooks")]
+                notify_wait_stopped_hook();
                 let (next, result) = coordinator
                     .complete
                     .wait_timeout(state, remaining)

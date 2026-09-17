@@ -101,7 +101,7 @@ fn timed_out_owner_shutdown_completes_late_for_repeated_control_waiters() {
         let _ = blocked_tx.send(result);
     });
     entered_rx
-        .recv_timeout(SHUTDOWN_TIMEOUT)
+        .recv_timeout(LATE_COMPLETION_DEADLINE)
         .expect("redactor did not enter before shutdown timeout");
 
     let started = Instant::now();
