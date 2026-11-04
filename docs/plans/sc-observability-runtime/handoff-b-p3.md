@@ -1,8 +1,6 @@
 # B.P3 BTIT source and evidence handoff
 
-This is the complete BTIT source-implementation record. It is not independent
-source QA or acceptance, a destination copy, a merge decision, or a publication
-decision. Those remain separately owned gates.
+This source-implementation record is accompanied by the completed [independent re-review and lead source acceptance](../../reviews/sc-observability-bp3-qa2.md) for exact source `396a9d9f77ca1950eeb92d4f88c0eecadb5ef00b`. Destination copy, merge and publication remain separate gates.
 
 ## Immutable inputs and source revision
 
@@ -11,7 +9,7 @@ decision. Those remain separately owned gates.
 | BTIT implementation SHA | `51fb22c6873b12c541b20b7f909110abb457c240` (QA1 correction layer; based on `c31095326bde604557dd1aa51c7252db7b3d6284`) |
 | BTIT branch / target | `fix/sc-obs-B-P3-source-qa1` → `fix/sc-obs-B-P3-inventory-exports` |
 | Draft review | [BTIT PR #86](https://github.com/randlee/beads-task-issue-tracker/pull/86) |
-| Accepted target design / reviewed runtime contract | `84b32e9d6718418371ffd25a3de52346278725ca`; source acceptance is pending independent QA, while runtime public-API acceptance remains owner-deferred |
+| Accepted target design / reviewed runtime contract | `84b32e9d6718418371ffd25a3de52346278725ca`; source acceptance is recorded in the linked re-review; runtime public-API acceptance remains owner-deferred |
 | B.P2 candidate | `1.3.0`, staged only; never published |
 | B.P2 package source | `561f89923c7f4fdfa9cd0fafa929a5d6dc94dfe5` |
 | B.P2 stage manifest SHA-256 | `822ff4494dcfbf92b3dcf47fa3fceac8df00b7e28baf7777b6a5aa1147078077` |
