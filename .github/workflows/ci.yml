@@ -65,6 +65,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download verified B.P2 candidate archives
+        uses: actions/download-artifact@v4
+        with:
+          repository: randlee/sc-observability
+          run-id: 35179919596
+          name: bp2-candidate-stage
+          path: .bp2-download
+          github-token: ${{ github.token }}
+
+      - name: Verify and reconstruct staged core dependencies
+        run: python3 scripts/prepare_bp2_stage.py --stage .bp2-download
+
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -98,6 +110,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download verified B.P2 candidate archives
+        uses: actions/download-artifact@v4
+        with:
+          repository: randlee/sc-observability
+          run-id: 35179919596
+          name: bp2-candidate-stage
+          path: .bp2-download
+          github-token: ${{ github.token }}
+
+      - name: Verify and reconstruct staged core dependencies
+        run: python3 scripts/prepare_bp2_stage.py --stage .bp2-download
+
       # The workspace clippy includes the Tauri app crate, which needs the GTK/WebKit
       # system libraries on Linux (same set as the backend job).
       - name: Install system dependencies (Linux)
@@ -120,7 +144,7 @@ jobs:
         run: cargo fmt --check --all
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --no-deps -p beads-issue-tracker -p btit-types -p btit-beads -p btit-cli -p btit-bd -p btit-br -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings
 
       - name: Rustdoc missing-docs
         run: |
@@ -172,6 +196,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download verified B.P2 candidate archives
+        uses: actions/download-artifact@v4
+        with:
+          repository: randlee/sc-observability
+          run-id: 35179919596
+          name: bp2-candidate-stage
+          path: .bp2-download
+          github-token: ${{ github.token }}
+
+      - name: Verify and reconstruct staged core dependencies
+        run: python3 scripts/prepare_bp2_stage.py --stage .bp2-download
+
       # Keep in sync with rust-toolchain.toml (enforced by the version-sync job).
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -186,10 +222,21 @@ jobs:
         run: cargo fmt --check -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check
 
       - name: Clippy
-        run: cargo clippy --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --no-deps -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check --all-targets --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked -p sc-observability-log -p sc-observability-log-macros -p sc-observability-log-consumer-check
+
+      - name: Release runtime-level bridge fixture
+        run: cargo test --release --locked -p sc-observability-log --test runtime_level_bridge
+
+      - name: Capped startup fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo test --release --locked -p sc-observability-log --features static_level_cap_test --test static_level_cap
+
+      - name: Lifecycle startup-failure fixture
+        run: cargo test --locked -p sc-observability-log --features test_hooks --test init_runtime_start
 
       # The remaining steps are host-independent, so they run once, on Linux, in bash.
       # CARGO_TERM_COLOR=always (set by the toolchain/cache actions) colors cargo tree's

@@ -9,10 +9,10 @@ num-conv v0.2.0
 powerfmt v0.2.0
 proc-macro2 v1.0.106
 quote v1.0.44
-sc-observability v1.2.0
+sc-observability v1.3.0
 sc-observability-log v0.1.0
 sc-observability-log-macros v0.1.0
-sc-observability-types v1.2.0
+sc-observability-types v1.3.0
 serde v1.0.228
 serde_core v1.0.228
 serde_derive v1.0.228

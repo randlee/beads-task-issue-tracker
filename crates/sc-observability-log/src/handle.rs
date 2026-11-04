@@ -9,19 +9,22 @@ use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, PoisonError, RwLock};
-use std::time::Duration;
-
-use sc_observability::TryLogError;
-use sc_observability_types::LevelFilter;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::__private::EventParts;
-use crate::{BridgeLifecycle, DropCause, DroppedEvents, FlushError, ShutdownError, health};
+use crate::health::BridgeLifecycle;
+use crate::{
+    DropCause, DroppedEvents, FlushError, ShutdownError, ShutdownOutcome, ShutdownReport,
+    UnconfirmedShutdown, health,
+};
+use sc_observability::TryLogError;
+use sc_observability_types::DiagnosticInfo;
 
 /// A rejected submission: every failure of the guarded core maps to exactly one [`DropCause`].
 ///
 /// Implemented by `DropCause` (the facade and the macros, which discard the
-/// result) and by `SubmitError` (`LogControl::submit`, which returns it).
+/// result) and by [`crate::EmitError`] (`LogControl::try_log`, which returns it).
 pub(crate) trait Rejection: Sized {
     /// The single counter this rejection increments.
     fn drop_cause(&self) -> DropCause;
@@ -45,6 +48,27 @@ impl Rejection for DropCause {
     }
 }
 
+impl Rejection for crate::EmitError {
+    fn drop_cause(&self) -> DropCause {
+        match self {
+            Self::InvalidField { .. } | Self::InvalidEvent { .. } => DropCause::InvalidEvent,
+            Self::QueueFull { .. } => DropCause::QueueFull,
+            Self::WriterDegraded { .. } => DropCause::WriterDegraded,
+            Self::ShutdownTimedOut { .. } => DropCause::ShutdownTimedOut,
+            Self::NotRunning { .. } => DropCause::NotInstalled,
+            Self::Reentrant => DropCause::ReentrantEmit,
+            Self::Panicked => DropCause::LoggerPanicked,
+        }
+    }
+
+    fn reentrant() -> Self {
+        Self::Reentrant
+    }
+    fn panicked() -> Self {
+        Self::Panicked
+    }
+}
+
 /// Everything the emit path needs, shared behind one `Arc`.
 pub(crate) struct Installed {
     pub(crate) logger: sc_observability::Logger,
@@ -55,37 +79,23 @@ pub(crate) struct Installed {
 
 pub(crate) static SLOT: RwLock<Option<Arc<Installed>>> = RwLock::new(None);
 pub(crate) static INSTALLED: AtomicBool = AtomicBool::new(false);
-/// Encoded `LevelFilter`: 0 = Off, 1 = Error, 2 = Warn, 3 = Info, 4 = Debug, 5 = Trace.
-pub(crate) static THRESHOLD: AtomicU8 = AtomicU8::new(THRESHOLD_OFF);
-
-pub(crate) const THRESHOLD_OFF: u8 = 0;
 
 /// Encoded [`BridgeLifecycle`]; `Stopped` until `init` succeeds (no guard exists before).
 static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_STOPPED);
 const LIFECYCLE_RUNNING: u8 = 0;
 const LIFECYCLE_SHUTTING_DOWN: u8 = 1;
 const LIFECYCLE_STOPPED: u8 = 2;
-const LIFECYCLE_SHUTDOWN_TIMED_OUT: u8 = 3;
+const LIFECYCLE_FAILED: u8 = 3;
 
 /// Publishes a lifecycle transition; read lock-free by health snapshots.
 pub(crate) fn set_lifecycle(lifecycle: BridgeLifecycle) {
     let encoded = match lifecycle {
         BridgeLifecycle::Running => LIFECYCLE_RUNNING,
         BridgeLifecycle::ShuttingDown => LIFECYCLE_SHUTTING_DOWN,
-        BridgeLifecycle::ShutdownTimedOut => LIFECYCLE_SHUTDOWN_TIMED_OUT,
+        BridgeLifecycle::Failed => LIFECYCLE_FAILED,
         BridgeLifecycle::Stopped => LIFECYCLE_STOPPED,
     };
     LIFECYCLE.store(encoded, Ordering::SeqCst);
-}
-
-/// `ShuttingDown` -> `ShutdownTimedOut`, unless the detached helper already reached `Stopped`.
-fn mark_shutdown_timed_out() {
-    let _ = LIFECYCLE.compare_exchange(
-        LIFECYCLE_SHUTTING_DOWN,
-        LIFECYCLE_SHUTDOWN_TIMED_OUT,
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-    );
 }
 
 /// Current lifecycle phase.
@@ -93,8 +103,186 @@ pub(crate) fn lifecycle() -> BridgeLifecycle {
     match LIFECYCLE.load(Ordering::SeqCst) {
         LIFECYCLE_RUNNING => BridgeLifecycle::Running,
         LIFECYCLE_SHUTTING_DOWN => BridgeLifecycle::ShuttingDown,
-        LIFECYCLE_SHUTDOWN_TIMED_OUT => BridgeLifecycle::ShutdownTimedOut,
+        LIFECYCLE_FAILED => BridgeLifecycle::Failed,
         _ => BridgeLifecycle::Stopped,
+    }
+}
+
+/// Target lifecycle projection shared by the owner and non-owning controls.
+pub(crate) fn lifecycle_phase() -> crate::LifecyclePhase {
+    match lifecycle() {
+        BridgeLifecycle::Running => crate::LifecyclePhase::Running,
+        BridgeLifecycle::ShuttingDown => crate::LifecyclePhase::Stopping,
+        BridgeLifecycle::Stopped => crate::LifecyclePhase::Stopped,
+        BridgeLifecycle::Failed => crate::LifecyclePhase::Failed,
+    }
+}
+
+/// Completion state belongs to one bridge-wide coordinator, independent of the
+/// owner and every control. A timeout ends only one caller's wait, never this
+/// operation.
+enum ShutdownState {
+    NotStarted,
+    InProgress,
+    Complete(Box<ShutdownReport>),
+}
+
+struct ShutdownCoordinator {
+    state: Mutex<ShutdownState>,
+    complete: Condvar,
+    work: mpsc::Sender<ShutdownCommand>,
+}
+
+static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
+
+#[cfg(feature = "test_hooks")]
+static FAIL_NEXT_COORDINATOR_RESERVATION: AtomicBool = AtomicBool::new(false);
+
+type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
+
+#[cfg(test)]
+static SHUTDOWN_WORK_HOOK: OnceLock<Mutex<Option<ShutdownCommand>>> = OnceLock::new();
+
+#[cfg(test)]
+fn run_shutdown_work_hook() {
+    let hook = SHUTDOWN_WORK_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+/// Reserves the sole shutdown worker before the global facade is installed.
+/// A failed reservation is therefore an initialization failure rather than a
+/// partially usable bridge that discovers it cannot complete its lifecycle.
+pub(crate) fn reserve_shutdown_coordinator() -> Result<(), std::io::Error> {
+    #[cfg(feature = "test_hooks")]
+    if FAIL_NEXT_COORDINATOR_RESERVATION.swap(false, Ordering::SeqCst) {
+        return Err(std::io::Error::other(
+            "injected coordinator reservation failure",
+        ));
+    }
+    if SHUTDOWN_COORDINATOR.get().is_some() {
+        return Ok(());
+    }
+    let (work, receiver) = mpsc::channel::<ShutdownCommand>();
+    std::thread::Builder::new()
+        .name("sc-observability-log-shutdown".to_owned())
+        .spawn(move || {
+            // Exactly one lifecycle owner exists, so this worker handles one
+            // final operation and then exits. It is reserved at init rather
+            // than spawned by a timeout caller.
+            if let Ok(command) = receiver.recv() {
+                command();
+            }
+        })?;
+    let _ = SHUTDOWN_COORDINATOR.set(ShutdownCoordinator {
+        state: Mutex::new(ShutdownState::NotStarted),
+        complete: Condvar::new(),
+        work,
+    });
+    Ok(())
+}
+
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn fail_next_shutdown_coordinator_reservation() {
+    FAIL_NEXT_COORDINATOR_RESERVATION.store(true, Ordering::SeqCst);
+}
+
+fn shutdown_coordinator() -> Option<&'static ShutdownCoordinator> {
+    SHUTDOWN_COORDINATOR.get()
+}
+
+pub(crate) fn begin_shutdown() -> bool {
+    let Some(coordinator) = shutdown_coordinator() else {
+        return false;
+    };
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match &*state {
+        ShutdownState::NotStarted => {
+            *state = ShutdownState::InProgress;
+            true
+        }
+        ShutdownState::InProgress | ShutdownState::Complete(_) => false,
+    }
+}
+
+fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
+    set_lifecycle(lifecycle);
+    let Some(coordinator) = shutdown_coordinator() else {
+        return;
+    };
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if !matches!(&*state, ShutdownState::Complete(_)) {
+        let Ok(health) = health::snapshot() else {
+            return;
+        };
+        *state = ShutdownState::Complete(Box::new(ShutdownReport { outcome, health }));
+        coordinator.complete.notify_all();
+    }
+}
+
+fn diagnostic(
+    code: sc_observability_types::ErrorCode,
+    message: String,
+) -> sc_observability_types::OperationDiagnostic {
+    sc_observability_types::OperationDiagnostic {
+        code,
+        message,
+        remediation: sc_observability_types::Remediation::not_recoverable(
+            "inspect retained lifecycle health; writer completion is unconfirmed",
+        ),
+        at: sc_observability_types::Timestamp::now_utc(),
+    }
+}
+
+fn save_unconfirmed(cause: UnconfirmedShutdown) {
+    save_shutdown(
+        ShutdownOutcome::Unconfirmed { cause },
+        BridgeLifecycle::Failed,
+    );
+}
+
+/// Waits only for an already-started shutdown and returns its exact retained
+/// result. It never reconstructs a report from the current lifecycle.
+pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::WaitError> {
+    let Some(coordinator) = shutdown_coordinator() else {
+        return Err(crate::WaitError::NotStarted);
+    };
+    let deadline = Instant::now() + timeout;
+    let mut state = coordinator
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    loop {
+        match &*state {
+            ShutdownState::NotStarted => return Err(crate::WaitError::NotStarted),
+            ShutdownState::Complete(report) => return Ok(*report.clone()),
+            ShutdownState::InProgress => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(crate::WaitError::TimedOut { timeout });
+                }
+                let (next, result) = coordinator
+                    .complete
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(PoisonError::into_inner);
+                state = next;
+                if result.timed_out() && matches!(&*state, ShutdownState::InProgress) {
+                    return Err(crate::WaitError::TimedOut { timeout });
+                }
+            }
+        }
     }
 }
 
@@ -133,44 +321,36 @@ pub(crate) fn dropped_events() -> DroppedEvents {
     DroppedEvents::from_counter(drop_count)
 }
 
-/// Encodes a `LevelFilter` for `THRESHOLD`.
-pub(crate) fn encode_threshold(level: LevelFilter) -> u8 {
+/// Reads the staged core's coherent effective level for lazy facade and macro
+/// evaluation. This is an optimization only: `try_log_with_outcome` remains the
+/// authoritative admission decision and no bridge-owned threshold is retained.
+pub(crate) fn core_enabled(level: sc_observability_types::Level) -> bool {
+    let Some(installed) = current_installed() else {
+        return false;
+    };
+    let effective = installed.logger.level_state().effective_level;
+    level_rank(level) >= filter_rank(effective)
+}
+
+fn level_rank(level: sc_observability_types::Level) -> u8 {
     match level {
-        LevelFilter::Off => THRESHOLD_OFF,
-        LevelFilter::Error => 1,
-        LevelFilter::Warn => 2,
-        LevelFilter::Info => 3,
-        LevelFilter::Debug => 4,
-        LevelFilter::Trace => 5,
+        sc_observability_types::Level::Trace => 0,
+        sc_observability_types::Level::Debug => 1,
+        sc_observability_types::Level::Info => 2,
+        sc_observability_types::Level::Warn => 3,
+        sc_observability_types::Level::Error => 4,
     }
 }
 
-/// Maps a `LevelFilter` to the `log` facade's filter.
-pub(crate) fn to_log_level_filter(level: LevelFilter) -> log::LevelFilter {
+fn filter_rank(level: sc_observability_types::LevelFilter) -> u8 {
     match level {
-        LevelFilter::Off => log::LevelFilter::Off,
-        LevelFilter::Error => log::LevelFilter::Error,
-        LevelFilter::Warn => log::LevelFilter::Warn,
-        LevelFilter::Info => log::LevelFilter::Info,
-        LevelFilter::Debug => log::LevelFilter::Debug,
-        LevelFilter::Trace => log::LevelFilter::Trace,
+        sc_observability_types::LevelFilter::Trace => 0,
+        sc_observability_types::LevelFilter::Debug => 1,
+        sc_observability_types::LevelFilter::Info => 2,
+        sc_observability_types::LevelFilter::Warn => 3,
+        sc_observability_types::LevelFilter::Error => 4,
+        sc_observability_types::LevelFilter::Off => 5,
     }
-}
-
-/// Encoded rank of an event level, comparable with `THRESHOLD`.
-pub(crate) fn level_rank(level: sc_observability_types::Level) -> u8 {
-    match level {
-        sc_observability_types::Level::Error => 1,
-        sc_observability_types::Level::Warn => 2,
-        sc_observability_types::Level::Info => 3,
-        sc_observability_types::Level::Debug => 4,
-        sc_observability_types::Level::Trace => 5,
-    }
-}
-
-/// Lock-free threshold check.
-pub(crate) fn level_enabled(level: sc_observability_types::Level) -> bool {
-    level_rank(level) <= THRESHOLD.load(Ordering::Relaxed)
 }
 
 thread_local! {
@@ -201,7 +381,7 @@ impl Drop for EmitScope {
 /// The guarded submission core: reentrancy guard plus panic containment.
 ///
 /// This is the single outermost boundary of every submission, shared by the
-/// `log` facade, the event macros / `#[instrument]` and `LogControl::submit`:
+/// `log` facade, the event macros / `#[instrument]` and `LogControl::try_log`:
 /// exactly one call per record. A rejection is counted under its one
 /// [`DropCause`] *before* it is returned, so a caller that discards the result
 /// (the facade and the macros) still leaves exactly-once drop accounting.
@@ -209,9 +389,9 @@ impl Drop for EmitScope {
 /// The closure must reach the logger only through the unguarded cores
 /// [`submit_installed`] / [`submit_to`]; calling a guarded entry point from
 /// inside the closure would classify the record as `DropCause::ReentrantEmit`.
-pub(crate) fn submit_guarded<E: Rejection>(
-    submit: impl FnOnce() -> Result<(), E>,
-) -> Result<(), E> {
+pub(crate) fn submit_guarded<T, E: Rejection>(
+    submit: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
     let Some(_scope) = EmitScope::enter() else {
         let rejection = E::reentrant();
         record_drop(rejection.drop_cause());
@@ -233,7 +413,10 @@ pub(crate) fn submit_guarded<E: Rejection>(
 ///
 /// Never call it outside a [`submit_guarded`] closure: it neither contains panics
 /// nor detects reentrancy.
-pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), DropCause> {
+pub(crate) fn submit_to(
+    installed: &Installed,
+    parts: EventParts,
+) -> Result<sc_observability_types::AdmissionOutcome, DropCause> {
     let mut event = crate::mapping::assemble_event(
         parts,
         &installed.service,
@@ -244,7 +427,7 @@ pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), 
     event.trace = crate::context::current_trace();
     installed
         .logger
-        .try_log(event)
+        .try_log_with_outcome(event)
         .map_err(|error| match error {
             TryLogError::QueueFull(_) => DropCause::QueueFull,
             TryLogError::InvalidEvent(_) => DropCause::InvalidEvent,
@@ -256,7 +439,9 @@ pub(crate) fn submit_to(installed: &Installed, parts: EventParts) -> Result<(), 
 /// Unguarded submit core for pre-built parts: slot read, then [`submit_to`].
 ///
 /// Same contract as [`submit_to`]: call it only inside a [`submit_guarded`] closure.
-pub(crate) fn submit_installed(parts: EventParts) -> Result<(), DropCause> {
+pub(crate) fn submit_installed(
+    parts: EventParts,
+) -> Result<sc_observability_types::AdmissionOutcome, DropCause> {
     let installed = current_installed().ok_or(DropCause::NotInstalled)?;
     submit_to(&installed, parts)
 }
@@ -274,9 +459,8 @@ pub(crate) enum BoundedError {
 
 /// Helpers whose caller timed out and whose work has not finished (flush and shutdown).
 ///
-/// Incremented by the caller when its timeout elapses, decremented by the helper
-/// when its work returns or unwinds. Read by health snapshots
-/// (`BridgeHealthReport.helpers.detached`).
+/// This remains private accounting for bounded helper cleanup; native health
+/// deliberately exposes the staged core report plus bridge lifecycle only.
 static DETACHED_HELPERS: AtomicU32 = AtomicU32::new(0);
 
 /// Set while a flush helper runs: at most one flush helper per installed bridge.
@@ -321,14 +505,6 @@ impl Flight {
 impl Drop for Flight {
     fn drop(&mut self) {
         self.flag.store(false, Ordering::SeqCst);
-    }
-}
-
-/// Health of the bounded-operation helper threads.
-pub(crate) fn helper_health() -> crate::HelperHealth {
-    crate::HelperHealth {
-        flush_in_flight: FLUSH_IN_FLIGHT.load(Ordering::SeqCst),
-        detached: DETACHED_HELPERS.load(Ordering::SeqCst),
     }
 }
 
@@ -435,23 +611,97 @@ pub(crate) fn shutdown_installed(
     installed: Arc<Installed>,
     timeout: Duration,
 ) -> Result<(), ShutdownError> {
-    let outcome = run_bounded(timeout, move || {
-        let sole = take_sole(installed);
-        let flushed = sole.logger.flush();
-        let stopped = sole.logger.shutdown();
-        // Final health for post-shutdown snapshots (writer state `Stopped`).
-        if let Some(report) = health::read_report(&stopped) {
-            health::store_final_report(report);
-        }
-        set_lifecycle(BridgeLifecycle::Stopped);
-        flushed
+    enum WorkerOutcome {
+        Completed(Result<(), sc_observability_types::FlushError>),
+        Panicked,
+    }
+
+    let Some(coordinator) = shutdown_coordinator() else {
+        let source =
+            std::io::Error::other("shutdown coordinator was not reserved at initialization");
+        save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+        return Err(ShutdownError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+    };
+    let work = coordinator.work.clone();
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    let command: ShutdownCommand = Box::new(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            #[cfg(test)]
+            run_shutdown_work_hook();
+            let sole = take_sole(installed);
+            let flushed = sole.logger.flush();
+            let stopped = sole.logger.shutdown();
+            health::store_level_state(stopped.level_state());
+            if let Some(report) = health::read_report(&stopped) {
+                health::store_report(report);
+            }
+            let outcome = match &flushed {
+                Ok(()) => ShutdownOutcome::Stopped,
+                Err(source) => ShutdownOutcome::StoppedWithFlushError {
+                    diagnostic: diagnostic(source.diagnostic().code.clone(), source.to_string()),
+                },
+            };
+            save_shutdown(outcome, BridgeLifecycle::Stopped);
+            flushed
+        }));
+        let outcome = if let Ok(flushed) = result {
+            WorkerOutcome::Completed(flushed)
+        } else {
+            save_unconfirmed(UnconfirmedShutdown::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the reserved shutdown worker panicked before completion".to_owned(),
+                ),
+            });
+            WorkerOutcome::Panicked
+        };
+        let _ = result_tx.send(outcome);
     });
-    match outcome {
-        Ok(Ok(())) => Ok(()),
-        Err(BoundedError::TimedOut) => Err(ShutdownError::TimedOut { timeout }),
-        Ok(Err(source)) => Err(ShutdownError::FinalFlush { source }),
-        Err(BoundedError::Spawn { source }) => Err(ShutdownError::HelperSpawn { source }),
-        Err(BoundedError::WorkerLost) => Err(ShutdownError::HelperLost),
+    if let Err(error) = work.send(command) {
+        let source = std::io::Error::other(error.to_string());
+        save_unconfirmed(UnconfirmedShutdown::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+        return Err(ShutdownError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        });
+    }
+    match result_rx.recv_timeout(timeout) {
+        Ok(WorkerOutcome::Completed(Ok(()))) => Ok(()),
+        Ok(WorkerOutcome::Completed(Err(source))) => Err(ShutdownError::FinalFlush {
+            diagnostic: crate::error::diagnostic_from_info(&source),
+        }),
+        Ok(WorkerOutcome::Panicked) | Err(RecvTimeoutError::Disconnected) => {
+            save_unconfirmed(UnconfirmedShutdown::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the reserved shutdown worker ended without a result".to_owned(),
+                ),
+            });
+            Err(ShutdownError::HelperLost {
+                diagnostic: diagnostic(
+                    crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                    "the reserved shutdown worker ended without a result".to_owned(),
+                ),
+            })
+        }
+        Err(RecvTimeoutError::Timeout) => Err(ShutdownError::TimedOut { timeout }),
     }
 }
 
@@ -462,18 +712,28 @@ pub(crate) fn shutdown_installed(
 /// leaves `ShutdownTimedOut` until the detached helper completes and publishes
 /// `Stopped` (see [`shutdown_installed`]).
 pub(crate) fn shutdown_sequence(timeout: Duration) -> Result<(), ShutdownError> {
+    if !begin_shutdown() {
+        return Ok(());
+    }
     set_lifecycle(BridgeLifecycle::ShuttingDown);
-    THRESHOLD.store(THRESHOLD_OFF, Ordering::SeqCst);
+    // Runtime admission belongs exclusively to the staged core logger.  The
+    // facade is disabled only because shutdown has started; it is never a
+    // second threshold policy.
     log::set_max_level(log::LevelFilter::Off);
     let taken = SLOT.write().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(installed) = &taken {
+        health::store_level_state(installed.logger.level_state());
+        if let Some(report) = health::read_report(&installed.logger) {
+            health::store_report(report);
+        }
+    }
+    let no_logger = taken.is_none();
     let result = match taken {
         Some(installed) => shutdown_installed(installed, timeout),
         None => Ok(()),
     };
-    if matches!(result, Err(ShutdownError::TimedOut { .. })) {
-        mark_shutdown_timed_out();
-    } else {
-        set_lifecycle(BridgeLifecycle::Stopped);
+    if no_logger {
+        save_shutdown(ShutdownOutcome::Stopped, BridgeLifecycle::Stopped);
     }
     result
 }
@@ -486,7 +746,7 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
 /// `LogGuard::flush` / `LogControl::flush`: the helper owns an `Arc` clone until
 /// sc-observability's flush returns.
 ///
-/// An empty slot means shutdown has taken the logger: `FlushError::ShutDown`. A
+/// An empty slot means shutdown has taken the logger: `FlushError::NotRunning`. A
 /// flush whose helper already holds its clone when shutdown starts is awaited by
 /// the shutdown's `take_sole`, within the shutdown's own timeout.
 ///
@@ -494,8 +754,15 @@ pub(crate) fn current_installed() -> Option<Arc<Installed>> {
 /// caller timed out and detached it), a new flush spawns nothing and returns
 /// `FlushError::InProgress`, so a stuck sink cannot accumulate helper threads.
 pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
+    if lifecycle() != BridgeLifecycle::Running {
+        return Err(FlushError::NotRunning {
+            phase: lifecycle_phase(),
+        });
+    }
     let Some(installed) = current_installed() else {
-        return Err(FlushError::ShutDown);
+        return Err(FlushError::NotRunning {
+            phase: lifecycle_phase(),
+        });
     };
     let Some(flight) = Flight::claim(&FLUSH_IN_FLIGHT) else {
         return Err(FlushError::InProgress);
@@ -507,10 +774,22 @@ pub(crate) fn flush_installed(timeout: Duration) -> Result<(), FlushError> {
     };
     match run_bounded(timeout, flush) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(source)) => Err(FlushError::Logger { source }),
+        Ok(Err(source)) => Err(FlushError::Logger {
+            diagnostic: crate::error::diagnostic_from_info(&source),
+        }),
         Err(BoundedError::TimedOut) => Err(FlushError::TimedOut { timeout }),
-        Err(BoundedError::Spawn { source }) => Err(FlushError::HelperSpawn { source }),
-        Err(BoundedError::WorkerLost) => Err(FlushError::HelperLost),
+        Err(BoundedError::Spawn { source }) => Err(FlushError::HelperSpawn {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_SPAWN_FAILED,
+                source.to_string(),
+            ),
+        }),
+        Err(BoundedError::WorkerLost) => Err(FlushError::HelperLost {
+            diagnostic: diagnostic(
+                crate::error_codes::SC_OBSERVABILITY_LOG_HELPER_LOST,
+                "the flush helper ended without a result".to_owned(),
+            ),
+        }),
     }
 }
 
@@ -535,6 +814,76 @@ mod tests {
             panic!("worker panic (expected by this test)");
         });
         assert!(matches!(result, Err(BoundedError::WorkerLost)));
+    }
+
+    #[test]
+    fn reserved_shutdown_worker_publishes_failure_after_a_waiter_times_out() {
+        let root = std::env::temp_dir().join(format!("bp3-worker-{}", std::process::id()));
+        let service = sc_observability_types::ServiceName::new("bp3-worker");
+        assert!(service.is_ok());
+        let Some(service) = service.ok() else {
+            return;
+        };
+        let mut config = sc_observability::LoggerConfig::default_for(service.clone(), root);
+        config.enable_console_sink = false;
+        let logger = sc_observability::Logger::new(config);
+        assert!(logger.is_ok());
+        let Some(logger) = logger.ok() else {
+            return;
+        };
+        let initial_report = logger.health();
+        health::set_snapshot_config(health::SinkConfig {
+            active_log_path: Some(initial_report.active_log_path.clone()),
+            level_state: logger.level_state(),
+        });
+        health::store_report(initial_report);
+        let action = sc_observability_types::ActionName::new("log.record");
+        assert!(action.is_ok());
+        let Some(action) = action.ok() else {
+            return;
+        };
+        let installed = Arc::new(Installed {
+            logger,
+            service,
+            identity: sc_observability_types::ProcessIdentity::default(),
+            options: crate::BridgeOptions {
+                default_action: action,
+                parse_bracket_action: false,
+            },
+        });
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        *SHUTDOWN_WORK_HOOK
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(move || {
+            let _ = entered_tx.send(());
+            let _ = release_rx.recv();
+            panic!("test worker failure");
+        }));
+        assert!(reserve_shutdown_coordinator().is_ok());
+        assert!(begin_shutdown());
+        set_lifecycle(BridgeLifecycle::ShuttingDown);
+        let owner =
+            std::thread::spawn(move || shutdown_installed(installed, Duration::from_millis(1)));
+        assert!(entered_rx.recv().is_ok());
+        assert!(matches!(
+            wait_stopped(Duration::from_millis(1)),
+            Err(crate::WaitError::TimedOut { .. })
+        ));
+        assert!(matches!(
+            owner.join(),
+            Ok(Err(ShutdownError::TimedOut { .. }))
+        ));
+        assert!(release_tx.send(()).is_ok());
+        assert!(matches!(
+            wait_stopped(Duration::from_secs(1)),
+            Ok(ShutdownReport {
+                outcome: ShutdownOutcome::Unconfirmed { .. },
+                ..
+            })
+        ));
+        assert_eq!(lifecycle(), BridgeLifecycle::Failed);
     }
 
     /// Signals its channel when dropped: the work closure has returned.
@@ -673,34 +1022,10 @@ mod tests {
     }
 
     #[test]
-    fn threshold_encoding_orders_levels() {
-        assert_eq!(encode_threshold(LevelFilter::Off), THRESHOLD_OFF);
-        assert!(
-            level_rank(sc_observability_types::Level::Error)
-                <= encode_threshold(LevelFilter::Error)
-        );
-        assert!(
-            level_rank(sc_observability_types::Level::Warn) > encode_threshold(LevelFilter::Error)
-        );
-        assert!(
-            level_rank(sc_observability_types::Level::Trace)
-                <= encode_threshold(LevelFilter::Trace)
-        );
-        assert_eq!(
-            to_log_level_filter(LevelFilter::Debug),
-            log::LevelFilter::Debug
-        );
-        for (filter, log_filter) in [
-            (LevelFilter::Off, log::LevelFilter::Off),
-            (LevelFilter::Error, log::LevelFilter::Error),
-            (LevelFilter::Warn, log::LevelFilter::Warn),
-            (LevelFilter::Info, log::LevelFilter::Info),
-            (LevelFilter::Debug, log::LevelFilter::Debug),
-            (LevelFilter::Trace, log::LevelFilter::Trace),
-        ] {
-            // The encoding matches the log facade's own ordering (Off = 0 .. Trace = 5).
-            assert_eq!(usize::from(encode_threshold(filter)), log_filter as usize);
-        }
+    fn bridge_has_no_independent_level_policy() {
+        // Admission filtering is delegated to sc-observability's LevelOwner.
+        // The bridge keeps no mutable level threshold to test or synchronize.
+        assert_eq!(log::STATIC_MAX_LEVEL, log::LevelFilter::Trace);
     }
 
     /// The only unit test that calls `submit_guarded` or `record_drop`, so its counter deltas cannot race.
@@ -740,7 +1065,7 @@ mod tests {
         // A closure error is counted under its own cause.
         let invalid_before = drop_count(DropCause::InvalidEvent);
         assert_eq!(
-            submit_guarded(|| Err(DropCause::InvalidEvent)),
+            submit_guarded(|| Err::<(), DropCause>(DropCause::InvalidEvent)),
             Err(DropCause::InvalidEvent)
         );
         assert_eq!(drop_count(DropCause::InvalidEvent), invalid_before + 1);

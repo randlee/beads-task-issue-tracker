@@ -39,6 +39,9 @@ coverage
 
 # Cargo workspace build output
 /target/
+# Reconstructed only by scripts/prepare_bp2_stage.py after it verifies the
+# immutable B.P2 archive manifest.  Never substitute a sibling source checkout.
+/.bp2-stage/
 
 # repowise — index & caches are machine-local artifacts (regenerable via
 # `repowise update --provider codex_cli --yes`). Config, data exports, and

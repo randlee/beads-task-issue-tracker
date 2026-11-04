@@ -92,8 +92,14 @@ impl OwnedGuard for LogGuard {
     /// Purpose: post-mortem evidence in the JSONL file (and the debug panel) of
     /// whether the session lost records or ran degraded.
     fn report_before_shutdown(&self) {
-        let health = self.health();
-        let dropped = health.dropped_events;
+        let health = match self.health() {
+            Ok(health) => health,
+            Err(error) => {
+                log::warn!("[logging] health at exit unavailable: {error}");
+                return;
+            }
+        };
+        let dropped = health.dropped;
         if dropped.total() > 0 {
             let summary: Vec<String> = DropCause::ALL
                 .iter()
@@ -368,8 +374,7 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use sc_observability_log::{
-        ActionName, BridgeHealthState, BridgeLifecycle, BridgeOptions, LevelFilter, LoggerConfig,
-        ServiceName,
+        ActionName, BridgeOptions, LevelFilter, LifecyclePhase, LoggerConfig, ServiceName,
     };
 
     use super::*;
@@ -508,9 +513,10 @@ mod tests {
             "a clear racing exit is rejected, got {clear_result:?}"
         );
 
-        let health = late_control.health();
-        assert_eq!(health.lifecycle, BridgeLifecycle::Stopped);
-        assert_eq!(health.state, BridgeHealthState::Unavailable);
+        let health = late_control
+            .health()
+            .map_err(|e| TestError(e.to_string()))?;
+        assert_eq!(health.lifecycle, LifecyclePhase::Stopped);
 
         let contents = fs::read_to_string(&log_path)?;
         assert!(
@@ -551,7 +557,8 @@ mod tests {
             Some(1)
         );
         assert_eq!(text(&health, "lifecycle").as_deref(), Some("running"));
-        assert!(health.get("dropped_events").is_some_and(Value::is_object));
+        assert!(health.get("dropped").is_some_and(Value::is_object));
+        assert!(health.get("logging").is_some_and(Value::is_object));
         Ok(())
     }
 
