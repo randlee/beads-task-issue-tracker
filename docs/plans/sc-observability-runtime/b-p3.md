@@ -11,7 +11,7 @@ evidence_status: complete
 evidence_branch: fix/sc-obs-B-P3-handoff-evidence
 evidence_worktree: /Users/randlee/github/beads-task-issue-tracker-worktrees/fix/sc-obs-B-P3-handoff-evidence
 evidence_target: feature/sc-obs-B-P3-runtime-bridge
-source_acceptance: owner_deferred
+source_acceptance: pending_independent_qa
 ---
 
 # B.P3 — Implement the reviewed sc-observability bridge contract in BTIT

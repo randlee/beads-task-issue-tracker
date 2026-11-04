@@ -11,8 +11,9 @@ python3 scripts/generate_bp3_handoff_inventory.py \
 
 The generator reads each listed file with `git show REV:path`, so this artifact
 does not accidentally describe the handoff branch. The accepted target design
-and reviewed runtime contract are `84b32e9d6718418371ffd25a3de52346278725ca`;
-runtime public-source acceptance remains owner-deferred.
+and reviewed runtime contract are `84b32e9d6718418371ffd25a3de52346278725ca`.
+Source acceptance is pending independent QA; only runtime public-API acceptance
+remains owner-deferred.
 
 ## Root contract and re-exports
 
@@ -137,13 +138,13 @@ Source-derived counts: 32 public declarations, 5 impl headers, 5 derive lists.
 
 - L91 public declaration: `pub mod error_codes;`
 - L110 public declaration: `pub use control::{BridgeEvent, EmitOutcome, LogControl};`
-- L112 public declaration: `pub use error::{`
+- L112 public declaration: `pub use error::{ ControlError, DropCause, EmitError, FieldKeyError, FlushError, InitError, LifecyclePhase, ShutdownError, WaitError, };`
 - L117 public declaration: `pub use error::{ShutdownOutcome, ShutdownReport, UnconfirmedShutdown};`
 - L119 public declaration: `pub use health::{BRIDGE_HEALTH_SCHEMA_VERSION, BridgeHealthReport};`
 - L121 public declaration: `pub use sc_observability::LoggerConfig;`
-- L124 public declaration: `pub use sc_observability_types::{`
+- L124 public declaration: `pub use sc_observability_types::{ ActionName, CorrelationId, ErrorCode, LevelFilter, LoggingHealthReport, OutcomeLabel, ProcessIdentityPolicy, Remediation, ServiceName, TargetCategory, Timestamp, TraceContext, };`
 - L131 public declaration: `pub use handle::fail_next_shutdown_coordinator_reservation;`
-- L133 public declaration: `pub use sc_observability_types::{`
+- L133 public declaration: `pub use sc_observability_types::{ AdmissionOutcome, Level as EventLevel, LevelChange, LevelChangeError, LevelChangeSource, LevelState, LogEvent, LogQuery, LogSnapshot, OperationDiagnostic, };`
 - L142 public declaration: `pub use sc_observability_log_macros::{debug, error, event, info, instrument, trace, warn};`
 - L150 derive: `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]`
 - L152 public declaration: `pub struct Level(LevelInner);`
