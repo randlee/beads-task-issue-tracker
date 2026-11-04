@@ -124,7 +124,7 @@ pub(crate) fn lifecycle_phase() -> crate::LifecyclePhase {
 enum ShutdownState {
     NotStarted,
     InProgress,
-    Complete(Box<ShutdownReport>),
+    Complete(Box<Result<ShutdownReport, crate::WaitError>>),
 }
 
 struct ShutdownCoordinator {
@@ -139,6 +139,18 @@ static SHUTDOWN_COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
 static FAIL_NEXT_COORDINATOR_RESERVATION: AtomicBool = AtomicBool::new(false);
 
 type ShutdownCommand = Box<dyn FnOnce() + Send + 'static>;
+
+#[cfg(feature = "test_hooks")]
+struct SaveShutdownHook {
+    entered: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+}
+
+#[cfg(feature = "test_hooks")]
+static SAVE_SHUTDOWN_HOOK: OnceLock<Mutex<Option<SaveShutdownHook>>> = OnceLock::new();
+
+#[cfg(feature = "test_hooks")]
+static WAIT_STOPPED_HOOK: OnceLock<Mutex<Option<mpsc::SyncSender<()>>>> = OnceLock::new();
 
 #[cfg(test)]
 static SHUTDOWN_WORK_HOOK: OnceLock<Mutex<Option<ShutdownCommand>>> = OnceLock::new();
@@ -193,6 +205,51 @@ pub fn fail_next_shutdown_coordinator_reservation() {
     FAIL_NEXT_COORDINATOR_RESERVATION.store(true, Ordering::SeqCst);
 }
 
+/// Pauses the next terminal shutdown save before it locks the coordinator.
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn block_next_shutdown_save(entered: mpsc::SyncSender<()>, release: mpsc::Receiver<()>) {
+    *SAVE_SHUTDOWN_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(SaveShutdownHook { entered, release });
+}
+
+/// Signals immediately before the next in-progress waiter sleeps on completion.
+#[cfg(feature = "test_hooks")]
+#[doc(hidden)]
+pub fn notify_next_wait_stopped(entered: mpsc::SyncSender<()>) {
+    *WAIT_STOPPED_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(entered);
+}
+
+#[cfg(feature = "test_hooks")]
+fn run_save_shutdown_hook() {
+    let hook = SAVE_SHUTDOWN_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(hook) = hook {
+        let _ = hook.entered.send(());
+        let _ = hook.release.recv();
+    }
+}
+
+#[cfg(feature = "test_hooks")]
+fn notify_wait_stopped_hook() {
+    if let Some(entered) = WAIT_STOPPED_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+    {
+        let _ = entered.send(());
+    }
+}
+
 fn shutdown_coordinator() -> Option<&'static ShutdownCoordinator> {
     SHUTDOWN_COORDINATOR.get()
 }
@@ -219,17 +276,32 @@ fn save_shutdown(outcome: ShutdownOutcome, lifecycle: BridgeLifecycle) {
     let Some(coordinator) = shutdown_coordinator() else {
         return;
     };
+    #[cfg(feature = "test_hooks")]
+    run_save_shutdown_hook();
     let mut state = coordinator
         .state
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     if !matches!(&*state, ShutdownState::Complete(_)) {
-        let Ok(health) = health::snapshot() else {
-            return;
+        let result = match health::snapshot() {
+            Ok(health) => Ok(ShutdownReport { outcome, health }),
+            Err(error) => Err(wait_error_from_snapshot(error)),
         };
-        *state = ShutdownState::Complete(Box::new(ShutdownReport { outcome, health }));
+        *state = ShutdownState::Complete(Box::new(result));
         coordinator.complete.notify_all();
     }
+}
+
+fn wait_error_from_snapshot(error: crate::ControlError) -> crate::WaitError {
+    let diagnostic = match error {
+        crate::ControlError::Query { diagnostic }
+        | crate::ControlError::Unavailable { diagnostic } => diagnostic,
+        crate::ControlError::NotRunning { phase } => diagnostic(
+            crate::error_codes::SC_OBSERVABILITY_LOG_STATUS_UNAVAILABLE,
+            format!("shutdown health became unavailable in {phase:?}"),
+        ),
+    };
+    crate::WaitError::Unavailable { diagnostic }
 }
 
 fn diagnostic(
@@ -267,12 +339,14 @@ pub(crate) fn wait_stopped(timeout: Duration) -> Result<ShutdownReport, crate::W
     loop {
         match &*state {
             ShutdownState::NotStarted => return Err(crate::WaitError::NotStarted),
-            ShutdownState::Complete(report) => return Ok(*report.clone()),
+            ShutdownState::Complete(result) => return *result.clone(),
             ShutdownState::InProgress => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
                     return Err(crate::WaitError::TimedOut { timeout });
                 }
+                #[cfg(feature = "test_hooks")]
+                notify_wait_stopped_hook();
                 let (next, result) = coordinator
                     .complete
                     .wait_timeout(state, remaining)

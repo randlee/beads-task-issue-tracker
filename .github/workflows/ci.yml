@@ -235,8 +235,8 @@ jobs:
         shell: bash
         run: cargo test --release --locked -p sc-observability-log --features static_level_cap_test --test static_level_cap
 
-      - name: Lifecycle startup-failure fixture
-        run: cargo test --locked -p sc-observability-log --features test_hooks --test init_runtime_start
+      - name: Lifecycle failure fixtures
+        run: cargo test --locked -p sc-observability-log --features test_hooks --test init_runtime_start --test shutdown_snapshot_unavailable
 
       # The remaining steps are host-independent, so they run once, on Linux, in bash.
       # CARGO_TERM_COLOR=always (set by the toolchain/cache actions) colors cargo tree's

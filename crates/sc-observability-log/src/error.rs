@@ -360,16 +360,16 @@ pub enum FlushError {
         /// Stable diagnostic for the missing helper result.
         diagnostic: sc_observability_types::OperationDiagnostic,
     },
+    /// A previous flush helper is still running (possibly detached after its caller's
+    /// timeout); no new helper was started and nothing new was flushed.
+    #[error("a previous flush is still running; no new flush was started")]
+    InProgress,
     /// The owner has stopped accepting flush requests.
     #[error("the logger is not running: {phase:?}")]
     NotRunning {
         /// The lifecycle phase observed when the flush was requested.
         phase: LifecyclePhase,
     },
-    /// A previous flush helper is still running (possibly detached after its caller's
-    /// timeout); no new helper was started and nothing new was flushed.
-    #[error("a previous flush is still running; no new flush was started")]
-    InProgress,
 }
 
 /// Error returned by [`LogGuard::shutdown`](crate::LogGuard::shutdown).

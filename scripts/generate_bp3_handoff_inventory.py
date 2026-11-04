@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 
-IMPLEMENTATION_REVISION = "c31095326bde604557dd1aa51c7252db7b3d6284"
+IMPLEMENTATION_REVISION = "51fb22c6873b12c541b20b7f909110abb457c240"
 
 
 def git_show(root: Path, revision: str, path: str) -> str:
@@ -286,9 +286,11 @@ exact `=` version. Its complete export set at this revision is:
 ## Feature-gated test-only export
 
 `#[cfg(feature = "test_hooks")] #[doc(hidden)]`
-`fail_next_shutdown_coordinator_reservation` is the only feature-gated root
-item. Its disposition is retain as test-only deterministic lifecycle fault
-injection; it is excluded from normal production feature resolution.
+`fail_next_shutdown_coordinator_reservation`, `fail_next_health_snapshot`,
+`block_next_shutdown_save`, and `notify_next_wait_stopped` are the
+feature-gated root items. Their disposition is retain as test-only deterministic
+lifecycle fault injection; they are excluded from normal production feature
+resolution.
 
 ## Removed surface confirmation
 
